@@ -278,28 +278,45 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           quarter: formData.cuatrimestre,
           character: formData.caracter,
           regime: formData.regimen,
-          theoretical_hours: parseInt(formData.hsTeo),
-          practical_hours: parseInt(formData.hsPrac),
+          theoretical_hours: parseInt(formData.hsTeo) || 0,
+          practical_hours: parseInt(formData.hsPrac) || 0,
           minimum_content: formData.contenidosMin,
           generic_competencies: formData.competenciasGen,
           specific_competencies: formData.competenciasEsp,
           fundamentals_part1: formData.fundamentosP1,
           fundamentals_part2: formData.fundamentosP2,
-          learning_outcomes: formData.resultadosAprendizaje,
-          units: formData.unidades,
-          practicals: formData.trabajosPracticos,
+          learning_outcomes: formData.resultadosAprendizaje || [],
+          units: formData.unidades || [],
+          practicals: formData.trabajosPracticos || [],
           methodology: formData.metodologia,
           evaluation: formData.evaluacion,
           bibliography: formData.bibliografia,
           observations: formData.observaciones
         })
       })
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `HTTP ${res.status}`)
+      }
+      
       const data = await res.json()
-      setStatusMsg('Propuesta guardada correctamente')
+      setStatusMsg('Propuesta guardada correctamente - ID: ' + data.id)
       setStatusType('success')
+      // Reset form
+      setFormData({
+        carrera: '', asignatura: '', cuatrimestre: '', plan: '', anio: '', ciclo: '',
+        caracter: '', regimen: '', hsTeo: '', hsPrac: '', contenidosMin: '',
+        competenciasGen: '', competenciasEsp: '', fundamentosP1: '', fundamentosP2: '',
+        resultadosAprendizaje: [], unidades: [], trabajosPracticos: [], metodologia: '',
+        evaluacion: '', bibliografia: '', observaciones: ''
+      })
+      // Reload proposals list
       fetchProposals()
+      // Auto-switch to list view after 2 seconds
+      setTimeout(() => setProposalsMode('list'), 2000)
     } catch (err) {
-      setStatusMsg('Error al guardar: ' + err.message)
+      setStatusMsg('Error al guardar: ' + (err.message || 'Error desconocido'))
       setStatusType('error')
     }
   }
