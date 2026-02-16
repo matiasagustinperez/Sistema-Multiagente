@@ -24,7 +24,7 @@ export default function App() {
     plan: '',
     anio: '',
     ciclo: '',
-    cuatrimestre: '1er Cuatrimestre',
+    cuatrimestre: '',
     caracter: 'Obligatoria',
     regimen: 'Cuatrimestral',
     hsTeo: 0,
@@ -401,8 +401,15 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 <h3>Información General</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                   <div>
-                    <label style={styles.label}>Carrera</label>
-                    <input style={styles.input} value={formData.carrera} onChange={(e) => updateFormData('carrera', e.target.value)} />
+                    <label style={styles.label}>Carrera *</label>
+                    <select style={styles.input} value={formData.carrera} onChange={(e) => updateFormData('carrera', e.target.value)}>
+                      <option value="">Seleccionar carrera...</option>
+                      <option>Ingeniería en Sistemas</option>
+                      <option>Ingeniería Mecatrónica</option>
+                      <option>Licenciatura en Sistemas</option>
+                      <option>Tecnicatura Universitaria en Desarrollo Web</option>
+                      <option>Tecnicatura Universitaria en Ciencia de Datos</option>
+                    </select>
                   </div>
                   <div>
                     <label style={styles.label}>Asignatura</label>
@@ -421,10 +428,12 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} />
                   </div>
                   <div>
-                    <label style={styles.label}>Cuatrimestre</label>
+                    <label style={styles.label}>Cuatrimestre *</label>
                     <select style={styles.input} value={formData.cuatrimestre} onChange={(e) => updateFormData('cuatrimestre', e.target.value)}>
+                      <option value="">Seleccionar...</option>
                       <option>1er Cuatrimestre</option>
                       <option>2do Cuatrimestre</option>
+                      <option>Anual</option>
                     </select>
                   </div>
                   <div>
