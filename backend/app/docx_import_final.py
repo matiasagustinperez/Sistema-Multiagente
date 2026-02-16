@@ -251,7 +251,7 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
     programa_analitico = extract_programa_analitico(doc)
     teaching_team = extract_equipo_docente(doc)
     
-    # Contenido de secciones - índices conocidos de la estructura
+    # Contenido de secciones - buscar en TODAS las tablas por contenido
     contenidos_minimos = ''
     importance = ''
     generic_comp = ''
@@ -262,98 +262,99 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
     bibliography = ''
     observations = ''
     
-    if len(doc.tables) > 2:
-        contenidos_minimos = extract_content_from_single_cell_table(doc.tables[2])
-    
-    if len(doc.tables) > 3:
-        # Tabla 3: Fundamentos con "Importancia" y "Relación con perfil"
-        fundamentals_text = extract_content_from_single_cell_table(doc.tables[3])
-        if fundamentals_text:
-            importance = fundamentals_text
-    
-    if len(doc.tables) > 4:
-        # Tabla 4: Competencias genéricas
-        comp_text = extract_content_from_single_cell_table(doc.tables[4])
-        if comp_text:
-            generic_comp = comp_text
-    
-    # Extraer unidades de tablas 5+ (estructuras con "Unidad N°")
-    units = []
-    for table_idx in range(5, len(doc.tables)):
-        table = doc.tables[table_idx]
-        has_unit = any('unidad' in cell.text.lower() for row in table.rows for cell in row.cells)
-        if has_unit:
-            # Procesar filas alternadas: [0] "Unidad Nº: X", [1] "Contenidos:", [2] "Unidad Nº: Y", etc.
-            for row_idx in range(0, len(table.rows), 2):
-                if row_idx < len(table.rows):
-                    unit_data = {'number': '', 'name': '', 'content': '', 'bibliography_basic': '', 'bibliography_complementary': ''}
-                    
-                    # Primera fila: "Unidad N°: X" y nombre
-                    row1 = table.rows[row_idx]
-                    if len(row1.cells) >= 1:
-                        unit_text = row1.cells[0].text
-                        match = re.search(r'unidad\s+n[°º]?\s*:?\s*(\d+)', unit_text, re.IGNORECASE)
-                        if match:
-                            unit_data['number'] = match.group(1)
-                            if len(row1.cells) >= 2:
-                                unit_data['name'] = row1.cells[1].text.strip()
-                    
-                    # Segunda fila: "Contenidos:"
-                    if row_idx + 1 < len(table.rows):
-                        row2 = table.rows[row_idx + 1]
-                        if len(row2.cells) >= 1:
-                            content_text = extract_text_from_table_cell(row2.cells[0])
-                            unit_data['content'] = content_text
-                    
-                    if unit_data['number']:
-                        units.append(unit_data)
-            # Solo procesar una tabla de unidades
-            break
-    
-    # Extraer prácticos (buscar tabla específica con "Práctico Nº")
-    practicals = []
-    for table_idx in range(len(doc.tables)):
-        table = doc.tables[table_idx]
+    # Buscar tablas por keyword
+    for table in doc.tables:
+        table_text = ' '.join([cell.text for row in table.rows for cell in row.cells]).lower()
         
-        # Procesar CADA fila buscando "Práctico Nº"
+        # Buscar cada sección por palabra clave
+        if not contenidos_minimos and ('contenidos' in table_text and 'mínimos' in table_text):
+            contenidos_minimos = extract_content_from_single_cell_table(table)
+        
+        if not importance and ('importancia' in table_text or 'fundamentos' in table_text):
+            importance = extract_content_from_single_cell_table(table)
+        
+        if not generic_comp and 'competencias' in table_text and 'genéricas' in table_text:
+            generic_comp = extract_content_from_single_cell_table(table)
+        
+        if not specific_comp and 'competencias' in table_text and 'específicas' in table_text:
+            specific_comp = extract_content_from_single_cell_table(table)
+        
+        if not methodology and ('metodología' in table_text or 'metodologia' in table_text):
+            methodology = extract_content_from_single_cell_table(table)
+        
+        if not evaluation and ('evaluación' in table_text or 'evaluacion' in table_text):
+            evaluation = extract_content_from_single_cell_table(table)
+        
+        if not bibliography and ('bibliografía' in table_text or 'bibliografia' in table_text):
+            bibliography = extract_content_from_single_cell_table(table)
+        
+        if not observations and ('observaciones' in table_text or 'laboratorio' in table_text):
+            observations = extract_content_from_single_cell_table(table)
+    
+    # Extraer TODAS las unidades desde TODAS las tablas
+    # Buscar cada celda que tenga "Unidad N°:" sin importar en qué tabla esté
+    units = []
+    seen_numbers = set()
+    
+    for table_idx, table in enumerate(doc.tables):
         for row_idx, row in enumerate(table.rows):
-            for cell in row.cells:
-                if 'práctico' in cell.text.lower() or 'practico' in cell.text.lower():
-                    # Encontramos un práctico en row_idx
-                    practical_data = {'number': '', 'name': '', 'objective': '', 'activities': ''}
-                    
-                    # Extraer número y nombre de esta fila
-                    match = re.search(r'pr[áa]ctico\s+n[°º]?\s*:?\s*(\d+)', cell.text, re.IGNORECASE)
+            for cell_idx, cell in enumerate(row.cells):
+                cell_text = cell.text
+                # Buscar "Unidad N°:" en cualquier celda
+                if 'unidad' in cell_text.lower() and 'n[°º]' in re.sub(r'[°º]', 'N', cell_text.lower()):
+                    match = re.search(r'unidad\s+n[°º]?\s*:?\s*(\d+)', cell_text, re.IGNORECASE)
                     if match:
-                        practical_data['number'] = match.group(1)
-                        # Nombre está en la siguiente celda de la misma fila
-                        if len(row.cells) > 1:
-                            practical_data['name'] = row.cells[1].text.strip()
-                    
-                    # Buscar objetivo en la siguiente fila (si existe)
-                    if row_idx + 1 < len(table.rows):
-                        next_row = table.rows[row_idx + 1]
-                        if len(next_row.cells) >= 1:
-                            obj_text = extract_text_from_table_cell(next_row.cells[0])
-                            practical_data['objective'] = obj_text
-                    
-                    if practical_data['number']:
-                        practicals.append(practical_data)
-                    break
+                        unit_num = match.group(1)
+                        if unit_num not in seen_numbers:  # Evitar duplicados
+                            seen_numbers.add(unit_num)
+                            unit_data = {'number': unit_num, 'name': '', 'content': '', 'bibliography_basic': '', 'bibliography_complementary': ''}
+                            
+                            # El nombre está en la siguiente celda de la misma fila
+                            if cell_idx + 1 < len(row.cells):
+                                unit_data['name'] = row.cells[cell_idx + 1].text.strip()
+                            
+                            # Buscar contenidos en la siguente fila
+                            if row_idx + 1 < len(table.rows):
+                                next_row = table.rows[row_idx + 1]
+                                if len(next_row.cells) >= 1:
+                                    content_text = extract_text_from_table_cell(next_row.cells[0])
+                                    unit_data['content'] = content_text
+                            
+                            units.append(unit_data)
+    
+    # Extraer TODOS los prácticos desde TODAS las tablas
+    # Buscar cada celda que tenga "Práctico Nº:" sin importar en qué tabla esté
+    practicals = []
+    seen_tp_numbers = set()
+    
+    for table_idx, table in enumerate(doc.tables):
+        for row_idx, row in enumerate(table.rows):
+            for cell_idx, cell in enumerate(row.cells):
+                cell_text = cell.text
+                # Buscar "Práctico Nº:" en cualquier celda
+                if ('práctico' in cell_text.lower() or 'practico' in cell_text.lower()) and 'n[°º]' in re.sub(r'[°º]', 'N', cell_text.lower()):
+                    match = re.search(r'pr[áa]ctico\s+n[°º]?\s*:?\s*(\d+)', cell_text, re.IGNORECASE)
+                    if match:
+                        tp_num = match.group(1)
+                        if tp_num not in seen_tp_numbers:  # Evitar duplicados
+                            seen_tp_numbers.add(tp_num)
+                            practical_data = {'number': tp_num, 'name': '', 'objective': '', 'activities': ''}
+                            
+                            # El nombre está en la siguiente celda de la misma fila
+                            if cell_idx + 1 < len(row.cells):
+                                practical_data['name'] = row.cells[cell_idx + 1].text.strip()
+                            
+                            # Buscar objetivo en la siguiente fila
+                            if row_idx + 1 < len(table.rows):
+                                next_row = table.rows[row_idx + 1]
+                                if len(next_row.cells) >= 1:
+                                    obj_text = extract_text_from_table_cell(next_row.cells[0])
+                                    practical_data['objective'] = obj_text
+                            
+                            practicals.append(practical_data)
     
     # Buscar metodología, evaluación, bibliografía, observaciones en tablas finales (1 celda)
-    for table_idx in range(max(0, len(doc.tables) - 4), len(doc.tables)):
-        table = doc.tables[table_idx]
-        content = extract_content_from_single_cell_table(table)
-        
-        if not methodology and ('actividades' in content.lower() or 'metodología' in content.lower()):
-            methodology = content
-        elif not evaluation and ('evaluación' in content.lower() or 'criterios' in content.lower()):
-            evaluation = content
-        elif not bibliography and ('bibliografía' in content.lower() or 'bibliografia' in content.lower()):
-            bibliography = content
-        elif not observations and ('observaciones' in content.lower() or 'laboratorio' in content.lower()):
-            observations = content
+    # (Ya se buscaron en el loop anterior, pero podemos también buscar en paragrafos si no se encontraron)
     
     # Compilar respuesta
     return {

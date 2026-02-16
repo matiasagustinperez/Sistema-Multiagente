@@ -2911,7 +2911,6 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '15px' }}>
                     <div><strong>Carrera:</strong> {importPreview.preview.career || '-'}</div>
                     <div><strong>Asignatura:</strong> {importPreview.preview.subject || '-'}</div>
-                    <div><strong>Docentes:</strong> {importPreview.preview.teachers || '-'}</div>
                     <div><strong>Año de Carrera:</strong> {importPreview.preview.year || '-'}</div>
                     <div><strong>Cuatrimestre:</strong> {importPreview.preview.quarter || '-'}</div>
                     <div><strong>Horas:</strong> {importPreview.preview.hours || '-'}</div>
@@ -2920,6 +2919,31 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     <div><strong>Trabajos Prácticos:</strong> {importPreview.preview.practicals_count || 0}</div>
                     <div><strong>Resultados de Aprendizaje:</strong> {importPreview.preview.ra_count || 0}</div>
                   </div>
+                  
+                  {/* Tabla de Docentes */}
+                  {importPreview.data?.teaching_team && importPreview.data.teaching_team.length > 0 && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Equipo Docente ({importPreview.data.teaching_team.length}):</strong>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #ddd' }}>
+                        <thead>
+                          <tr style={{ background: '#f0f0f0', borderBottom: '2px solid #ddd' }}>
+                            <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd' }}>Nombre</th>
+                            <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd' }}>Categoría</th>
+                            <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold' }}>Email</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.data.teaching_team.map((docente, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid #eee', background: idx % 2 === 0 ? '#fff' : '#f9f9f9' }}>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{docente.name || '-'}</td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{docente.category || '-'}</td>
+                              <td style={{ padding: '8px' }}>{docente.email || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
                 
                 <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
