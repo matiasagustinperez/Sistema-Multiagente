@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -17,6 +17,22 @@ Base = declarative_base()
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
+    ensure_proposals_columns()
+
+
+def ensure_proposals_columns():
+    """Add missing columns to proposals table (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(proposals)"))
+        columns = {row[1] for row in result}
+        if "status" not in columns:
+            conn.execute(text("ALTER TABLE proposals ADD COLUMN status VARCHAR(50)"))
+            conn.commit()
+        if "teaching_team" not in columns:
+            conn.execute(text("ALTER TABLE proposals ADD COLUMN teaching_team JSON"))
+            conn.commit()
 
 def get_db():
     """Database session dependency"""

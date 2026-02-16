@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import logoMacau from '../Logo MACAU.png'
 
 export default function App() {
@@ -10,8 +10,10 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiSection, setAiSection] = useState(null)
   const [showComparison, setShowComparison] = useState(false)
+  const [aiError, setAiError] = useState('')
+  const [raBatchCount, setRaBatchCount] = useState(5)
   const [comparisonData, setComparisonData] = useState({ original: '', reformulated: '' })
-  const [comparisonField, setComparisonField] = useState(null)
+  const [comparisonTarget, setComparisonTarget] = useState(null)
   
   // Form state
   const [equipoDocente, setEquipoDocente] = useState([
@@ -19,6 +21,11 @@ export default function App() {
   ])
 
   const [editingProposalId, setEditingProposalId] = useState(null)
+  const [editingProposalStatus, setEditingProposalStatus] = useState(null)
+  const [viewProposal, setViewProposal] = useState(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
+  const autosaveTimerRef = useRef(null)
   
   const [formData, setFormData] = useState({
     carrera: '',
@@ -76,6 +83,7 @@ export default function App() {
 
   const updateFormData = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
+    setIsDirty(true)
   }
 
   const isFormComplete = () => {
@@ -83,6 +91,47 @@ export default function App() {
            formData.ciclo && formData.cuatrimestre && formData.caracter &&
            formData.regimen && formData.contenidosMin && 
            formData.competenciasGen && formData.competenciasEsp
+  }
+
+  const isNonEmptyText = (value) => typeof value === 'string' && value.trim().length > 0
+  const hasNumberValue = (value) => value !== '' && value !== null && value !== undefined
+  const isProposalReadyToCreate = () => {
+    const requiredTextFields = [
+      formData.carrera,
+      formData.asignatura,
+      formData.plan,
+      formData.anio,
+      formData.ciclo,
+      formData.cuatrimestre,
+      formData.caracter,
+      formData.regimen,
+      formData.contenidosMin,
+      formData.competenciasGen,
+      formData.competenciasEsp,
+      formData.fundamentosP1,
+      formData.fundamentosP2,
+      formData.metodologia,
+      formData.evaluacion,
+      formData.bibliografia,
+      formData.observaciones
+    ]
+
+    const requiredArraysFilled =
+      formData.resultadosAprendizaje.length > 0 &&
+      formData.resultadosAprendizaje.every(ra => isNonEmptyText(ra.verbo) && isNonEmptyText(ra.descripcion)) &&
+      formData.unidades.length > 0 &&
+      formData.unidades.every(u => isNonEmptyText(u.nombre) && isNonEmptyText(u.contenidos) && isNonEmptyText(u.bibBasica) && isNonEmptyText(u.bibCompl)) &&
+      formData.trabajosPracticos.length > 0 &&
+      formData.trabajosPracticos.every(tp => isNonEmptyText(tp.nombre) && isNonEmptyText(tp.objetivo) && isNonEmptyText(tp.actividades) && isNonEmptyText(tp.materiales) && isNonEmptyText(tp.ambito))
+
+    const docentesCompletos = equipoDocente.length > 0 &&
+      equipoDocente.every(doc => isNonEmptyText(doc.nombre) && isNonEmptyText(doc.correo))
+
+    return requiredTextFields.every(isNonEmptyText) &&
+      hasNumberValue(formData.hsTeo) &&
+      hasNumberValue(formData.hsPrac) &&
+      requiredArraysFilled &&
+      docentesCompletos
   }
 
   const getCartTotal = () => {
@@ -101,6 +150,7 @@ export default function App() {
   const addDocente = () => {
     const newId = Math.max(...equipoDocente.map(d => d.id), 0) + 1
     setEquipoDocente([...equipoDocente, { id: newId, nombre: '', categoria: 'AYUDANTE 1º', correo: '' }])
+    setIsDirty(true)
   }
 
   const updateDocente = (id, field, value) => {
@@ -109,11 +159,13 @@ export default function App() {
     )
     setEquipoDocente(updated)
     sortDocentes(updated)
+    setIsDirty(true)
   }
 
   const deleteDocente = (id) => {
     if (equipoDocente.length > 1) {
       setEquipoDocente(equipoDocente.filter(d => d.id !== id))
+      setIsDirty(true)
     }
   }
 
@@ -129,6 +181,7 @@ export default function App() {
       ...prev,
       resultadosAprendizaje: [...prev.resultadosAprendizaje, { id: Date.now(), descripcion: '', verbo: '' }]
     }))
+    setIsDirty(true)
   }
 
   const updateRA = (id, field, value) => {
@@ -138,6 +191,7 @@ export default function App() {
         ra.id === id ? { ...ra, [field]: value } : ra
       )
     }))
+    setIsDirty(true)
   }
 
   const deleteRA = (id) => {
@@ -145,6 +199,7 @@ export default function App() {
       ...prev,
       resultadosAprendizaje: prev.resultadosAprendizaje.filter(ra => ra.id !== id)
     }))
+    setIsDirty(true)
   }
 
   // Units management
@@ -153,6 +208,7 @@ export default function App() {
       ...prev,
       unidades: [...prev.unidades, { id: Date.now(), nombre: '', contenidos: '', bibBasica: '', bibCompl: '' }]
     }))
+    setIsDirty(true)
   }
 
   const updateUnidad = (id, field, value) => {
@@ -162,6 +218,7 @@ export default function App() {
         u.id === id ? { ...u, [field]: value } : u
       )
     }))
+    setIsDirty(true)
   }
 
   const deleteUnidad = (id) => {
@@ -169,6 +226,7 @@ export default function App() {
       ...prev,
       unidades: prev.unidades.filter(u => u.id !== id)
     }))
+    setIsDirty(true)
   }
 
   // Practicals management
@@ -177,6 +235,7 @@ export default function App() {
       ...prev,
       trabajosPracticos: [...prev.trabajosPracticos, { id: Date.now(), nombre: '', objetivo: '', actividades: '', materiales: '', ambito: '' }]
     }))
+    setIsDirty(true)
   }
 
   const updateTP = (id, field, value) => {
@@ -186,12 +245,30 @@ export default function App() {
         tp.id === id ? { ...tp, [field]: value } : tp
       )
     }))
+    setIsDirty(true)
   }
 
   const deleteTP = (id) => {
     setFormData(prev => ({
       ...prev,
       trabajosPracticos: prev.trabajosPracticos.filter(tp => tp.id !== id)
+    }))
+    setIsDirty(true)
+  }
+
+  const parseLearningOutcomesFromText = (text, desiredCount) => {
+    if (!text || typeof text !== 'string') {
+      return []
+    }
+    const rawItems = text
+      .split(/\r?\n|•/)
+      .map(line => line.replace(/^[-*\d\s.)]+/, '').trim())
+      .filter(Boolean)
+
+    const items = rawItems.length > 0 ? rawItems : text.split(';').map(item => item.trim()).filter(Boolean)
+    return items.slice(0, desiredCount).map((item, idx) => ({
+      id: Date.now() + idx,
+      descripcion: item
     }))
   }
 
@@ -221,7 +298,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       const data = await res.json()
       
       if (data.status === 'success') {
-        updateFormData('metodologia', data.content)
+        updateFormData('metodologia', sanitizeAiOutput(data.content))
         setStatusMsg('Propuesta generada exitosamente')
         setStatusType('success')
       }
@@ -234,31 +311,156 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     }
   }
 
-  const reformulateField = async (field, currentValue) => {
-    if (!currentValue) {
-      setStatusMsg('Escribe algo primero para reformular')
+  const generateLearningOutcomes = async () => {
+    const count = Math.max(1, Math.min(10, parseInt(raBatchCount, 10) || 1))
+    const existingCount = formData.resultadosAprendizaje.length
+    const remainingCount = Math.max(0, count - existingCount)
+    if (remainingCount === 0) {
+      setStatusMsg(`Ya hay ${existingCount} RA cargados`)
+      setStatusType('info')
+      return
+    }
+    if (!isNonEmptyText(formData.carrera) || !isNonEmptyText(formData.asignatura)) {
+      setStatusMsg('Completa Carrera y Asignatura antes de generar RA')
+      setStatusType('info')
+      return
+    }
+    if (!isNonEmptyText(formData.competenciasGen) || !isNonEmptyText(formData.competenciasEsp)) {
+      setStatusMsg('Completa Competencias Genericas y Especificas antes de generar RA')
       setStatusType('info')
       return
     }
 
+    setAiError('')
     setAiLoading(true)
-    setAiSection(field)
+    setAiSection('Resultados de Aprendizaje')
     try {
-      const res = await fetch('http://localhost:8001/ai-reformulate', {
+      const prompt = `Genera ${remainingCount} resultados de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${formData.competenciasGen}\nCompetencias especificas: ${formData.competenciasEsp}\n\nReglas de RA:\n- Centrado en el estudiante.\n- Verbo observable y evaluable.\n- Presente del indicativo.\n- Desempeno demostrable y medible.\n- No mezclar demasiadas capacidades en un solo RA.\n- Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada RA.\n- Sin titulos ni encabezados.`
+      const res = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: currentValue })
+        body: JSON.stringify({ prompt })
       })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
       const data = await res.json()
-      
       if (data.status === 'success') {
-        setComparisonData({ original: currentValue, reformulated: data.content })
-        setComparisonField(field)
-        setShowComparison(true)
+        const cleaned = sanitizeAiOutput(data.content)
+        const generated = parseLearningOutcomesFromText(cleaned, remainingCount)
+        if (generated.length === 0) {
+          throw new Error('No se pudieron interpretar los resultados de aprendizaje')
+        }
+        setFormData(prev => ({
+          ...prev,
+          resultadosAprendizaje: [...prev.resultadosAprendizaje, ...generated]
+        }))
+        setIsDirty(true)
+        setStatusMsg(`Se generaron ${generated.length} RA`)
+        setStatusType('success')
+      } else {
+        throw new Error(data.detail || 'Respuesta invalida del servidor')
       }
     } catch (err) {
-      setStatusMsg('Error al reformular: ' + err.message)
+      const errorMsg = `Error al generar RA con IA: ${err.message}`
+      setStatusMsg(errorMsg)
       setStatusType('error')
+      setAiError(errorMsg)
+    } finally {
+      setAiLoading(false)
+      setAiSection(null)
+    }
+  }
+
+  const sanitizeAiOutput = (text) => {
+    if (typeof text !== 'string') {
+      return ''
+    }
+    const lines = text.split('\n')
+    const cleanedLines = []
+    let removedHeading = false
+    for (const line of lines) {
+      const trimmed = line.trim()
+      const isHeading = /^#{1,6}\s+/.test(trimmed) || /^\*\*.+\*\*$/.test(trimmed)
+      const isMetaLine = /^directrices/i.test(trimmed) || /^reformulaci[oó]n/i.test(trimmed)
+      if (!removedHeading && (isHeading || isMetaLine || trimmed.toLowerCase().startsWith('fundamentos'))) {
+        removedHeading = true
+        continue
+      }
+      cleanedLines.push(line)
+    }
+    return cleanedLines.join('\n').trim()
+  }
+
+  const buildAiPrompt = (label, target) => {
+    const baseContext = [
+      `Carrera: ${formData.carrera}`,
+      `Asignatura: ${formData.asignatura}`,
+      `Ano en la carrera: ${formData.ciclo}`,
+      `Cuatrimestre: ${formData.cuatrimestre}`
+    ].join('\n')
+
+    const isFundamentos = target?.field === 'fundamentosP1' || target?.field === 'fundamentosP2'
+    if (isFundamentos) {
+      return `Escribe el contenido para: ${label}.\n\nContexto:\n${baseContext}\nContenidos minimos: ${formData.contenidosMin}\n\nRequisitos:\n- Entre 100 y 200 palabras.\n- Espanol claro y formal.\n- No incluyas titulos ni encabezados, solo el texto.`
+    }
+
+    return `Escribe el contenido para: ${label}.\n\nContexto:\n${baseContext}\n\nRequisitos:\n- Espanol claro y conciso.\n- No incluyas titulos ni encabezados, solo el texto.`
+  }
+
+  const runAiForField = async ({ target, currentValue, label }) => {
+    const hasContent = typeof currentValue === 'string' && currentValue.trim().length > 0
+    if (!hasContent && !isFormComplete()) {
+      setStatusMsg('Completa la informacion general antes de usar IA')
+      setStatusType('info')
+      return
+    }
+
+    setAiError('')
+    setAiLoading(true)
+    setAiSection(label || target.field || 'IA')
+    try {
+      const endpoint = hasContent ? 'ai-reformulate' : 'ai-generate'
+      const raRules = [
+        'Reglas de RA: centrado en el estudiante, verbo observable y evaluable, presente del indicativo, desempeño demostrable y medible.',
+        'Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.',
+        'No mezclar demasiadas capacidades en un solo RA.',
+        'No usar infinitivo (terminaciones -ar, -er, -ir).'
+      ].join(' ')
+
+      const prompt = hasContent
+        ? (target?.type === 'ra'
+          ? `${raRules}\n\nReformula el siguiente RA manteniendo el sentido.\nDevuelve solo el RA reformulado, sin encabezados ni explicaciones:\n${currentValue}`
+          : currentValue)
+        : (target?.type === 'ra'
+          ? `Genera un resultado de aprendizaje para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${formData.competenciasGen}\nCompetencias especificas: ${formData.competenciasEsp}\n\n${raRules}\n\nRequisitos:\n- Un solo RA.\n- Solo el texto del RA.\n- Sin titulos ni encabezados.`
+          : buildAiPrompt(label || target.field || 'contenido', target))
+      const res = await fetch(`http://localhost:8001/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+
+      if (data.status === 'success') {
+        const cleaned = sanitizeAiOutput(data.content)
+        setComparisonData({ original: currentValue || '', reformulated: cleaned })
+        setComparisonTarget({ ...target, label: label || target.field || '' })
+        setShowComparison(true)
+      } else {
+        throw new Error(data.detail || 'Respuesta invalida del servidor')
+      }
+    } catch (err) {
+      const action = hasContent ? 'reformular' : 'escribir'
+      const errorMsg = `Error al ${action} con IA: ${err.message}`
+      setStatusMsg(errorMsg)
+      setStatusType('error')
+      setAiError(errorMsg)
     } finally {
       setAiLoading(false)
       setAiSection(null)
@@ -266,23 +468,53 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
   }
 
   const acceptReformulation = () => {
-    if (comparisonField) {
-      updateFormData(comparisonField, comparisonData.reformulated)
-      setShowComparison(false)
+    if (!comparisonTarget) {
+      return
     }
+
+    if (comparisonTarget.type === 'form') {
+      updateFormData(comparisonTarget.field, comparisonData.reformulated)
+    } else if (comparisonTarget.type === 'ra') {
+      updateRA(comparisonTarget.id, comparisonTarget.field, comparisonData.reformulated)
+    } else if (comparisonTarget.type === 'tp') {
+      updateTP(comparisonTarget.id, comparisonTarget.field, comparisonData.reformulated)
+    }
+
+    setShowComparison(false)
+    setComparisonTarget(null)
   }
 
   const rejectReformulation = () => {
     setShowComparison(false)
+    setComparisonTarget(null)
   }
 
-  const saveProposal = async () => {
+  const saveProposal = async ({ silent = false } = {}) => {
+    const isEditing = !!editingProposalId
     // Validate required fields: carrera and asignatura only
     if (!formData.carrera || !formData.asignatura) {
-      setStatusMsg('Requiere al menos: Carrera y Asignatura')
-      setStatusType('error')
+      if (!silent) {
+        setStatusMsg('Requiere al menos: Carrera y Asignatura')
+        setStatusType('error')
+      }
       return
     }
+
+    if (!isEditing && !isProposalReadyToCreate()) {
+      if (!silent) {
+        setStatusMsg('Completa todos los campos antes de crear la propuesta')
+        setStatusType('error')
+      }
+      return
+    }
+
+    if (isSaving) {
+      return
+    }
+
+    const computedStatus = editingProposalStatus === 'Importada'
+      ? 'Importada'
+      : ((isEditing ? isFormComplete() : isProposalReadyToCreate()) ? 'Creada' : 'EnProceso')
 
     const payload = {
       title: formData.asignatura,
@@ -326,11 +558,18 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       methodology: formData.metodologia,
       evaluation: formData.evaluacion,
       bibliography: formData.bibliografia,
-      observations: formData.observaciones
+      observations: formData.observaciones,
+      status: computedStatus,
+      teaching_team: equipoDocente.map(doc => ({
+        id: doc.id,
+        name: doc.nombre || '',
+        category: doc.categoria || '',
+        email: doc.correo || ''
+      }))
     }
 
     try {
-      const isEditing = !!editingProposalId
+      setIsSaving(true)
       const res = await fetch(`http://localhost:8001/proposals${isEditing ? `/${editingProposalId}` : ''}`, {
         method: isEditing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -343,9 +582,15 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       }
 
       const data = await res.json()
-      setStatusMsg(isEditing ? `Borrador actualizado - ID: ${data.id}` : 'Borrador guardado - ID: ' + data.id)
-      setStatusType('success')
+      if (!silent) {
+        setStatusMsg(isEditing ? `Propuesta actualizada - ID: ${data.id}` : 'Propuesta creada - ID: ' + data.id)
+        setStatusType('success')
+      } else {
+        setStatusMsg('Guardado automatico')
+        setStatusType('info')
+      }
       if (!isEditing) {
+        setEditingProposalStatus(null)
         // Reset form
         setFormData({
           carrera: '', asignatura: '', cuatrimestre: '', plan: '', anio: '', ciclo: '',
@@ -354,32 +599,53 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           resultadosAprendizaje: [], unidades: [], trabajosPracticos: [], metodologia: '',
           evaluacion: '', bibliografia: '', observaciones: ''
         })
-        // Auto-switch to list view after 2 seconds
-        setTimeout(() => setProposalsMode('list'), 2000)
+        setEquipoDocente([{ id: 1, nombre: '', categoria: 'TITULAR', correo: '' }])
       }
       // Reload proposals list
       fetchProposals()
+      setIsDirty(false)
     } catch (err) {
       const msg = err.message === 'Failed to fetch' 
         ? 'No hay conexión con el Backend (8001)' 
         : err.message
-      setStatusMsg('Error al guardar: ' + msg)
-      setStatusType('error')
+      if (!silent) {
+        setStatusMsg('Error al guardar: ' + msg)
+        setStatusType('error')
+      }
+    } finally {
+      setIsSaving(false)
     }
   }
 
-  const isProposalComplete = (proposal) => {
-    return !!(
-      proposal.career &&
-      proposal.subject &&
-      proposal.minimum_content &&
-      proposal.generic_competencies &&
-      proposal.specific_competencies
-    )
-  }
+  useEffect(() => {
+    if (!isDirty) {
+      return
+    }
+    if (!editingProposalId) {
+      return
+    }
+    if (!formData.carrera || !formData.asignatura) {
+      return
+    }
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current)
+    }
+    autosaveTimerRef.current = setTimeout(() => {
+      saveProposal({ silent: true })
+    }, 10000)
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current)
+      }
+    }
+  }, [formData, isDirty, editingProposalId, editingProposalStatus])
+
+  const isProposalComplete = (proposal) => proposal.status !== 'EnProceso'
+  const isProposalInProcess = (proposal) => proposal.status === 'EnProceso'
 
   const loadProposalForEdit = async (proposalId) => {
     try {
+      setViewProposal(null)
       const res = await fetch(`http://localhost:8001/proposals/${proposalId}`)
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -404,7 +670,6 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         fundamentosP2: data.fundamentals_part2 || '',
         resultadosAprendizaje: (data.learning_outcomes || []).map((ra, idx) => ({
           id: ra.id ?? Date.now() + idx,
-          verbo: ra.observable_verb || '',
           descripcion: ra.description || ''
         })),
         unidades: (data.units || []).map((u, idx) => ({
@@ -427,13 +692,59 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         bibliografia: data.bibliography || '',
         observaciones: data.observations || ''
       })
+      if (Array.isArray(data.teaching_team) && data.teaching_team.length > 0) {
+        setEquipoDocente(data.teaching_team.map((doc, idx) => ({
+          id: doc.id ?? Date.now() + idx,
+          nombre: doc.name || '',
+          categoria: doc.category || 'AYUDANTE 1º',
+          correo: doc.email || ''
+        })))
+      } else {
+        setEquipoDocente([{ id: 1, nombre: '', categoria: 'TITULAR', correo: '' }])
+      }
       setEditingProposalId(proposalId)
+      setEditingProposalStatus(data.status || null)
+      setIsDirty(false)
       setActiveMenu('propuestas')
       setProposalsMode('create')
       setStatusMsg(`Editando propuesta #${proposalId}`)
       setStatusType('info')
     } catch (err) {
       setStatusMsg('Error al cargar propuesta: ' + err.message)
+      setStatusType('error')
+    }
+  }
+
+  const openProposalView = async (proposalId) => {
+    try {
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}`)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      setViewProposal(data)
+    } catch (err) {
+      setStatusMsg('Error al cargar propuesta: ' + err.message)
+      setStatusType('error')
+    }
+  }
+
+  const deleteProposal = async (proposalId) => {
+    if (!window.confirm(`Eliminar propuesta #${proposalId}? Esta accion no se puede deshacer.`)) {
+      return
+    }
+    try {
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      setStatusMsg(`Propuesta #${proposalId} eliminada`)
+      setStatusType('success')
+      fetchProposals()
+    } catch (err) {
+      setStatusMsg('Error al eliminar: ' + err.message)
       setStatusType('error')
     }
   }
@@ -476,12 +787,15 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         style={{ ...styles.button, ...(disabled && styles.buttonDisabled) }}
         onClick={onClick}
         disabled={disabled}
-        title={tooltip}
+        title={title}
       >
-        {hasContent ? '✏️' : '✍️'} {hasContent ? 'Reformular' : 'Escribir'}
+        {hasContent ? '✏️' : '✍️'} {hasContent ? 'Reformular con IA' : 'Escribir con IA'}
       </button>
     )
   }
+
+  const canCreateProposal = isProposalReadyToCreate()
+  const canSaveEdits = !!formData.carrera && !!formData.asignatura
 
   return (
     <div style={styles.container}>
@@ -492,7 +806,14 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           <h3 style={{ color: '#1a3d5c', fontSize: '16px', marginTop: '10px' }}>MACAU</h3>
         </div>
         <MenuButton label="Home" onClick={() => setActiveMenu('home')} active={activeMenu === 'home'} />
-        <MenuButton label="Propuestas" onClick={() => setActiveMenu('propuestas')} active={activeMenu === 'propuestas'} />
+        <MenuButton
+          label="Propuestas"
+          onClick={() => {
+            setActiveMenu('propuestas')
+            setProposalsMode(null)
+          }}
+          active={activeMenu === 'propuestas'}
+        />
         <MenuButton label="Docentes" onClick={() => setActiveMenu('docentes')} active={activeMenu === 'docentes'} />
         <MenuButton label="Resoluciones" onClick={() => setActiveMenu('resoluciones')} active={activeMenu === 'resoluciones'} />
       </div>
@@ -534,7 +855,11 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               }}
               onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(0, 102, 204, 0.2)'; e.target.style.backgroundColor = '#e6f2ff'; }}
               onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f0f8ff'; }}
-              onClick={() => setProposalsMode('create')}>
+              onClick={() => {
+                setEditingProposalId(null)
+                setEditingProposalStatus(null)
+                setProposalsMode('create')
+              }}>
                 <div style={{ fontSize: '32px', marginBottom: '10px' }}>📝</div>
                 <h3 style={{ color: '#0066cc', margin: '0 0 10px 0' }}>Crear Propuesta</h3>
                 <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Crear una nueva propuesta desde cero</p>
@@ -579,8 +904,8 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
             {/* PROPOSALS TABLE */}
             <div style={{ ...styles.section, marginTop: '30px', borderTop: '2px solid #ddd', paddingTop: '20px' }}>
-              <h3>Propuestas Cargadas ({proposals.length})</h3>
-              {proposals.length > 0 ? (
+              <h3>Propuestas Cargadas ({proposals.filter(isProposalComplete).length})</h3>
+              {proposals.filter(isProposalComplete).length > 0 ? (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                     <thead>
@@ -595,7 +920,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                       </tr>
                     </thead>
                     <tbody>
-                      {proposals.map((prop, idx) => (
+                      {proposals.filter(isProposalComplete).map((prop, idx) => (
                         <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
                           <td style={{ padding: '10px' }}>#{prop.id}</td>
                           <td style={{ padding: '10px' }}>{prop.career || '-'}</td>
@@ -605,11 +930,11 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                           <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
                           <td style={{ padding: '10px', textAlign: 'center' }}>
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
-                              onClick={() => alert(`Detalles de propuesta #${prop.id}`)}>Ver</button>
+                              onClick={() => openProposalView(prop.id)}>Ver</button>
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px', background: '#ff9900', color: 'white' }} 
                               onClick={() => loadProposalForEdit(prop.id)}>Editar</button>
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', color: 'white' }} 
-                              onClick={() => alert(`Eliminar propuesta #${prop.id}`)}>Eliminar</button>
+                              onClick={() => deleteProposal(prop.id)}>Eliminar</button>
                           </td>
                         </tr>
                       ))}
@@ -762,21 +1087,60 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 <h3>Fundamentos</h3>
                 <label style={styles.label}>Importancia (100-200 palabras)</label>
                 <textarea style={styles.textarea} value={formData.fundamentosP1} onChange={(e) => updateFormData('fundamentosP1', e.target.value)} />
-                <AIButton onClick={() => reformulateField('fundamentosP1', formData.fundamentosP1)} hasContent={!!formData.fundamentosP1} disabled={!isFormComplete()} tooltip={isFormComplete() ? '' : 'Completa info general primero'} />
+                <AIButton
+                  onClick={() => runAiForField({
+                    target: { type: 'form', field: 'fundamentosP1' },
+                    currentValue: formData.fundamentosP1,
+                    label: 'Fundamentos - Importancia'
+                  })}
+                  hasContent={!!formData.fundamentosP1}
+                  disabled={!isFormComplete()}
+                  tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                />
 
                 <label style={styles.label}>Perfil Profesional (100-200 palabras)</label>
                 <textarea style={styles.textarea} value={formData.fundamentosP2} onChange={(e) => updateFormData('fundamentosP2', e.target.value)} />
-                <AIButton onClick={() => reformulateField('fundamentosP2', formData.fundamentosP2)} hasContent={!!formData.fundamentosP2} disabled={!isFormComplete()} tooltip={isFormComplete() ? '' : 'Completa info general primero'} />
+                <AIButton
+                  onClick={() => runAiForField({
+                    target: { type: 'form', field: 'fundamentosP2' },
+                    currentValue: formData.fundamentosP2,
+                    label: 'Fundamentos - Perfil Profesional'
+                  })}
+                  hasContent={!!formData.fundamentosP2}
+                  disabled={!isFormComplete()}
+                  tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                />
               </div>
 
               {/* LEARNING OUTCOMES */}
               <div style={styles.section}>
                 <h3>Resultados de Aprendizaje</h3>
-                {formData.resultadosAprendizaje.map(ra => (
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
+                  <label style={{ fontWeight: 600, color: '#1a3d5c' }}>Generar</label>
+                  <input
+                    style={{ ...styles.input, width: '80px', marginBottom: 0 }}
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={raBatchCount}
+                    onChange={(e) => setRaBatchCount(e.target.value)}
+                  />
+                  <button style={styles.button} onClick={generateLearningOutcomes}>Generar RA con IA</button>
+                </div>
+                {formData.resultadosAprendizaje.map((ra, idx) => (
                   <div key={ra.id} style={{ marginBottom: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
-                    <input style={styles.input} placeholder="Verbo observable (Ej: Implementa, Analiza)" value={ra.verbo} onChange={(e) => updateRA(ra.id, 'verbo', e.target.value)} />
-                    <textarea style={styles.textarea} placeholder="Descripción del RA" value={ra.descripcion} onChange={(e) => updateRA(ra.id, 'descripcion', e.target.value)} />
-                    <AIButton onClick={() => reformulateField(`ra_${ra.id}`, ra.descripcion)} hasContent={!!ra.descripcion} disabled={!isFormComplete()} tooltip={isFormComplete() ? '' : 'Completa info general primero'} />
+                    <div style={{ fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>RA {idx + 1}</div>
+                    <textarea style={styles.textarea} placeholder="Resultado de aprendizaje" value={ra.descripcion} onChange={(e) => updateRA(ra.id, 'descripcion', e.target.value)} />
+                    <AIButton
+                      onClick={() => runAiForField({
+                        target: { type: 'ra', id: ra.id, field: 'descripcion' },
+                        currentValue: ra.descripcion,
+                        label: 'Resultado de Aprendizaje'
+                      })}
+                      hasContent={!!ra.descripcion}
+                      disabled={!isFormComplete()}
+                      tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                    />
                     <button style={{ ...styles.button, background: '#d32f2f' }} onClick={() => deleteRA(ra.id)}>Eliminar</button>
                   </div>
                 ))}
@@ -805,7 +1169,16 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                   <div key={tp.id} style={{ marginBottom: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
                     <input style={styles.input} placeholder="Nombre del TP" value={tp.nombre} onChange={(e) => updateTP(tp.id, 'nombre', e.target.value)} />
                     <textarea style={styles.textarea} placeholder="Objetivo" value={tp.objetivo} onChange={(e) => updateTP(tp.id, 'objetivo', e.target.value)} />
-                    <AIButton onClick={() => reformulateField(`tp_obj_${tp.id}`, tp.objetivo)} hasContent={!!tp.objetivo} disabled={!isFormComplete()} tooltip={isFormComplete() ? '' : 'Completa info general primero'} />
+                    <AIButton
+                      onClick={() => runAiForField({
+                        target: { type: 'tp', id: tp.id, field: 'objetivo' },
+                        currentValue: tp.objetivo,
+                        label: 'Objetivo del Trabajo Practico'
+                      })}
+                      hasContent={!!tp.objetivo}
+                      disabled={!isFormComplete()}
+                      tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                    />
                     <textarea style={styles.textarea} placeholder="Actividades" value={tp.actividades} onChange={(e) => updateTP(tp.id, 'actividades', e.target.value)} />
                     <textarea style={styles.textarea} placeholder="Materiales" value={tp.materiales} onChange={(e) => updateTP(tp.id, 'materiales', e.target.value)} />
                     <textarea style={styles.textarea} placeholder="Ámbito de Práctica" value={tp.ambito} onChange={(e) => updateTP(tp.id, 'ambito', e.target.value)} />
@@ -819,13 +1192,31 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               <div style={styles.section}>
                 <h3>Metodología</h3>
                 <textarea style={styles.textarea} value={formData.metodologia} onChange={(e) => updateFormData('metodologia', e.target.value)} />
-                <AIButton onClick={() => reformulateField('metodologia', formData.metodologia)} hasContent={!!formData.metodologia} disabled={!isFormComplete()} tooltip={isFormComplete() ? '' : 'Completa info general primero'} />
+                <AIButton
+                  onClick={() => runAiForField({
+                    target: { type: 'form', field: 'metodologia' },
+                    currentValue: formData.metodologia,
+                    label: 'Metodologia'
+                  })}
+                  hasContent={!!formData.metodologia}
+                  disabled={!isFormComplete()}
+                  tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                />
               </div>
 
               <div style={styles.section}>
                 <h3>Evaluación</h3>
                 <textarea style={styles.textarea} value={formData.evaluacion} onChange={(e) => updateFormData('evaluacion', e.target.value)} />
-                <AIButton onClick={() => reformulateField('evaluacion', formData.evaluacion)} hasContent={!!formData.evaluacion} disabled={!isFormComplete()} tooltip={isFormComplete() ? '' : 'Completa info general primero'} />
+                <AIButton
+                  onClick={() => runAiForField({
+                    target: { type: 'form', field: 'evaluacion' },
+                    currentValue: formData.evaluacion,
+                    label: 'Evaluacion'
+                  })}
+                  hasContent={!!formData.evaluacion}
+                  disabled={!isFormComplete()}
+                  tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                />
               </div>
 
               <div style={styles.section}>
@@ -847,26 +1238,63 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     fontSize: '16px',
                     padding: '15px 30px',
                     boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-                    ...((!formData.carrera || !formData.asignatura) && { opacity: 0.45, cursor: 'not-allowed' })
+                    ...((editingProposalId ? !canSaveEdits : !canCreateProposal) && { opacity: 0.45, cursor: 'not-allowed' })
                   }}
                   onClick={saveProposal}
-                  disabled={!formData.carrera || !formData.asignatura}
+                  disabled={editingProposalId ? !canSaveEdits : !canCreateProposal}
+                  title={editingProposalId
+                    ? (canSaveEdits ? 'Guardar cambios de la propuesta' : 'Completa Carrera y Asignatura')
+                    : (canCreateProposal ? 'Crear propuesta completa' : 'Completa todos los campos para habilitar')}
                 >
-                  Guardar Borrador
+                  {editingProposalId ? 'Guardar Cambios' : 'Crear Propuesta'}
                 </button>
               </div>
             </div>
 
             {/* COMPARISON MODAL */}
+            {aiLoading && (
+              <div
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+                onClick={() => setAiLoading(false)}
+              >
+                <div
+                  style={{ background: '#fff', padding: '24px 30px', borderRadius: '8px', maxWidth: '520px', width: '90%' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 style={{ marginTop: 0 }}>Procesando con IA...</h3>
+                  <p style={{ marginBottom: 0, color: '#555' }}>
+                    {aiSection ? `Seccion: ${aiSection}` : 'Generando contenido'}
+                  </p>
+                </div>
+              </div>
+            )}
+            {aiError && !aiLoading && (
+              <div
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+                onClick={() => setAiError('')}
+              >
+                <div
+                  style={{ background: '#fff', padding: '24px 30px', borderRadius: '8px', maxWidth: '620px', width: '90%' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 style={{ marginTop: 0 }}>No se pudo generar con IA</h3>
+                  <p style={{ marginBottom: '20px', color: '#555' }}>{aiError}</p>
+                  <button style={{ ...styles.button, background: '#999' }} onClick={() => setAiError('')}>Cerrar</button>
+                </div>
+              </div>
+            )}
             {showComparison && (
               <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
                 <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '900px', maxHeight: '80vh', overflowY: 'auto' }}>
                   <h2>Comparación de Reformulación</h2>
+                  {comparisonTarget?.label && (
+                    <div style={{ color: '#555', marginTop: '6px' }}>Seccion: {comparisonTarget.label}</div>
+                  )}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '20px' }}>
                     <div>
                       <h3>Original</h3>
                       <div style={{ background: '#f5f5f5', padding: '15px', borderRadius: '4px', minHeight: '200px', whiteSpace: 'pre-wrap' }}>
-                        {comparisonData.original}
+                        {comparisonData.original || '-'}
                       </div>
                     </div>
                     <div>
@@ -881,6 +1309,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 </div>
               </div>
             )}
+
           </div>
         )}
 
@@ -921,7 +1350,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
             <h2>Propuestas en Proceso</h2>
-            {proposals.filter(p => !isProposalComplete(p)).length === 0 ? (
+            {proposals.filter(isProposalInProcess).length === 0 ? (
               <p style={{ color: '#999', marginTop: '20px' }}>No hay propuestas en edición aún.</p>
             ) : (
               <div style={{ overflowX: 'auto', marginTop: '20px' }}>
@@ -938,7 +1367,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     </tr>
                   </thead>
                   <tbody>
-                    {proposals.filter(p => !isProposalComplete(p)).map((prop, idx) => (
+                    {proposals.filter(isProposalInProcess).map((prop, idx) => (
                       <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
                         <td style={{ padding: '10px' }}>#{prop.id}</td>
                         <td style={{ padding: '10px' }}>{prop.career || '-'}</td>
@@ -950,7 +1379,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                           <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
                             onClick={() => loadProposalForEdit(prop.id)}>Continuar</button>
                           <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', marginRight: '5px' }} 
-                            onClick={() => alert(`Eliminar propuesta #${prop.id}`)}>Eliminar</button>
+                            onClick={() => deleteProposal(prop.id)}>Eliminar</button>
                         </td>
                       </tr>
                     ))}
@@ -988,6 +1417,106 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           <div style={styles.section}>
             <h2>Resoluciones</h2>
             <p>Funcionalidad en desarrollo</p>
+          </div>
+        )}
+
+        {/* VIEW PROPOSAL MODAL */}
+        {viewProposal && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '900px', maxHeight: '80vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2>Resumen de Propuesta #{viewProposal.id}</h2>
+                <button style={{ ...styles.button, background: '#999' }} onClick={() => setViewProposal(null)}>Cerrar</button>
+              </div>
+
+              <div style={{ marginTop: '15px', padding: '12px', background: '#f5f5f5', borderRadius: '6px' }}>
+                <strong>Estado:</strong> {viewProposal.status || '-'}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '15px' }}>
+                <div><strong>Carrera:</strong> {viewProposal.career || '-'}</div>
+                <div><strong>Asignatura:</strong> {viewProposal.subject || viewProposal.title || '-'}</div>
+                <div><strong>Plan:</strong> {viewProposal.study_plan || '-'}</div>
+                <div><strong>Ano Academico:</strong> {viewProposal.academic_year || '-'}</div>
+                <div><strong>Ciclo:</strong> {viewProposal.year_of_career || '-'}</div>
+                <div><strong>Cuatrimestre:</strong> {viewProposal.quarter || '-'}</div>
+                <div><strong>Caracter:</strong> {viewProposal.character || '-'}</div>
+                <div><strong>Regimen:</strong> {viewProposal.regime || '-'}</div>
+                <div><strong>Hs Teoricas:</strong> {viewProposal.theoretical_hours ?? '-'}</div>
+                <div><strong>Hs Practicas:</strong> {viewProposal.practical_hours ?? '-'}</div>
+                <div><strong>Total:</strong> {viewProposal.total_hours ?? '-'}</div>
+                <div><strong>Hs Semanales:</strong> {viewProposal.weekly_hours ?? '-'}</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Equipo Docente</h3>
+                {Array.isArray(viewProposal.teaching_team) && viewProposal.teaching_team.length > 0 ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr', gap: '8px' }}>
+                    {viewProposal.teaching_team.map((doc, idx) => (
+                      <React.Fragment key={doc.id ?? idx}>
+                        <div>{doc.name || '-'}</div>
+                        <div>{doc.category || '-'}</div>
+                        <div>{doc.email || '-'}</div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: '#999' }}>-</div>
+                )}
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Contenidos Minimos</h3>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.minimum_content || '-'}</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Competencias</h3>
+                <div style={{ whiteSpace: 'pre-wrap' }}><strong>Genericas:</strong> {viewProposal.generic_competencies || '-'}</div>
+                <div style={{ whiteSpace: 'pre-wrap' }}><strong>Especificas:</strong> {viewProposal.specific_competencies || '-'}</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Fundamentos</h3>
+                <div style={{ whiteSpace: 'pre-wrap' }}><strong>Importancia:</strong> {viewProposal.fundamentals_part1 || '-'}</div>
+                <div style={{ whiteSpace: 'pre-wrap' }}><strong>Perfil Profesional:</strong> {viewProposal.fundamentals_part2 || '-'}</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Resultados de Aprendizaje</h3>
+                <div>{(viewProposal.learning_outcomes || []).length} item(s)</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Unidades</h3>
+                <div>{(viewProposal.units || []).length} item(s)</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Trabajos Practicos</h3>
+                <div>{(viewProposal.practicals || []).length} item(s)</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Metodologia</h3>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.methodology || '-'}</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Evaluacion</h3>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.evaluation || '-'}</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Bibliografia</h3>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.bibliography || '-'}</div>
+              </div>
+
+              <div style={{ marginTop: '15px' }}>
+                <h3>Observaciones</h3>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.observations || '-'}</div>
+              </div>
+            </div>
           </div>
         )}
       </div>

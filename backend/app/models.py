@@ -31,6 +31,7 @@ class Proposal(Base):
     learning_outcomes = Column(JSON, nullable=True)  # List of RA
     units = Column(JSON, nullable=True)  # List of Units
     practicals = Column(JSON, nullable=True)  # List of Practicals
+    teaching_team = Column(JSON, nullable=True)  # List of docentes
     
     # Other sections
     methodology = Column(Text, nullable=True)
@@ -41,6 +42,7 @@ class Proposal(Base):
     # File metadata
     original_filename = Column(String(500), nullable=True)
     source_type = Column(String(50), nullable=True)  # docx, pdf, manual
+    status = Column(String(50), nullable=True)  # EnProceso, Importada, Creada
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

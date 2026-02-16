@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from . import models, schemas
 from .database import SessionLocal, init_db
@@ -25,12 +26,23 @@ app.add_middleware(
 UPLOAD_FOLDER = os.getenv("LOCAL_UPLOAD_PATH", "./data/uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+
+class AiPrompt(BaseModel):
+    prompt: str
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+def get_openai_client():
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    return OpenAI(api_key=key)
 
 
 @app.on_event("startup")
@@ -70,6 +82,7 @@ async def upload_proposal(
     proposal = models.Proposal(
         original_filename=file.filename,
         source_type="upload",
+        status="Importada",
         career=career,
         subject=subject,
     )
@@ -111,13 +124,57 @@ def suggest_for_proposal(proposal_id: int = Form(...), prompt_context: str = For
         evidence_texts = "\n\n".join([m.get("metadata", {}).get("text", "") for m in matches])
         system_prompt = "Eres un asistente que ayuda a redactar la Fundamentación de una propuesta docente, usando la evidencia asociada. Devuelve un párrafo sugerido." 
         user_prompt = f"Evidencias:\n{evidence_texts}\n\nContexto adicional:{prompt_context or ''}\n\nGenera una sugerencia concisa para la Fundamentación."
-        key = os.getenv("OPENAI_API_KEY")
-        if not key:
-            raise RuntimeError("OPENAI_API_KEY not set")
-        client = OpenAI(api_key=key)
+        client = get_openai_client()
         resp = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"system","content":system_prompt},{"role":"user","content":user_prompt}], max_tokens=300)
         suggestion = resp.choices[0].message.content.strip()
         return {"suggestion": suggestion, "evidence_used": matches}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ai-generate")
+def ai_generate(payload: AiPrompt):
+    try:
+        if not payload.prompt.strip():
+            raise HTTPException(status_code=400, detail="Prompt is required")
+        system_prompt = "Eres un asistente que redacta contenido academico en espanol, claro y conciso."
+        client = get_openai_client()
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": payload.prompt}
+            ],
+            max_tokens=500
+        )
+        content = resp.choices[0].message.content.strip()
+        return {"status": "success", "content": content}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ai-reformulate")
+def ai_reformulate(payload: AiPrompt):
+    try:
+        if not payload.prompt.strip():
+            raise HTTPException(status_code=400, detail="Prompt is required")
+        system_prompt = "Eres un asistente que reformula textos academicos manteniendo el significado."
+        user_prompt = f"Reformula el siguiente texto, manteniendo el significado:\n\n{payload.prompt}"
+        client = get_openai_client()
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=500
+        )
+        content = resp.choices[0].message.content.strip()
+        return {"status": "success", "content": content}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -143,6 +200,16 @@ def update_proposal(proposal_id: int, payload: schemas.ProposalUpdate, db: Sessi
     db.commit()
     db.refresh(proposal)
     return proposal
+
+
+@app.delete("/proposals/{proposal_id}")
+def delete_proposal(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    db.delete(proposal)
+    db.commit()
+    return {"status": "deleted", "id": proposal_id}
 
 
 @app.get("/proposals", response_model=list[schemas.ProposalOut])
@@ -177,12 +244,14 @@ def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_
             learning_outcomes=proposal.learning_outcomes,
             units=proposal.units,
             practicals=proposal.practicals,
+            teaching_team=proposal.teaching_team,
             methodology=proposal.methodology,
             evaluation=proposal.evaluation,
             bibliography=proposal.bibliography,
             observations=proposal.observations,
             original_filename="form_submission",
-            source_type="manual"
+            source_type="manual",
+            status=proposal.status or "EnProceso"
         )
         db.add(db_proposal)
         db.commit()

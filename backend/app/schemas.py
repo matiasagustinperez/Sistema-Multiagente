@@ -22,6 +22,12 @@ class Practical(BaseModel):
     materials: str = ""
     scope: str = ""
 
+class TeachingStaff(BaseModel):
+    id: Optional[int] = None
+    name: str
+    category: str = ""
+    email: str = ""
+
 class ProposalBase(BaseModel):
     title: str
     career: Optional[str] = None
@@ -46,11 +52,13 @@ class ProposalBase(BaseModel):
     learning_outcomes: Optional[List[LearningOutcome]] = []
     units: Optional[List[Unit]] = []
     practicals: Optional[List[Practical]] = []
+    teaching_team: Optional[List[TeachingStaff]] = []
     
     methodology: Optional[str] = None
     evaluation: Optional[str] = None
     bibliography: Optional[str] = None
     observations: Optional[str] = None
+    status: Optional[str] = None
 
 class ProposalCreate(ProposalBase):
     pass
@@ -78,10 +86,12 @@ class ProposalUpdate(BaseModel):
     learning_outcomes: Optional[List[LearningOutcome]] = None
     units: Optional[List[Unit]] = None
     practicals: Optional[List[Practical]] = None
+    teaching_team: Optional[List[TeachingStaff]] = None
     methodology: Optional[str] = None
     evaluation: Optional[str] = None
     bibliography: Optional[str] = None
     observations: Optional[str] = None
+    status: Optional[str] = None
 
 class Proposal(ProposalBase):
     id: int
@@ -104,6 +114,7 @@ class ProposalOut(BaseModel):
     generic_competencies: Optional[str] = None
     specific_competencies: Optional[str] = None
     source_type: Optional[str] = None
+    status: Optional[str] = None
     created_at: datetime
     
     class Config:
