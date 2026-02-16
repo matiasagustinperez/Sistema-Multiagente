@@ -142,6 +142,85 @@ def extract_section_tables(doc: Document, section_start_idx: int, section_end_id
     return tables_in_range
 
 
+def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
+    """
+    Extrae Competencias Genéricas (CGTx) del texto.
+    Formato: "- CGT1 - Descripción - Nivel"
+    Retorna: [{'code': 'CGT1', 'description': 'Descripción', 'level': 'Nivel'}, ...]
+    """
+    competencies = []
+    # Buscar líneas que comiencen con "- CGT" o "CGT"
+    pattern = r'[-•]\s*([Cc][Gg][Tt]\d+)\s*[-:]\s*([^-]+?)(?:\s*[-:]\s*([^-\n]+))?(?=\n|$)'
+    matches = re.finditer(pattern, text, re.MULTILINE)
+    
+    for match in matches:
+        code = match.group(1).upper()
+        description = match.group(2).strip()
+        level = match.group(3).strip() if match.group(3) else ""
+        
+        if description:
+            competencies.append({
+                'code': code,
+                'description': description,
+                'level': level
+            })
+    
+    return competencies
+
+
+def extract_specific_competencies(text: str) -> List[Dict[str, str]]:
+    """
+    Extrae Competencias Específicas (CEx) del texto.
+    Formato: "- CE1 - Descripción - Nivel"
+    Retorna: [{'code': 'CE1', 'description': 'Descripción', 'level': 'Nivel'}, ...]
+    """
+    competencies = []
+    # Buscar líneas que comiencen con "- CE" o "CE"
+    pattern = r'[-•]\s*([Cc][Ee]\d+)\s*[-:]\s*([^-]+?)(?:\s*[-:]\s*([^-\n]+))?(?=\n|$)'
+    matches = re.finditer(pattern, text, re.MULTILINE)
+    
+    for match in matches:
+        code = match.group(1).upper()
+        description = match.group(2).strip()
+        level = match.group(3).strip() if match.group(3) else ""
+        
+        if description:
+            competencies.append({
+                'code': code,
+                'description': description,
+                'level': level
+            })
+    
+    return competencies
+
+
+def extract_learning_outcomes_parsed(text: str) -> List[Dict[str, str]]:
+    """
+    Extrae Resultados de Aprendizaje (RAx) del texto con descripción completa.
+    Formato: "- RA1 - Descripción completa del aprendizaje"
+    Retorna: [{'code': 'RA1', 'description': 'Descripción'}, ...]
+    """
+    outcomes = []
+    # Buscar líneas que comiencen con "- RA" o "RA"
+    pattern = r'[-•]\s*([Rr][Aa]\d+)\s*[-:]\s*([^\n]+)'
+    matches = re.finditer(pattern, text, re.MULTILINE)
+    
+    seen_codes = set()
+    for match in matches:
+        code = match.group(1).upper()
+        description = match.group(2).strip()
+        
+        # Evitar duplicados
+        if code not in seen_codes and description:
+            seen_codes.add(code)
+            outcomes.append({
+                'code': code,
+                'description': description
+            })
+    
+    return outcomes
+
+
 def extract_learning_outcomes_from_tables(doc: Document) -> List[str]:
     """
     Extrae Resultados de Aprendizaje (RA1, RA2, etc.) desde TABLAS.
@@ -456,42 +535,59 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
         if 'FUNDAMENTOS' in section_key:
             start_idx, end_idx = sections[section_key]
             fundamentals_text = extract_section_content(doc, start_idx, end_idx)
-            # Buscar subsecciones dentro
-            if 'Importancia en el Plan de estudio:' in fundamentals_text:
-                importance = fundamentals_text.split('Importancia en el Plan de estudio:')[1]
-                importance = importance.split('Relación con el perfil')[0] if 'Relación con el perfil' in fundamentals_text else importance
-            if 'Relación con el perfil profesional esperado:' in fundamentals_text:
-                professional_profile = fundamentals_text.split('Relación con el perfil profesional esperado:')[1]
+            
+            # Separar subsecciones con regex (case-insensitive)
+            import_match = re.search(r'importancia\s+en\s+el\s+plan\s+de\s+estudio\s*:?\s*(.+?)(?=relación\s+con\s+el\s+perfil|$)', 
+                                    fundamentals_text, re.IGNORECASE | re.DOTALL)
+            if import_match:
+                importance = import_match.group(1).strip()
+            
+            profile_match = re.search(r'relación\s+con\s+el\s+perfil\s+profesional\s+esperado\s*:?\s*(.+?)$', 
+                                     fundamentals_text, re.IGNORECASE | re.DOTALL)
+            if profile_match:
+                professional_profile = profile_match.group(1).strip()
+            
             fundamentals = fundamentals_text
             break
     
     # Extraer objetivos (sección 3)
-    generic_competencies = ""
-    specific_competencies = ""
+    generic_competencies_list = []
+    specific_competencies_list = []
     learning_outcomes = []
+    generic_competencies_text = ""
+    specific_competencies_text = ""
+    
     for section_key in sections.keys():
         if 'OBJETIVOS' in section_key:
             start_idx, end_idx = sections[section_key]
             objectives_text = extract_section_content(doc, start_idx, end_idx)
             
-            # Buscar subsecciones
-            if 'Competencias genéricas' in objectives_text:
-                generic_comp_part = objectives_text.split('Competencias genéricas')[1]
-                generic_competencies = generic_comp_part.split('Competencias específicas')[0] if 'Competencias específicas' in generic_comp_part else generic_comp_part
+            # Extraer cada sección usando regex
+            gen_comp_match = re.search(r'competencias\s+genéricas|competencias\s+genericas(.+?)(?=competencias\s+específicas|competencias\s+especificas|$)', 
+                                      objectives_text, re.IGNORECASE | re.DOTALL)
+            if gen_comp_match:
+                generic_competencies_text = gen_comp_match.group(1).strip()
+                generic_competencies_list = extract_generic_competencies(generic_competencies_text)
             
-            if 'Competencias específicas' in objectives_text:
-                specific_comp_part = objectives_text.split('Competencias específicas')[1]
-                specific_competencies = specific_comp_part.split('Resultados de aprendizaje')[0] if 'Resultados de aprendizaje' in specific_comp_part else specific_comp_part
+            spec_comp_match = re.search(r'competencias\s+específicas|competencias\s+especificas(.+?)(?=resultados\s+de\s+aprendizaje|$)', 
+                                       objectives_text, re.IGNORECASE | re.DOTALL)
+            if spec_comp_match:
+                specific_competencies_text = spec_comp_match.group(1).strip()
+                specific_competencies_list = extract_specific_competencies(specific_competencies_text)
             
-            if 'Resultados de aprendizaje' in objectives_text:
-                ra_text = objectives_text.split('Resultados de aprendizaje')[1]
-                # Buscar RA1, RA2, etc.
-                learning_outcomes = re.findall(r'RA\d+[:\-]?\s*([^\n]+)', ra_text, re.IGNORECASE)
+            # Extraer RAs usando la nueva función mejorada
+            ra_match = re.search(r'resultados\s+de\s+aprendizaje(.+?)$', 
+                                objectives_text, re.IGNORECASE | re.DOTALL)
+            if ra_match:
+                ra_text = ra_match.group(1).strip()
+                learning_outcomes = extract_learning_outcomes_parsed(ra_text)
+            
             break
     
-    # Si no se encontraron RAs en párrafos, buscar en TABLAS
+    # Si no se encontraron RAs en párrafos, intentar desde TABLAS
     if not learning_outcomes:
-        learning_outcomes = extract_learning_outcomes_from_tables(doc)
+        ra_strings = extract_learning_outcomes_from_tables(doc)
+        learning_outcomes = [{'code': f'RA{i+1}', 'description': ra} for i, ra in enumerate(ra_strings)]
     
     # Extraer unidades (sección 4)
     units = extract_units_from_docx(doc, 0, len(doc.paragraphs))
@@ -557,9 +653,9 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
         'importance': importance.strip(),
         'professional_profile': professional_profile.strip(),
         'fundamentals': fundamentals,
-        'generic_competencies': generic_competencies.strip(),
-        'specific_competencies': specific_competencies.strip(),
-        'learning_outcomes': learning_outcomes,
+        'generic_competencies': generic_competencies_list,  # Lista de dicts con code, description, level
+        'specific_competencies': specific_competencies_list,  # Lista de dicts con code, description, level
+        'learning_outcomes': learning_outcomes,  # Lista de dicts con code, description
         
         # Contenido
         'units': units,
