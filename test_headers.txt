@@ -1,0 +1,10 @@
+HTTP/1.1 200 OK
+date: Mon, 16 Feb 2026 21:56:38 GMT
+server: uvicorn
+content-type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+accept-ranges: bytes
+content-disposition: attachment; filename*=utf-8''5%20-%202%20-%20Inteligencia%20Artificial.docx
+content-length: 1816789
+last-modified: Mon, 16 Feb 2026 21:56:39 GMT
+etag: "504193137caeae383b6e8623475bda4d"
+

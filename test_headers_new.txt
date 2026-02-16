@@ -1,0 +1,10 @@
+HTTP/1.1 200 OK
+date: Mon, 16 Feb 2026 22:05:14 GMT
+server: uvicorn
+content-type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+accept-ranges: bytes
+content-disposition: attachment; filename*=utf-8''1%20-%202%20-%20Estructura%20de%20Datos.docx
+content-length: 1813892
+last-modified: Mon, 16 Feb 2026 22:05:15 GMT
+etag: "afd0dd047bdfc4e5cbc7729447defe47"
+
