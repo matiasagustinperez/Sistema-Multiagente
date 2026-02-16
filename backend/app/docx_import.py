@@ -554,33 +554,20 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
     generic_competencies_list = []
     specific_competencies_list = []
     learning_outcomes = []
-    generic_competencies_text = ""
-    specific_competencies_text = ""
     
     for section_key in sections.keys():
         if 'OBJETIVOS' in section_key:
             start_idx, end_idx = sections[section_key]
             objectives_text = extract_section_content(doc, start_idx, end_idx)
             
-            # Extraer cada sección usando regex
-            gen_comp_match = re.search(r'competencias\s+genéricas|competencias\s+genericas(.+?)(?=competencias\s+específicas|competencias\s+especificas|$)', 
-                                      objectives_text, re.IGNORECASE | re.DOTALL)
-            if gen_comp_match:
-                generic_competencies_text = gen_comp_match.group(1).strip()
-                generic_competencies_list = extract_generic_competencies(generic_competencies_text)
+            # Extraer competencias genéricas directamente del texto (sin necesidad de separar bloques)
+            generic_competencies_list = extract_generic_competencies(objectives_text)
             
-            spec_comp_match = re.search(r'competencias\s+específicas|competencias\s+especificas(.+?)(?=resultados\s+de\s+aprendizaje|$)', 
-                                       objectives_text, re.IGNORECASE | re.DOTALL)
-            if spec_comp_match:
-                specific_competencies_text = spec_comp_match.group(1).strip()
-                specific_competencies_list = extract_specific_competencies(specific_competencies_text)
+            # Extraer competencias específicas directamente del texto
+            specific_competencies_list = extract_specific_competencies(objectives_text)
             
-            # Extraer RAs usando la nueva función mejorada
-            ra_match = re.search(r'resultados\s+de\s+aprendizaje(.+?)$', 
-                                objectives_text, re.IGNORECASE | re.DOTALL)
-            if ra_match:
-                ra_text = ra_match.group(1).strip()
-                learning_outcomes = extract_learning_outcomes_parsed(ra_text)
+            # Extraer RAs using regex search para encontrar la sección
+            learning_outcomes = extract_learning_outcomes_parsed(objectives_text)
             
             break
     
