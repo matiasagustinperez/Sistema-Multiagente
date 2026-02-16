@@ -4,29 +4,30 @@ from datetime import datetime
 
 class LearningOutcome(BaseModel):
     id: Optional[int] = None
-    description: str
-    observable_verb: str = ""
+    description: Optional[str] = ""
+    observable_verb: Optional[str] = ""
     
 class Unit(BaseModel):
     id: Optional[int] = None
-    name: str
-    content: str = ""
-    bibliography_basic: str = ""
-    bibliography_complementary: str = ""
+    name: Optional[str] = ""
+    content: Optional[str] = ""
+    bibliography_basic: Optional[str] = ""
+    bibliography_complementary: Optional[str] = ""
 
 class Practical(BaseModel):
     id: Optional[int] = None
-    name: str
-    objective: str = ""
-    activities: str = ""
-    materials: str = ""
-    scope: str = ""
+    number: Optional[str] = None
+    name: Optional[str] = ""
+    objective: Optional[str] = ""
+    activities: Optional[str] = ""
+    materials: Optional[str] = ""
+    scope: Optional[str] = ""
 
 class TeachingStaff(BaseModel):
     id: Optional[int] = None
-    name: str
-    category: str = ""
-    email: str = ""
+    name: Optional[str] = ""
+    category: Optional[str] = ""
+    email: Optional[str] = ""
 
 class ProposalBase(BaseModel):
     title: str

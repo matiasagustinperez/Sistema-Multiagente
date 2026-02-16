@@ -6,12 +6,27 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('home')
   const [proposalsMode, setProposalsMode] = useState(null)
   
+  // Import state
+  const [importFile, setImportFile] = useState(null)
+  const [importLoading, setImportLoading] = useState(false)
+  const [importPreview, setImportPreview] = useState(null)
+  const [importError, setImportError] = useState('')
+  
   // AI state
   const [aiLoading, setAiLoading] = useState(false)
   const [aiSection, setAiSection] = useState(null)
   const [showComparison, setShowComparison] = useState(false)
   const [aiError, setAiError] = useState('')
   const [raBatchCount, setRaBatchCount] = useState(5)
+  const [unitBatchCount, setUnitBatchCount] = useState(4)
+  const [tpBatchCount, setTpBatchCount] = useState(4)
+  const [unitBibliografiaRef, setUnitBibliografiaRef] = useState({ basica: '', complementaria: '', preferencia: '' })
+  const [unitBibliografiaDraft, setUnitBibliografiaDraft] = useState({ basica: '', complementaria: '', preferencia: '' })
+  const [showUnitBibliografiaModal, setShowUnitBibliografiaModal] = useState(false)
+  const [unitDebug, setUnitDebug] = useState(null)
+  const [tpCommentRef, setTpCommentRef] = useState('')
+  const [tpCommentDraft, setTpCommentDraft] = useState('')
+  const [showTpCommentModal, setShowTpCommentModal] = useState(false)
   const [comparisonData, setComparisonData] = useState({ original: '', reformulated: '' })
   const [comparisonTarget, setComparisonTarget] = useState(null)
   
@@ -71,6 +86,14 @@ export default function App() {
     }
   }, [statusMsg])
 
+  useEffect(() => {
+    const textareas = document.querySelectorAll('textarea[data-autoresize="true"]')
+    textareas.forEach((el) => {
+      el.style.height = 'auto'
+      el.style.height = `${el.scrollHeight}px`
+    })
+  }, [formData, unitDebug, showComparison, showUnitBibliografiaModal, showTpCommentModal])
+
   const fetchProposals = async () => {
     try {
       const res = await fetch('http://localhost:8001/proposals')
@@ -86,6 +109,15 @@ export default function App() {
     setIsDirty(true)
   }
 
+  const autoResizeTextarea = (event) => {
+    const el = event?.target
+    if (!el || el.tagName !== 'TEXTAREA') {
+      return
+    }
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }
+
   const isFormComplete = () => {
     return formData.carrera && formData.asignatura && formData.plan &&
            formData.ciclo && formData.cuatrimestre && formData.caracter &&
@@ -95,43 +127,106 @@ export default function App() {
 
   const isNonEmptyText = (value) => typeof value === 'string' && value.trim().length > 0
   const hasNumberValue = (value) => value !== '' && value !== null && value !== undefined
+  const getValidationErrors = () => {
+    const errors = []
+    
+    // Campos básicos
+    if (!isNonEmptyText(formData.carrera)) errors.push('Carrera')
+    if (!isNonEmptyText(formData.asignatura)) errors.push('Asignatura')
+    if (!isNonEmptyText(formData.plan)) errors.push('Plan')
+    if (!isNonEmptyText(formData.anio)) errors.push('Año')
+    if (!isNonEmptyText(formData.ciclo)) errors.push('Ciclo')
+    if (!isNonEmptyText(formData.cuatrimestre)) errors.push('Cuatrimestre')
+    if (!hasNumberValue(formData.hsTeo)) errors.push('Horas Teóricas')
+    if (!hasNumberValue(formData.hsPrac)) errors.push('Horas Prácticas')
+    
+    // Sección Contenidos
+    if (!isNonEmptyText(formData.contenidosMin)) errors.push('Contenidos Mínimos')
+    if (!isNonEmptyText(formData.competenciasGen)) errors.push('Competencias Genéricas')
+    if (!isNonEmptyText(formData.competenciasEsp)) errors.push('Competencias Específicas')
+    
+    // Sección Fundamentación
+    if (!isNonEmptyText(formData.fundamentosP1)) errors.push('Fundamentación P1')
+    if (!isNonEmptyText(formData.fundamentosP2)) errors.push('Fundamentación P2')
+    
+    // Resultados de Aprendizaje
+    if (formData.resultadosAprendizaje.length === 0) {
+      errors.push('Resultados de Aprendizaje (al menos 1)')
+    } else {
+      const incompletos = formData.resultadosAprendizaje.filter((ra, idx) => {
+        const hasDesc = isNonEmptyText(ra.descripcion)
+        if (!hasDesc) {
+          console.log(`RA ${idx + 1} incompleto: descripción vacía`)
+        }
+        return !hasDesc
+      })
+      if (incompletos.length > 0) {
+        errors.push(`RA incompletos: ${incompletos.length} (falta descripción)`)
+      }
+    }
+    
+    // Unidades
+    if (formData.unidades.length === 0) {
+      errors.push('Unidades (al menos 1)')
+    } else {
+      const incompletas = formData.unidades.filter((u, idx) => {
+        const MissingFields = []
+        if (!isNonEmptyText(u.nombre)) MissingFields.push('nombre')
+        if (!isNonEmptyText(u.contenidos)) MissingFields.push('contenidos')
+        if (!isNonEmptyText(u.bibBasica)) MissingFields.push('bibBasica')
+        if (!isNonEmptyText(u.bibCompl)) MissingFields.push('bibCompl')
+        
+        if (MissingFields.length > 0) {
+          console.log(`Unidad ${idx + 1} incompleta:`, MissingFields.join(', '), '- Valores:', {
+            nombre: u.nombre?.substring(0, 30),
+            contenidos: u.contenidos?.substring(0, 30),
+            bibBasica: u.bibBasica?.substring(0, 30),
+            bibCompl: u.bibCompl?.substring(0, 30)
+          })
+        }
+        return MissingFields.length > 0
+      })
+      if (incompletas.length > 0) {
+        errors.push(`Unidades incompletas: ${incompletas.length} (ver consola para detalles)`)
+      }
+    }
+    
+    // Trabajos Prácticos
+    if (formData.trabajosPracticos.length === 0) {
+      errors.push('Trabajos Prácticos (al menos 1)')
+    } else {
+      const incompletos = formData.trabajosPracticos.filter(tp => 
+        !isNonEmptyText(tp.nombre) || !Array.isArray(tp.raIds) || tp.raIds.length === 0 || 
+        !isNonEmptyText(tp.actividades) || !isNonEmptyText(tp.materiales)
+      )
+      if (incompletos.length > 0) {
+        errors.push(`TPs incompletos: ${incompletos.length} (falta nombre, RA vinculados, actividades o materiales)`)
+      }
+    }
+    
+    // Otras secciones
+    if (!isNonEmptyText(formData.metodologia)) errors.push('Metodología')
+    if (!isNonEmptyText(formData.evaluacion)) errors.push('Evaluación')
+    if (!isNonEmptyText(formData.bibliografia)) errors.push('Bibliografía')
+    // Observaciones es opcional
+    
+    // Equipo docente
+    if (equipoDocente.length === 0) {
+      errors.push('Equipo Docente (al menos 1)')
+    } else {
+      const incompletos = equipoDocente.filter(doc => 
+        !isNonEmptyText(doc.nombre) || !isNonEmptyText(doc.correo)
+      )
+      if (incompletos.length > 0) {
+        errors.push(`Docentes incompletos: ${incompletos.length} (falta nombre o correo)`)
+      }
+    }
+    
+    return errors
+  }
+
   const isProposalReadyToCreate = () => {
-    const requiredTextFields = [
-      formData.carrera,
-      formData.asignatura,
-      formData.plan,
-      formData.anio,
-      formData.ciclo,
-      formData.cuatrimestre,
-      formData.caracter,
-      formData.regimen,
-      formData.contenidosMin,
-      formData.competenciasGen,
-      formData.competenciasEsp,
-      formData.fundamentosP1,
-      formData.fundamentosP2,
-      formData.metodologia,
-      formData.evaluacion,
-      formData.bibliografia,
-      formData.observaciones
-    ]
-
-    const requiredArraysFilled =
-      formData.resultadosAprendizaje.length > 0 &&
-      formData.resultadosAprendizaje.every(ra => isNonEmptyText(ra.verbo) && isNonEmptyText(ra.descripcion)) &&
-      formData.unidades.length > 0 &&
-      formData.unidades.every(u => isNonEmptyText(u.nombre) && isNonEmptyText(u.contenidos) && isNonEmptyText(u.bibBasica) && isNonEmptyText(u.bibCompl)) &&
-      formData.trabajosPracticos.length > 0 &&
-      formData.trabajosPracticos.every(tp => isNonEmptyText(tp.nombre) && isNonEmptyText(tp.objetivo) && isNonEmptyText(tp.actividades) && isNonEmptyText(tp.materiales) && isNonEmptyText(tp.ambito))
-
-    const docentesCompletos = equipoDocente.length > 0 &&
-      equipoDocente.every(doc => isNonEmptyText(doc.nombre) && isNonEmptyText(doc.correo))
-
-    return requiredTextFields.every(isNonEmptyText) &&
-      hasNumberValue(formData.hsTeo) &&
-      hasNumberValue(formData.hsPrac) &&
-      requiredArraysFilled &&
-      docentesCompletos
+    return getValidationErrors().length === 0
   }
 
   const getCartTotal = () => {
@@ -179,7 +274,7 @@ export default function App() {
   const addRA = () => {
     setFormData(prev => ({
       ...prev,
-      resultadosAprendizaje: [...prev.resultadosAprendizaje, { id: Date.now(), descripcion: '', verbo: '' }]
+      resultadosAprendizaje: [...prev.resultadosAprendizaje, { id: Date.now(), descripcion: '' }]
     }))
     setIsDirty(true)
   }
@@ -233,7 +328,7 @@ export default function App() {
   const addTP = () => {
     setFormData(prev => ({
       ...prev,
-      trabajosPracticos: [...prev.trabajosPracticos, { id: Date.now(), nombre: '', objetivo: '', actividades: '', materiales: '', ambito: '' }]
+      trabajosPracticos: [...prev.trabajosPracticos, { id: Date.now(), numero: prev.trabajosPracticos.length + 1, nombre: '', raIds: [], actividades: '', materiales: '', ambito: '' }]
     }))
     setIsDirty(true)
   }
@@ -256,6 +351,46 @@ export default function App() {
     setIsDirty(true)
   }
 
+  const getTpObjectiveFromRaIds = (raIds) => {
+    if (!Array.isArray(raIds) || raIds.length === 0) {
+      return ''
+    }
+    const raMap = new Map((formData.resultadosAprendizaje || []).map((ra, idx) => [ra.id, { idx, ra }]))
+    return raIds
+      .map((id) => raMap.get(id))
+      .filter(Boolean)
+      .map(({ idx, ra }) => `RA ${idx + 1}: ${ra.descripcion || ra.verbo || ''}`.trim())
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  const inferTpRaIdsFromObjective = (objectiveText) => {
+    if (!isNonEmptyText(objectiveText)) {
+      return []
+    }
+    const text = objectiveText.toLowerCase()
+    return (formData.resultadosAprendizaje || [])
+      .filter((ra) => isNonEmptyText(ra.descripcion) && text.includes(ra.descripcion.toLowerCase()))
+      .map((ra) => ra.id)
+  }
+
+  const toggleTpRa = (tpId, raId) => {
+    setFormData(prev => ({
+      ...prev,
+      trabajosPracticos: prev.trabajosPracticos.map(tp => {
+        if (tp.id !== tpId) {
+          return tp
+        }
+        const current = Array.isArray(tp.raIds) ? tp.raIds : []
+        const next = current.includes(raId)
+          ? current.filter(id => id !== raId)
+          : [...current, raId]
+        return { ...tp, raIds: next }
+      })
+    }))
+    setIsDirty(true)
+  }
+
   const parseLearningOutcomesFromText = (text, desiredCount) => {
     if (!text || typeof text !== 'string') {
       return []
@@ -270,6 +405,377 @@ export default function App() {
       id: Date.now() + idx,
       descripcion: item
     }))
+  }
+
+  const stripCodeFences = (text) => text
+    .replace(/```[a-z]*\n?/gi, '')
+    .replace(/```/g, '')
+    .trim()
+
+  const extractJsonCandidate = (value) => {
+    const arrayStart = value.indexOf('[')
+    const arrayEnd = value.lastIndexOf(']')
+    if (arrayStart !== -1 && arrayEnd > arrayStart) {
+      return value.slice(arrayStart, arrayEnd + 1)
+    }
+    const objStart = value.indexOf('{')
+    const objEnd = value.lastIndexOf('}')
+    if (objStart !== -1 && objEnd > objStart) {
+      return value.slice(objStart, objEnd + 1)
+    }
+    return value
+  }
+
+  const normalizeUnitField = (value) => {
+    if (!value) {
+      return ''
+    }
+    return String(value)
+      .replace(/^[\["']+/, '')
+      .replace(/[\]"']+,?$/g, '')
+      .trim()
+  }
+
+  const isNoiseLine = (value) => {
+    const cleanedValue = String(value || '').trim()
+    return !cleanedValue ||
+      cleanedValue === '[' ||
+      cleanedValue === ']' ||
+      /^contenidos?$/i.test(cleanedValue) ||
+      /^bibliograf/i.test(cleanedValue)
+  }
+
+  const parseUnitNamesFromText = (text, desiredCount) => {
+    if (!text || typeof text !== 'string') {
+      return []
+    }
+    const rawItems = text
+      .split(/\r?\n|•/)
+      .map(line => line.replace(/^[-*\d\s.)]+/, '').trim())
+      .filter(Boolean)
+      .map(line => line.replace(/^Unidad\s*\d+[:.-]?\s*/i, '').trim())
+
+    const items = rawItems.length > 0
+      ? rawItems
+      : text.split(';').map(item => item.trim()).filter(Boolean)
+
+    return items.slice(0, desiredCount)
+  }
+
+  const parseTpNamesFromText = (text, desiredCount) => {
+    if (!text || typeof text !== 'string') {
+      return []
+    }
+    const rawItems = text
+      .split(/\r?\n|•/)
+      .map(line => line.replace(/^[-*\d\s.)]+/, '').trim())
+      .filter(Boolean)
+      .map(line => line.replace(/^(TP|Trabajo\s+Practico)\s*\d+[:.-]?\s*/i, '').trim())
+
+    const items = rawItems.length > 0
+      ? rawItems
+      : text.split(';').map(item => item.trim()).filter(Boolean)
+
+    return items.slice(0, desiredCount)
+  }
+
+  const normalizeBibliographyLines = (text) => {
+    if (!text || typeof text !== 'string') {
+      return ''
+    }
+    const lines = text
+      .split(/\r?\n|;\s*/)
+      .map(line => line.trim())
+      .filter(Boolean)
+    return lines.join('\n')
+  }
+
+  const normalizeBibliographyValue = (value) => {
+    if (!value) {
+      return ''
+    }
+    const pickTextFromObject = (obj) => {
+      if (!obj || typeof obj !== 'object') {
+        return ''
+      }
+      const candidates = ['text', 'item', 'reference', 'ref', 'cita', 'entry', 'value']
+      for (const key of candidates) {
+        if (typeof obj[key] === 'string' && obj[key].trim()) {
+          return obj[key].trim()
+        }
+      }
+      const values = Object.values(obj).map(val => (typeof val === 'string' ? val : '')).filter(Boolean)
+      if (values.length > 0) {
+        return values.join(' ')
+      }
+      return JSON.stringify(obj)
+    }
+
+    if (typeof value === 'string') {
+      return normalizeBibliographyLines(value)
+    }
+    if (Array.isArray(value)) {
+      const lines = value.map(item => (typeof item === 'string' ? item : pickTextFromObject(item))).filter(Boolean)
+      return normalizeBibliographyLines(lines.join('\n'))
+    }
+    if (typeof value === 'object') {
+      return normalizeBibliographyLines(pickTextFromObject(value))
+    }
+    return normalizeBibliographyLines(String(value))
+  }
+
+  const parseUnitsFromText = (text, desiredCount) => {
+    if (!text || typeof text !== 'string') {
+      return []
+    }
+
+    const cleaned = stripCodeFences(text)
+    let units = []
+
+    try {
+      const parsed = JSON.parse(extractJsonCandidate(cleaned))
+      const array = Array.isArray(parsed)
+        ? parsed
+        : (Array.isArray(parsed.unidades) ? parsed.unidades : [])
+
+      units = array.map((u, idx) => {
+        if (typeof u === 'string') {
+          return {
+            id: Date.now() + idx,
+            nombre: normalizeUnitField(u),
+            contenidos: '',
+            bibBasica: '',
+            bibCompl: ''
+          }
+        }
+        return {
+          id: Date.now() + idx,
+          nombre: normalizeUnitField(u.nombre || u.name),
+          contenidos: normalizeUnitField(u.contenidos || u.content),
+          bibBasica: normalizeUnitField(u.bibBasica || u.bibliografia_basica || u.bibliography_basic),
+          bibCompl: normalizeUnitField(u.bibCompl || u.bibliografia_complementaria || u.bibliography_complementary)
+        }
+      })
+    } catch (err) {
+      units = []
+    }
+
+    if (units.length === 0) {
+      const blocks = cleaned
+        .split(/(?=Unidad\s*\d+[:.-])/i)
+        .map(block => block.trim())
+        .filter(Boolean)
+
+      units = blocks.map((block, idx) => {
+        const nameMatch = block.match(/Nombre\s*:\s*(.+)/i)
+        const contentMatch = block.match(/Contenidos?\s*:\s*([\s\S]*?)(Bibliograf[ií]a\s*Basica|Bibliograf[ií]a\s*Complementaria|$)/i)
+        const basicMatch = block.match(/Bibliograf[ií]a\s*Basica\s*:\s*([\s\S]*?)(Bibliograf[ií]a\s*Complementaria|$)/i)
+        const complMatch = block.match(/Bibliograf[ií]a\s*Complementaria\s*:\s*([\s\S]*?)$/i)
+
+        const lines = block.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+        const rawNameLine = (lines[0] || '')
+          .replace(/^Unidad\s*\d+[:.-]?/i, '')
+          .trim()
+        const fallbackName = rawNameLine || (lines.find(line => !/^Unidad\s*\d+/i.test(line) && !isNoiseLine(line)) || '')
+
+        const nombre = normalizeUnitField(nameMatch?.[1] || fallbackName) || `Unidad ${idx + 1}`
+        return {
+          id: Date.now() + idx,
+          nombre,
+          contenidos: normalizeUnitField(contentMatch?.[1] || ''),
+          bibBasica: normalizeUnitField(basicMatch?.[1] || ''),
+          bibCompl: normalizeUnitField(complMatch?.[1] || '')
+        }
+      })
+    }
+
+    return units.slice(0, desiredCount).filter(u => isNonEmptyText(u.nombre) || isNonEmptyText(u.contenidos))
+  }
+
+  const parseSingleUnitFromText = (text, fallbackName) => {
+    if (!text || typeof text !== 'string') {
+      return null
+    }
+    const cleaned = stripCodeFences(text)
+    const unescapeJsonString = (value) => {
+      if (!value) {
+        return ''
+      }
+      const normalized = String(value).replace(/\r?\n/g, '\\n')
+      try {
+        return JSON.parse(`"${normalized.replace(/"/g, '\\"')}"`)
+      } catch (err) {
+        return String(value).trim()
+      }
+    }
+
+    const parseLooseUnitFromJsonLike = (value) => {
+      if (!value || typeof value !== 'string') {
+        return null
+      }
+      const getBetween = (field, nextField) => {
+        const regex = new RegExp(`"${field}"\\s*:\\s*"([\\s\\S]*?)"\\s*,\\s*"${nextField}"`, 'i')
+        const match = value.match(regex)
+        return match ? match[1] : null
+      }
+      const getLast = (field) => {
+        const regex = new RegExp(`"${field}"\\s*:\\s*"([\\s\\S]*?)"\\s*}`, 'i')
+        const match = value.match(regex)
+        return match ? match[1] : null
+      }
+
+      const nombreRaw = getBetween('nombre', 'contenidos') || getBetween('name', 'contenidos')
+      const contenidosRaw = getBetween('contenidos', 'bibBasica') || getBetween('content', 'bibBasica')
+      const bibBasicaRaw = getBetween('bibBasica', 'bibCompl') || getBetween('bibliografia_basica', 'bibCompl') || getBetween('bibliography_basic', 'bibCompl')
+      const bibComplRaw = getLast('bibCompl') || getLast('bibliografia_complementaria') || getLast('bibliography_complementary')
+
+      if (!nombreRaw && !contenidosRaw && !bibBasicaRaw && !bibComplRaw) {
+        return null
+      }
+
+      return {
+        nombre: normalizeUnitField(unescapeJsonString(nombreRaw) || fallbackName),
+        contenidos: normalizeUnitField(unescapeJsonString(contenidosRaw)),
+        bibBasica: normalizeUnitField(unescapeJsonString(bibBasicaRaw)),
+        bibCompl: normalizeUnitField(unescapeJsonString(bibComplRaw))
+      }
+    }
+    try {
+      const parsed = JSON.parse(extractJsonCandidate(cleaned))
+      const unitObj = Array.isArray(parsed)
+        ? parsed[0]
+        : (parsed?.unidad || parsed)
+      if (typeof unitObj === 'string') {
+        return {
+          nombre: normalizeUnitField(fallbackName) || 'Unidad',
+          contenidos: normalizeUnitField(unitObj),
+          bibBasica: '',
+          bibCompl: ''
+        }
+      }
+      return {
+        nombre: normalizeUnitField(unitObj?.nombre || unitObj?.name || fallbackName),
+        contenidos: normalizeUnitField(unitObj?.contenidos || unitObj?.content),
+        bibBasica: normalizeUnitField(unitObj?.bibBasica || unitObj?.bibliografia_basica || unitObj?.bibliography_basic),
+        bibCompl: normalizeUnitField(unitObj?.bibCompl || unitObj?.bibliografia_complementaria || unitObj?.bibliography_complementary)
+      }
+    } catch (err) {
+      const looseParsed = parseLooseUnitFromJsonLike(cleaned)
+      if (looseParsed) {
+        return {
+          nombre: looseParsed.nombre || normalizeUnitField(fallbackName) || 'Unidad',
+          contenidos: looseParsed.contenidos || '',
+          bibBasica: looseParsed.bibBasica || '',
+          bibCompl: looseParsed.bibCompl || ''
+        }
+      }
+      return {
+        nombre: normalizeUnitField(fallbackName) || 'Unidad',
+        contenidos: normalizeUnitField(cleaned),
+        bibBasica: '',
+        bibCompl: ''
+      }
+    }
+  }
+
+  const parseSinglePracticalFromText = (text, fallbackName) => {
+    if (!text || typeof text !== 'string') {
+      return null
+    }
+    const cleaned = stripCodeFences(text)
+    const unescapeJsonString = (value) => {
+      if (!value) {
+        return ''
+      }
+      const normalized = String(value).replace(/\r?\n/g, '\\n')
+      try {
+        return JSON.parse(`"${normalized.replace(/"/g, '\\"')}"`)
+      } catch (err) {
+        return String(value).trim()
+      }
+    }
+
+    const parseLoosePracticalFromJsonLike = (value) => {
+      if (!value || typeof value !== 'string') {
+        return null
+      }
+      const getBetween = (field, nextField) => {
+        const regex = new RegExp(`"${field}"\\s*:\\s*"([\\s\\S]*?)"\\s*,\\s*"${nextField}"`, 'i')
+        const match = value.match(regex)
+        return match ? match[1] : null
+      }
+      const getLast = (field) => {
+        const regex = new RegExp(`"${field}"\\s*:\\s*"([\\s\\S]*?)"\\s*}`, 'i')
+        const match = value.match(regex)
+        return match ? match[1] : null
+      }
+
+      const numeroRaw = getBetween('numero', 'nombre') || getBetween('number', 'nombre') || getBetween('nro', 'nombre')
+      const nombreRaw = getBetween('nombre', 'objetivo') || getBetween('name', 'objetivo')
+      const objetivoRaw = getBetween('objetivo', 'actividades') || getBetween('objective', 'actividades')
+      const actividadesRaw = getBetween('actividades', 'materiales') || getBetween('activities', 'materiales')
+      const materialesRaw = getLast('materiales') || getLast('materials')
+      const raMatch = value.match(/"raIndices"\s*:\s*\[([^\]]*)\]/i)
+      const raIndices = raMatch
+        ? raMatch[1].split(',').map(item => parseInt(item.trim(), 10)).filter(Number.isFinite)
+        : []
+
+      if (!nombreRaw && !objetivoRaw && !actividadesRaw && !materialesRaw && !numeroRaw) {
+        return null
+      }
+
+      return {
+        numero: normalizeUnitField(unescapeJsonString(numeroRaw)),
+        nombre: normalizeUnitField(unescapeJsonString(nombreRaw) || fallbackName),
+        objetivo: normalizeUnitField(unescapeJsonString(objetivoRaw)),
+        actividades: normalizeUnitField(unescapeJsonString(actividadesRaw)),
+        materiales: normalizeUnitField(unescapeJsonString(materialesRaw)),
+        raIndices
+      }
+    }
+
+    try {
+      const parsed = JSON.parse(extractJsonCandidate(cleaned))
+      const tpObj = Array.isArray(parsed)
+        ? parsed[0]
+        : (parsed?.tp || parsed?.practica || parsed)
+      if (typeof tpObj === 'string') {
+        return {
+          numero: '',
+          nombre: normalizeUnitField(fallbackName) || 'TP',
+          objetivo: normalizeUnitField(tpObj),
+          actividades: '',
+          materiales: ''
+        }
+      }
+      return {
+        numero: normalizeUnitField(tpObj?.numero || tpObj?.number || tpObj?.nro),
+        nombre: normalizeUnitField(tpObj?.nombre || tpObj?.name || fallbackName),
+        objetivo: normalizeUnitField(tpObj?.objetivo || tpObj?.objective),
+        actividades: normalizeUnitField(tpObj?.actividades || tpObj?.activities),
+        materiales: normalizeUnitField(tpObj?.materiales || tpObj?.materials),
+        raIndices: Array.isArray(tpObj?.raIndices) ? tpObj.raIndices : []
+      }
+    } catch (err) {
+      const looseParsed = parseLoosePracticalFromJsonLike(cleaned)
+      if (looseParsed) {
+        return {
+          numero: looseParsed.numero || '',
+          nombre: looseParsed.nombre || normalizeUnitField(fallbackName) || 'TP',
+          objetivo: looseParsed.objetivo || '',
+          actividades: looseParsed.actividades || '',
+          materiales: looseParsed.materiales || '',
+          raIndices: Array.isArray(looseParsed.raIndices) ? looseParsed.raIndices : []
+        }
+      }
+      return {
+        numero: '',
+        nombre: normalizeUnitField(fallbackName) || 'TP',
+        objetivo: normalizeUnitField(cleaned),
+        actividades: '',
+        materiales: ''
+      }
+    }
   }
 
   // AI functions
@@ -393,6 +899,53 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     return cleanedLines.join('\n').trim()
   }
 
+  const getRaContextText = () => {
+    const raList = (formData.resultadosAprendizaje || []).map((ra, idx) => {
+      const verbo = isNonEmptyText(ra.verbo) ? `${ra.verbo} ` : ''
+      const descripcion = isNonEmptyText(ra.descripcion) ? ra.descripcion : ''
+      const text = `${verbo}${descripcion}`.trim()
+      return text ? `RA ${idx + 1}: ${text}` : `RA ${idx + 1}: (sin descripcion)`
+    })
+    return raList.length > 0 ? raList.join('\n') : 'Sin RA cargados.'
+  }
+
+  const buildMethodologyPrompt = ({ baseContext, raText, mode, currentValue }) => {
+    const commonRequirements = [
+      '- Referir explicitamente a los RA por numero (RA 1, RA 2, etc.).',
+      '- Describir el desarrollo de clases (teoricas, practicas, actividades y secuencia).',
+      '- Explicar la articulacion entre unidades, actividades y RA.',
+      '- Espanol claro y formal.',
+      '- Sin titulos ni encabezados, solo el texto.'
+    ].join('\n')
+
+    if (mode === 'reformulate') {
+      return `Reformula la metodologia manteniendo el sentido, pero asegurando que cumpla los requisitos.
+\nContexto:\n${baseContext}\n\nResultados de aprendizaje:\n${raText}\n\nTexto a reformular:\n${currentValue}\n\nRequisitos:\n${commonRequirements}`
+    }
+
+    return `Escribe la metodologia de la asignatura.
+\nContexto:\n${baseContext}\n\nResultados de aprendizaje:\n${raText}\n\nRequisitos:\n${commonRequirements}`
+  }
+
+  const buildEvaluationPrompt = ({ baseContext, mode, currentValue }) => {
+    const commonRequirements = [
+      '- Incluir dos parciales y un recuperatorio.',
+      '- Indicar que los trabajos practicos son evaluables.',
+      '- Incluir examen libre con instancia practica y teorica.',
+      '- Explicitar rangos de nota: 0-3 libre, 4-6 regular, 7-8 promocion indirecta, 9-10 promocion directa.',
+      '- Espanol claro y formal.',
+      '- Sin titulos ni encabezados, solo el texto.'
+    ].join('\n')
+
+    if (mode === 'reformulate') {
+      return `Reformula la evaluacion manteniendo el sentido, pero asegurando que cumpla los requisitos.
+\nContexto:\n${baseContext}\n\nTexto a reformular:\n${currentValue}\n\nRequisitos:\n${commonRequirements}`
+    }
+
+    return `Escribe la evaluacion de la asignatura.
+\nContexto:\n${baseContext}\n\nRequisitos:\n${commonRequirements}`
+  }
+
   const buildAiPrompt = (label, target) => {
     const baseContext = [
       `Carrera: ${formData.carrera}`,
@@ -406,7 +959,27 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       return `Escribe el contenido para: ${label}.\n\nContexto:\n${baseContext}\nContenidos minimos: ${formData.contenidosMin}\n\nRequisitos:\n- Entre 100 y 200 palabras.\n- Espanol claro y formal.\n- No incluyas titulos ni encabezados, solo el texto.`
     }
 
+    if (target?.field === 'metodologia') {
+      return buildMethodologyPrompt({ baseContext, raText: getRaContextText(), mode: 'generate' })
+    }
+
+    if (target?.field === 'evaluacion') {
+      return buildEvaluationPrompt({ baseContext, mode: 'generate' })
+    }
+
     return `Escribe el contenido para: ${label}.\n\nContexto:\n${baseContext}\n\nRequisitos:\n- Espanol claro y conciso.\n- No incluyas titulos ni encabezados, solo el texto.`
+  }
+
+  const getUnitContext = (unitId) => {
+    const index = formData.unidades.findIndex(u => u.id === unitId)
+    const unit = formData.unidades[index] || {}
+    const previousUnits = formData.unidades.slice(0, Math.max(0, index)).map((u, idx) => (
+      `Unidad ${idx + 1}: ${u.nombre || 'Sin nombre'}\nContenidos: ${u.contenidos || '-'}`
+    ))
+    return {
+      unitName: unit.nombre || '',
+      previousUnitsText: previousUnits.length > 0 ? previousUnits.join('\n\n') : ''
+    }
   }
 
   const runAiForField = async ({ target, currentValue, label }) => {
@@ -429,13 +1002,30 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         'No usar infinitivo (terminaciones -ar, -er, -ir).'
       ].join(' ')
 
+      const unitContext = target?.type === 'unidad' ? getUnitContext(target.id) : { unitName: '', previousUnitsText: '' }
+      const baseContext = [
+        `Carrera: ${formData.carrera}`,
+        `Asignatura: ${formData.asignatura}`,
+        `Ano en la carrera: ${formData.ciclo}`,
+        `Cuatrimestre: ${formData.cuatrimestre}`
+      ].join('\n')
+      const isMethodologyField = target?.field === 'metodologia'
+      const isEvaluationField = target?.field === 'evaluacion'
       const prompt = hasContent
         ? (target?.type === 'ra'
           ? `${raRules}\n\nReformula el siguiente RA manteniendo el sentido.\nDevuelve solo el RA reformulado, sin encabezados ni explicaciones:\n${currentValue}`
-          : currentValue)
+          : (target?.type === 'unidad'
+            ? `Reformula los contenidos de la unidad "${unitContext.unitName}" manteniendo el sentido y coherencia con las unidades anteriores.\n\nContexto:\nCarrera: ${formData.carrera}\nAsignatura: ${formData.asignatura}\nContenidos minimos: ${formData.contenidosMin}\n${unitContext.previousUnitsText ? `\nUnidades anteriores:\n${unitContext.previousUnitsText}` : ''}\n\nRequisitos:\n- Devuelve solo los contenidos reformulados.\n- Sin titulos ni bibliografia.`
+            : (isMethodologyField
+              ? buildMethodologyPrompt({ baseContext, raText: getRaContextText(), mode: 'reformulate', currentValue })
+              : (isEvaluationField
+                ? buildEvaluationPrompt({ baseContext, mode: 'reformulate', currentValue })
+                : currentValue))))
         : (target?.type === 'ra'
           ? `Genera un resultado de aprendizaje para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${formData.competenciasGen}\nCompetencias especificas: ${formData.competenciasEsp}\n\n${raRules}\n\nRequisitos:\n- Un solo RA.\n- Solo el texto del RA.\n- Sin titulos ni encabezados.`
-          : buildAiPrompt(label || target.field || 'contenido', target))
+          : (target?.type === 'unidad'
+            ? `Escribe los contenidos de la unidad "${unitContext.unitName}" en funcion de los contenidos minimos y manteniendo coherencia con las unidades anteriores.\n\nContexto:\nCarrera: ${formData.carrera}\nAsignatura: ${formData.asignatura}\nContenidos minimos: ${formData.contenidosMin}\n${unitContext.previousUnitsText ? `\nUnidades anteriores:\n${unitContext.previousUnitsText}` : ''}\n\nRequisitos:\n- Devuelve solo los contenidos.\n- Sin titulos ni bibliografia.`
+            : buildAiPrompt(label || target.field || 'contenido', target)))
       const res = await fetch(`http://localhost:8001/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -476,6 +1066,8 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       updateFormData(comparisonTarget.field, comparisonData.reformulated)
     } else if (comparisonTarget.type === 'ra') {
       updateRA(comparisonTarget.id, comparisonTarget.field, comparisonData.reformulated)
+    } else if (comparisonTarget.type === 'unidad') {
+      updateUnidad(comparisonTarget.id, comparisonTarget.field, comparisonData.reformulated)
     } else if (comparisonTarget.type === 'tp') {
       updateTP(comparisonTarget.id, comparisonTarget.field, comparisonData.reformulated)
     }
@@ -489,6 +1081,471 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     setComparisonTarget(null)
   }
 
+  const openUnitBibliografiaModal = () => {
+    const fallbackFromForm = parseBibliographySection(formData.bibliografia)
+    setUnitBibliografiaDraft({
+      basica: unitBibliografiaRef.basica || fallbackFromForm.basica || '',
+      complementaria: unitBibliografiaRef.complementaria || fallbackFromForm.complementaria || '',
+      preferencia: unitBibliografiaRef.preferencia || ''
+    })
+    setShowUnitBibliografiaModal(true)
+  }
+
+  const parseBibliographySection = (text) => {
+    if (!text || typeof text !== 'string') {
+      return { basica: '', complementaria: '' }
+    }
+    const cleaned = text.trim()
+    const basicaMatch = cleaned.match(/Bibliograf[ií]a\s*basica\s*\(APA\)?:?\s*([\s\S]*?)(Bibliograf[ií]a\s*complementaria|$)/i)
+    const complementariaMatch = cleaned.match(/Bibliograf[ií]a\s*complementaria\s*\(APA\)?:?\s*([\s\S]*?)$/i)
+    const basica = normalizeBibliographyLines(basicaMatch?.[1] || '')
+    const complementaria = normalizeBibliographyLines(complementariaMatch?.[1] || '')
+
+    if (!basica && !complementaria) {
+      return { basica: normalizeBibliographyLines(cleaned), complementaria: '' }
+    }
+
+    return { basica, complementaria }
+  }
+
+  const confirmUnitBibliografiaModal = async () => {
+    const basica = unitBibliografiaDraft.basica.trim()
+    const complementaria = unitBibliografiaDraft.complementaria.trim()
+    const preferencia = unitBibliografiaDraft.preferencia.trim()
+
+    if (!basica && !complementaria) {
+      setStatusMsg('Completa bibliografia basica o complementaria para generar unidades')
+      setStatusType('info')
+      return
+    }
+
+    setUnitBibliografiaRef({ basica, complementaria, preferencia })
+    setShowUnitBibliografiaModal(false)
+    await generateUnitsFromContents({ basica, complementaria, preferencia })
+  }
+
+  const cancelUnitBibliografiaModal = () => {
+    setShowUnitBibliografiaModal(false)
+  }
+
+  const handleGenerateUnitsClick = () => {
+    if (!isNonEmptyText(formData.contenidosMin)) {
+      setStatusMsg('Completa Contenidos Minimos antes de generar unidades')
+      setStatusType('info')
+      return
+    }
+    if (!isNonEmptyText(formData.carrera) || !isNonEmptyText(formData.asignatura)) {
+      setStatusMsg('Completa Carrera y Asignatura antes de generar unidades')
+      setStatusType('info')
+      return
+    }
+    openUnitBibliografiaModal()
+  }
+
+  const openTpCommentModal = () => {
+    setTpCommentDraft(tpCommentRef || '')
+    setShowTpCommentModal(true)
+  }
+
+  const confirmTpCommentModal = async () => {
+    const trimmed = tpCommentDraft.trim()
+    setTpCommentRef(trimmed)
+    setShowTpCommentModal(false)
+    await generatePracticalsFromUnits(trimmed)
+  }
+
+  const cancelTpCommentModal = () => {
+    setShowTpCommentModal(false)
+  }
+
+  const handleGeneratePracticalsClick = () => {
+    if (!isNonEmptyText(formData.carrera) || !isNonEmptyText(formData.asignatura)) {
+      setStatusMsg('Completa Carrera y Asignatura antes de generar TP')
+      setStatusType('info')
+      return
+    }
+    if (formData.unidades.length === 0) {
+      setStatusMsg('Carga o genera unidades antes de generar TP')
+      setStatusType('info')
+      return
+    }
+    if (formData.resultadosAprendizaje.length === 0) {
+      setStatusMsg('Carga resultados de aprendizaje antes de generar TP')
+      setStatusType('info')
+      return
+    }
+    openTpCommentModal()
+  }
+
+  const parseBibliographyListFromText = (text) => {
+    if (!text || typeof text !== 'string') {
+      return null
+    }
+    const cleaned = stripCodeFences(text)
+    try {
+      const parsed = JSON.parse(cleaned)
+      const items = parsed.items || parsed.bibliografia || parsed.bibliography || parsed
+      return normalizeBibliographyValue(items)
+    } catch (err) {
+      return null
+    }
+  }
+
+  const formatBibliographyApaList = async (label, bibliographyRef) => {
+    if (!isNonEmptyText(bibliographyRef)) {
+      return ''
+    }
+
+    const prompt = `Convierte la siguiente bibliografia ${label} a normas APA.\n\nBibliografia:\n${bibliographyRef}\n\nRequisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {"items":"..."}\n- Una referencia por linea.\n- No inventes referencias nuevas.`
+
+    try {
+      const res = await fetch('http://localhost:8001/ai-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      })
+      if (!res.ok) {
+        return null
+      }
+      const data = await res.json()
+      if (data.status !== 'success') {
+        return null
+      }
+      const parsed = parseBibliographyListFromText(data.content)
+      if (!parsed) {
+        return null
+      }
+
+      return normalizeBibliographyLines(parsed)
+    } catch (err) {
+      return null
+    }
+  }
+
+  const generateUnitsFromContents = async (bibliographyData) => {
+    if (!isNonEmptyText(formData.contenidosMin)) {
+      setStatusMsg('Completa Contenidos Minimos antes de generar unidades')
+      setStatusType('info')
+      return
+    }
+    if (!isNonEmptyText(formData.carrera) || !isNonEmptyText(formData.asignatura)) {
+      setStatusMsg('Completa Carrera y Asignatura antes de generar unidades')
+      setStatusType('info')
+      return
+    }
+
+    const count = Math.max(1, Math.min(12, parseInt(unitBatchCount, 10) || 1))
+    if (formData.unidades.length > 0) {
+      const confirmReplace = window.confirm('Ya existen unidades cargadas. Deseas reemplazarlas por las generadas con IA?')
+      if (!confirmReplace) {
+        return
+      }
+    }
+
+    const basicaInput = normalizeBibliographyLines(bibliographyData?.basica || '')
+    const complementariaInput = normalizeBibliographyLines(bibliographyData?.complementaria || '')
+    const preferenciaInput = String(bibliographyData?.preferencia || '').trim()
+
+    if (!isNonEmptyText(basicaInput) && !isNonEmptyText(complementariaInput)) {
+      setStatusMsg('Se requiere bibliografia de referencia para generar unidades')
+      setStatusType('info')
+      return
+    }
+
+    setAiError('')
+    setAiLoading(true)
+    const debugSteps = []
+    const debugAt = new Date().toISOString()
+    const pushDebug = (step) => {
+      debugSteps.push(step)
+      setUnitDebug({ at: debugAt, steps: [...debugSteps] })
+    }
+    setAiSection('Unidades - nombres')
+    try {
+      const basicaApa = await formatBibliographyApaList('basica', basicaInput)
+      const complementariaApa = await formatBibliographyApaList('complementaria', complementariaInput)
+      const basicaFinal = normalizeBibliographyValue(basicaApa || basicaInput)
+      const complementariaFinal = normalizeBibliographyValue(complementariaApa || complementariaInput)
+      const bibliographyForUnits = `Basica (APA):\n${basicaFinal}\n\nComplementaria (APA):\n${complementariaFinal}`
+      const basicaLines = normalizeBibliographyLines(basicaFinal)
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+      const complementariaLines = normalizeBibliographyLines(complementariaFinal)
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+
+      setFormData(prev => ({
+        ...prev,
+        bibliografia: `Bibliografia basica (APA):\n${basicaFinal}\n\nBibliografia complementaria (APA):\n${complementariaFinal}`
+      }))
+      setIsDirty(true)
+
+      const namesPrompt = `Genera ${count} nombres de unidades para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nContenidos minimos (debes distribuirlos sin repetir):\n${formData.contenidosMin}\n\nRequisitos de salida:\n- Devuelve solo una lista con ${count} items.\n- Un nombre por linea.\n- Sin JSON, sin encabezados.`
+
+      const namesRes = await fetch('http://localhost:8001/ai-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: namesPrompt })
+      })
+      if (!namesRes.ok) {
+        const errorData = await namesRes.json().catch(() => ({ detail: 'Error desconocido' }))
+        pushDebug({ label: 'Nombres de unidades', prompt: namesPrompt, response: JSON.stringify(errorData, null, 2), cleaned: '' })
+        throw new Error(errorData.detail || `Error ${namesRes.status}`)
+      }
+      const namesData = await namesRes.json()
+      if (namesData.status !== 'success') {
+        pushDebug({ label: 'Nombres de unidades', prompt: namesPrompt, response: JSON.stringify(namesData, null, 2), cleaned: '' })
+        throw new Error(namesData.detail || 'Respuesta invalida del servidor')
+      }
+
+      const namesCleaned = sanitizeAiOutput(namesData.content)
+      pushDebug({
+        label: 'Nombres de unidades',
+        prompt: namesPrompt,
+        response: typeof namesData.content === 'string' ? namesData.content : JSON.stringify(namesData.content, null, 2),
+        cleaned: namesCleaned
+      })
+
+      let unitNames = parseUnitNamesFromText(namesCleaned, count)
+      if (unitNames.length < count) {
+        const missing = count - unitNames.length
+        const placeholders = Array.from({ length: missing }, (_, idx) => `Unidad ${unitNames.length + idx + 1}`)
+        unitNames = [...unitNames, ...placeholders]
+        setStatusMsg(`Solo se recibieron ${count - missing} nombres. Se completaron ${missing} con placeholders.`)
+        setStatusType('info')
+      }
+
+      const generatedUnits = []
+      const suspiciousUnits = []
+      for (let i = 0; i < unitNames.length; i += 1) {
+        const unitName = unitNames[i]
+        const previousUnits = generatedUnits.map((u, idx) => (
+          `Unidad ${idx + 1}: ${u.nombre}\nContenidos: ${u.contenidos || '-'}`
+        )).join('\n\n')
+        const unitPrompt = `Escribe los contenidos y bibliografia de la unidad "${unitName}" en funcion de los contenidos minimos y manteniendo coherencia con las unidades anteriores.\n\nContenidos minimos (debes distribuirlos sin repetir):\n${formData.contenidosMin}\n\nBibliografia de referencia (usa y asigna en basica y complementaria para la unidad, en APA):\n${bibliographyForUnits}\n\n${preferenciaInput ? `Preferencias del docente para el orden/énfasis:\n${preferenciaInput}\n\n` : ''}${previousUnits ? `Unidades anteriores:\n${previousUnits}\n\n` : ''}Requisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {"nombre":"...","contenidos":"...","bibBasica":"...","bibCompl":"..."}.\n- Incluye al menos 2 referencias en bibBasica y 1 en bibCompl.\n- No inventes referencias nuevas, solo usa las provistas.\n- No mezcles ni cambies la categoria basica/complementaria.\n- Sin encabezados.`
+
+        setAiSection(`Unidad ${i + 1}/${unitNames.length}`)
+        const unitRes = await fetch('http://localhost:8001/ai-generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: unitPrompt })
+        })
+        if (!unitRes.ok) {
+          const errorData = await unitRes.json().catch(() => ({ detail: 'Error desconocido' }))
+          pushDebug({ label: `Unidad ${i + 1}`, prompt: unitPrompt, response: JSON.stringify(errorData, null, 2), cleaned: '' })
+          throw new Error(errorData.detail || `Error ${unitRes.status}`)
+        }
+        const unitData = await unitRes.json()
+        if (unitData.status !== 'success') {
+          pushDebug({ label: `Unidad ${i + 1}`, prompt: unitPrompt, response: JSON.stringify(unitData, null, 2), cleaned: '' })
+          throw new Error(unitData.detail || 'Respuesta invalida del servidor')
+        }
+        const unitCleaned = sanitizeAiOutput(unitData.content)
+        pushDebug({
+          label: `Unidad ${i + 1}`,
+          prompt: unitPrompt,
+          response: typeof unitData.content === 'string' ? unitData.content : JSON.stringify(unitData.content, null, 2),
+          cleaned: unitCleaned
+        })
+        let parsedUnit = parseSingleUnitFromText(unitCleaned, unitName) || {
+          nombre: unitName,
+          contenidos: unitCleaned,
+          bibBasica: '',
+          bibCompl: ''
+        }
+        if (parsedUnit?.contenidos && typeof parsedUnit.contenidos === 'string') {
+          const contentText = parsedUnit.contenidos
+          const looksLikeJson = contentText.includes('"nombre"') && contentText.includes('"bibBasica"')
+          if (looksLikeJson) {
+            const reparsed = parseSingleUnitFromText(contentText, parsedUnit.nombre || unitName)
+            if (reparsed && isNonEmptyText(reparsed.contenidos)) {
+              parsedUnit = {
+                ...parsedUnit,
+                ...reparsed
+              }
+            }
+          }
+        }
+        const bibBasicaFinal = isNonEmptyText(parsedUnit.bibBasica)
+          ? normalizeBibliographyLines(parsedUnit.bibBasica)
+          : basicaLines.slice(i * 2, i * 2 + 2).join('\n')
+        const bibComplFinal = isNonEmptyText(parsedUnit.bibCompl)
+          ? normalizeBibliographyLines(parsedUnit.bibCompl)
+          : complementariaLines.slice(i, i + 1).join('\n')
+        generatedUnits.push({
+          id: Date.now() + i,
+          nombre: parsedUnit.nombre || unitName,
+          contenidos: parsedUnit.contenidos || '',
+          bibBasica: bibBasicaFinal,
+          bibCompl: bibComplFinal
+        })
+        if (parsedUnit?.contenidos && typeof parsedUnit.contenidos === 'string') {
+          const contentText = parsedUnit.contenidos
+          const looksLikeJson = contentText.trim().startsWith('{') && contentText.includes('"bibBasica"')
+          if (looksLikeJson) {
+            suspiciousUnits.push(i + 1)
+          }
+        }
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        unidades: generatedUnits
+      }))
+      setIsDirty(true)
+      if (suspiciousUnits.length > 0) {
+        setStatusMsg(`Se generaron ${generatedUnits.length} unidades, pero revisa las unidades: ${suspiciousUnits.join(', ')}`)
+        setStatusType('info')
+      } else {
+        setStatusMsg(`Se generaron ${generatedUnits.length} unidades`)
+        setStatusType('success')
+      }
+    } catch (err) {
+      const errorMsg = `Error al generar unidades con IA: ${err.message}`
+      setStatusMsg(errorMsg)
+      setStatusType('error')
+      setAiError(errorMsg)
+    } finally {
+      setAiLoading(false)
+      setAiSection(null)
+    }
+  }
+
+  const generatePracticalsFromUnits = async (tpComment = '') => {
+    const count = Math.max(1, Math.min(12, parseInt(tpBatchCount, 10) || 1))
+    if (formData.trabajosPracticos.length > 0) {
+      const confirmReplace = window.confirm('Ya existen trabajos practicos cargados. Deseas reemplazarlos por los generados con IA?')
+      if (!confirmReplace) {
+        return
+      }
+    }
+
+    const raList = formData.resultadosAprendizaje
+      .map((ra, idx) => `RA ${idx + 1}: ${ra.descripcion || ra.verbo || ''}`)
+      .filter(line => isNonEmptyText(line))
+      .join('\n')
+
+    const allRaIds = (formData.resultadosAprendizaje || []).map(ra => ra.id)
+
+    const unitsList = formData.unidades
+      .map((u, idx) => `Unidad ${idx + 1}: ${u.nombre || 'Sin nombre'}\nContenidos: ${u.contenidos || '-'}`)
+      .join('\n\n')
+    setAiError('')
+    setAiLoading(true)
+    setAiSection('TP - nombres')
+    try {
+      const namesPrompt = `Genera ${count} nombres de trabajos practicos para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nUnidades desarrolladas:\n${unitsList}\n\nResultados de aprendizaje:\n${raList}\n\n${tpComment ? `Comentario del docente (obligatorio, debes seguirlo):\n${tpComment}\n\n` : ''}Requisitos de salida:\n- Devuelve solo una lista con ${count} items.\n- Un nombre por linea.\n- Sin JSON, sin encabezados.\n- Los nombres deben reflejar el comentario del docente.`
+
+      const namesRes = await fetch('http://localhost:8001/ai-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: namesPrompt })
+      })
+      if (!namesRes.ok) {
+        const errorData = await namesRes.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${namesRes.status}`)
+      }
+      const namesData = await namesRes.json()
+      if (namesData.status !== 'success') {
+        throw new Error(namesData.detail || 'Respuesta invalida del servidor')
+      }
+
+      const namesCleaned = sanitizeAiOutput(namesData.content)
+      let tpNames = parseTpNamesFromText(namesCleaned, count)
+      if (tpNames.length < count) {
+        const missing = count - tpNames.length
+        const placeholders = Array.from({ length: missing }, (_, idx) => `Trabajo Practico ${tpNames.length + idx + 1}`)
+        tpNames = [...tpNames, ...placeholders]
+        setStatusMsg(`Solo se recibieron ${count - missing} nombres. Se completaron ${missing} con placeholders.`)
+        setStatusType('info')
+      }
+
+      const generated = []
+      for (let i = 0; i < tpNames.length; i += 1) {
+        const tpNumber = i + 1
+        const tpName = tpNames[i]
+        const previousTps = generated.map(tp => `TP ${tp.numero || ''}: ${tp.nombre || 'Sin nombre'}`).join('\n')
+        const tpPrompt = `Genera el Trabajo Practico ${tpNumber} ("${tpName}") para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nUnidades desarrolladas:\n${unitsList}\n\nResultados de aprendizaje (deben cubrirse sin modificar el texto):\n${raList}\n\n${tpComment ? `Comentario del docente (obligatorio, debes seguirlo):\n${tpComment}\n\n` : ''}${previousTps ? `TP anteriores:\n${previousTps}\n\n` : ''}Requisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {\"numero\":\"${tpNumber}\",\"nombre\":\"${tpName}\",\"objetivo\":\"...\",\"actividades\":\"...\",\"materiales\":\"...\",\"raIndices\":[1,2]}.\n- El objetivo debe incluir literalmente los RA usados (sin cambiarlos).\n- Actividades deben cubrir el objetivo y respetar el comentario del docente.\n- Materiales en lista separada por lineas.\n- raIndices debe contener los numeros de RA usados.\n- No incluyas ambito.`
+
+        setAiSection(`TP ${tpNumber}/${tpNames.length}`)
+        const tpRes = await fetch('http://localhost:8001/ai-generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: tpPrompt })
+        })
+        if (!tpRes.ok) {
+          const errorData = await tpRes.json().catch(() => ({ detail: 'Error desconocido' }))
+          throw new Error(errorData.detail || `Error ${tpRes.status}`)
+        }
+        const tpData = await tpRes.json()
+        if (tpData.status !== 'success') {
+          throw new Error(tpData.detail || 'Respuesta invalida del servidor')
+        }
+        const tpCleaned = sanitizeAiOutput(tpData.content)
+        const parsedTp = parseSinglePracticalFromText(tpCleaned, tpName) || {
+          numero: String(tpNumber),
+          nombre: tpName,
+          objetivo: tpCleaned,
+          actividades: '',
+          materiales: ''
+        }
+        let actividades = parsedTp.actividades || ''
+        let materiales = parsedTp.materiales || ''
+        if (!isNonEmptyText(actividades) || !isNonEmptyText(materiales)) {
+          const fillPrompt = `Completa actividades y materiales para el TP ${tpNumber} sin cambiar el objetivo.\n\nObjetivo:\n${parsedTp.objetivo}\n\nRequisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {\"actividades\":\"...\",\"materiales\":\"...\"}.\n- Materiales en lista separada por lineas.`
+          const fillRes = await fetch('http://localhost:8001/ai-generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: fillPrompt })
+          })
+          if (fillRes.ok) {
+            const fillData = await fillRes.json().catch(() => null)
+            if (fillData && fillData.status === 'success') {
+              const fillCleaned = sanitizeAiOutput(fillData.content)
+              const fillParsed = parseSinglePracticalFromText(fillCleaned, tpName)
+              actividades = actividades || fillParsed?.actividades || ''
+              materiales = materiales || fillParsed?.materiales || ''
+            }
+          }
+        }
+        const raIndices = Array.isArray(parsedTp.raIndices) ? parsedTp.raIndices : []
+        const selectedRaIds = raIndices.length > 0
+          ? raIndices
+            .map((idx) => formData.resultadosAprendizaje[idx - 1]?.id)
+            .filter(Boolean)
+          : allRaIds
+        generated.push({
+          id: Date.now() + i,
+          numero: parsedTp.numero || String(tpNumber),
+          nombre: parsedTp.nombre || tpName,
+          raIds: selectedRaIds,
+          objetivo: parsedTp.objetivo || '',
+          actividades,
+          materiales,
+          ambito: ''
+        })
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        trabajosPracticos: generated
+      }))
+      setIsDirty(true)
+      setStatusMsg(`Se generaron ${generated.length} trabajos practicos`)
+      setStatusType('success')
+    } catch (err) {
+      const errorMsg = `Error al generar TP con IA: ${err.message}`
+      setStatusMsg(errorMsg)
+      setStatusType('error')
+      setAiError(errorMsg)
+    } finally {
+      setAiLoading(false)
+      setAiSection(null)
+    }
+  }
+
   const saveProposal = async ({ silent = false } = {}) => {
     const isEditing = !!editingProposalId
     // Validate required fields: carrera and asignatura only
@@ -500,21 +1557,16 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       return
     }
 
-    if (!isEditing && !isProposalReadyToCreate()) {
-      if (!silent) {
-        setStatusMsg('Completa todos los campos antes de crear la propuesta')
-        setStatusType('error')
-      }
-      return
-    }
-
     if (isSaving) {
       return
     }
 
-    const computedStatus = editingProposalStatus === 'Importada'
-      ? 'Importada'
-      : ((isEditing ? isFormComplete() : isProposalReadyToCreate()) ? 'Creada' : 'EnProceso')
+    // Status logic: preserve "Creada" and "Importada", only compute for new or "EnProceso"
+    const computedStatus = isEditing
+      ? (editingProposalStatus === 'Importada' || editingProposalStatus === 'Creada'
+          ? editingProposalStatus
+          : (isProposalReadyToCreate() ? 'Creada' : 'EnProceso'))
+      : (isProposalReadyToCreate() ? 'Creada' : 'EnProceso')
 
     const payload = {
       title: formData.asignatura,
@@ -538,7 +1590,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       learning_outcomes: (formData.resultadosAprendizaje || []).map(ra => ({
         id: ra.id,
         description: ra.descripcion || '',
-        observable_verb: ra.verbo || ''
+        observable_verb: ''
       })),
       units: (formData.unidades || []).map(u => ({
         id: u.id,
@@ -549,8 +1601,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       })),
       practicals: (formData.trabajosPracticos || []).map(tp => ({
         id: tp.id,
+        number: tp.numero || '',
         name: tp.nombre || '',
-        objective: tp.objetivo || '',
+        objective: getTpObjectiveFromRaIds(tp.raIds) || tp.objetivo || '',
         activities: tp.actividades || '',
         materials: tp.materiales || '',
         scope: tp.ambito || ''
@@ -583,23 +1636,19 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
       const data = await res.json()
       if (!silent) {
-        setStatusMsg(isEditing ? `Propuesta actualizada - ID: ${data.id}` : 'Propuesta creada - ID: ' + data.id)
+        setStatusMsg(isEditing ? `Propuesta actualizada - ID: ${data.id}` : 'Borrador guardado - ID: ' + data.id)
         setStatusType('success')
       } else {
         setStatusMsg('Guardado automatico')
         setStatusType('info')
       }
       if (!isEditing) {
-        setEditingProposalStatus(null)
-        // Reset form
-        setFormData({
-          carrera: '', asignatura: '', cuatrimestre: '', plan: '', anio: '', ciclo: '',
-          caracter: 'Obligatoria', regimen: 'Cuatrimestral', hsTeo: '', hsPrac: '', contenidosMin: '',
-          competenciasGen: '', competenciasEsp: '', fundamentosP1: '', fundamentosP2: '',
-          resultadosAprendizaje: [], unidades: [], trabajosPracticos: [], metodologia: '',
-          evaluacion: '', bibliografia: '', observaciones: ''
-        })
-        setEquipoDocente([{ id: 1, nombre: '', categoria: 'TITULAR', correo: '' }])
+        // Instead of resetting, switch to edit mode for the newly created proposal
+        setEditingProposalId(data.id)
+        setEditingProposalStatus(data.status)
+      } else {
+        // Update status when editing to reflect the saved status
+        setEditingProposalStatus(data.status)
       }
       // Reload proposals list
       fetchProposals()
@@ -652,6 +1701,19 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
       const data = await res.json()
+      const loadedRaList = (data.learning_outcomes || []).map((ra, idx) => ({
+        id: ra.id ?? Date.now() + idx,
+        descripcion: ra.description || ''
+      }))
+      const inferRaIdsFromObjectiveText = (objectiveText) => {
+        if (!objectiveText || typeof objectiveText !== 'string') {
+          return []
+        }
+        const text = objectiveText.toLowerCase()
+        return loadedRaList
+          .filter((ra) => ra.descripcion && text.includes(ra.descripcion.toLowerCase()))
+          .map((ra) => ra.id)
+      }
       setFormData({
         carrera: data.career || '',
         asignatura: data.subject || data.title || '',
@@ -668,10 +1730,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         competenciasEsp: data.specific_competencies || '',
         fundamentosP1: data.fundamentals_part1 || '',
         fundamentosP2: data.fundamentals_part2 || '',
-        resultadosAprendizaje: (data.learning_outcomes || []).map((ra, idx) => ({
-          id: ra.id ?? Date.now() + idx,
-          descripcion: ra.description || ''
-        })),
+        resultadosAprendizaje: loadedRaList,
         unidades: (data.units || []).map((u, idx) => ({
           id: u.id ?? Date.now() + idx,
           nombre: u.name || '',
@@ -681,7 +1740,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         })),
         trabajosPracticos: (data.practicals || []).map((tp, idx) => ({
           id: tp.id ?? Date.now() + idx,
+          numero: tp.number || tp.numero || String(idx + 1),
           nombre: tp.name || '',
+          raIds: inferRaIdsFromObjectiveText(tp.objective || ''),
           objetivo: tp.objective || '',
           actividades: tp.activities || '',
           materiales: tp.materials || '',
@@ -749,6 +1810,161 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     }
   }
 
+  const downloadProposalDocx = async (proposalId) => {
+    try {
+      setStatusMsg('Generando documento...')
+      setStatusType('info')
+      
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/docx`)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      
+      // Extract filename from Content-Disposition header
+      const disposition = res.headers.get('Content-Disposition')
+      let filename = `Propuesta_${proposalId}.docx` // default fallback
+      if (disposition && disposition.includes('filename*=utf-8\'\'')) {
+        const filenameMatch = disposition.match(/filename\*=utf-8''(.+)/)
+        if (filenameMatch && filenameMatch[1]) {
+          filename = decodeURIComponent(filenameMatch[1])
+        }
+      } else if (disposition && disposition.includes('filename=')) {
+        const filenameMatch = disposition.match(/filename="?(.+?)"?$/)
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1]
+        }
+      }
+      
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      setStatusMsg(`Propuesta #${proposalId} descargada`)
+      setStatusType('success')
+    } catch (err) {
+      const msg = err.message === 'Failed to fetch' 
+        ? 'No hay conexión con el Backend (8001)' 
+        : err.message
+      setStatusMsg('Error al descargar: ' + msg)
+      setStatusType('error')
+      console.error('Download error:', err)
+    }
+  }
+
+  const handleImportDocxFile = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    
+    setImportFile(file)
+    setImportLoading(true)
+    setImportError('')
+    setImportPreview(null)
+    
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      
+      const res = await fetch('http://localhost:8001/proposals/import-docx', {
+        method: 'POST',
+        body: formData,
+      })
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      
+      const result = await res.json()
+      if (result.success) {
+        setImportPreview(result)
+        setStatusMsg('Archivo importado exitosamente')
+        setStatusType('success')
+      } else {
+        throw new Error(result.error || 'Error desconocido')
+      }
+    } catch (err) {
+      const msg = err.message === 'Failed to fetch' 
+        ? 'No hay conexión con el Backend (8001)' 
+        : err.message
+      setImportError('Error al importar: ' + msg)
+      setStatusMsg(setImportError)
+      setStatusType('error')
+      console.error('Import error:', err)
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  const handleLoadImportedProposal = () => {
+    if (!importPreview?.data) return
+    
+    const data = importPreview.data
+    // Mapear datos extraídos al formulario
+    setFormData({
+      carrera: data.career || '',
+      asignatura: data.subject || '',
+      plan: data.plan || '',
+      anio: data.year_of_career || '',
+      ciclo: '',
+      cuatrimestre: data.quarter || '',
+      caracter: 'Obligatoria',
+      regimen: data.regime || 'Cuatrimestral',
+      hsTeo: parseInt(data.hours) || 0,
+      hsPrac: 0,
+      contenidosMin: data.contenidos_minimos || '',
+      competenciasGen: data.importance || '',
+      competenciasEsp: '',
+      fundamentosP1: data.fundamentals || '',
+      fundamentosP2: '',
+      resultadosAprendizaje: data.learning_outcomes?.map((ra, idx) => ({
+        id: idx + 1,
+        descripcion: ra
+      })) || [],
+      unidades: data.units?.map((unit, idx) => ({
+        id: idx + 1,
+        nombre: unit.name || '',
+        contenidos: unit.content || '',
+        bibBasica: unit.bibliography_basic || '',
+        bibCompl: unit.bibliography_complementary || ''
+      })) || [],
+      trabajosPracticos: data.practicals?.map((tp, idx) => ({
+        id: idx + 1,
+        nombre: tp.name || '',
+        raIds: [],
+        objetivo: tp.objective || '',
+        actividades: tp.activities || '',
+        materiales: tp.materials || '',
+        ambito: tp.scope || ''
+      })) || [],
+      metodologia: data.methodology || '',
+      evaluacion: data.evaluation || '',
+      bibliografia: data.bibliography_complementary_apa || '',
+      observaciones: data.observations || ''
+    })
+    
+    // Cargar equipo docente
+    if (data.teachers) {
+      setEquipoDocente([{
+        id: 1,
+        nombre: data.teachers.toUpperCase(),
+        categoria: 'TITULAR',
+        correo: ''
+      }])
+    }
+    
+    setProposalsMode('create')
+    setImportPreview(null)
+    setImportFile(null)
+    setStatusMsg('Propuesta cargada en el formulario')
+    setStatusType('success')
+  }
+
   const styles = {
     container: { display: 'flex', height: '100vh', fontFamily: 'Segoe UI, Arial' },
     sidebar: { width: '220px', background: '#e8f4f8', color: '#333', padding: '20px', overflowY: 'auto' },
@@ -759,11 +1975,21 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     section: { background: '#fff', margin: '15px 20px', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' },
     label: { display: 'block', fontWeight: '600', marginTop: '12px', marginBottom: '5px', color: '#1a3d5c' },
     input: { width: '100%', padding: '8px', marginBottom: '10px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' },
-    textarea: { width: '100%', padding: '8px', marginBottom: '10px', border: '1px solid #ddd', borderRadius: '4px', minHeight: '80px', boxSizing: 'border-box', fontFamily: 'Segoe UI' },
+    textarea: { width: '100%', padding: '8px', marginBottom: '10px', border: '1px solid #ddd', borderRadius: '4px', minHeight: '110px', boxSizing: 'border-box', fontFamily: 'Segoe UI', resize: 'vertical', overflow: 'hidden' },
     button: { padding: '10px 20px', background: '#006ba8', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' },
     buttonDisabled: { opacity: 0.5, cursor: 'not-allowed' },
     readonlyField: { background: '#f0f0f0', cursor: 'not-allowed' },
-    status: { padding: '12px', margin: '10px 20px', borderRadius: '4px', color: '#fff' },
+    statusToast: {
+      position: 'fixed',
+      right: '20px',
+      top: '20px',
+      padding: '12px 16px',
+      borderRadius: '4px',
+      color: '#fff',
+      zIndex: 1000,
+      maxWidth: '420px',
+      boxShadow: '0 8px 18px rgba(0,0,0,0.2)'
+    },
     statusError: { background: '#d32f2f' },
     statusSuccess: { background: '#388e3c' },
     statusInfo: { background: '#1976d2' }
@@ -778,13 +2004,11 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       {label}
     </button>
   )
-
-  // AI Button Component
-  const AIButton = ({ onClick, hasContent, disabled, tooltip }) => {
+  const AIButton = ({ onClick, hasContent, disabled, tooltip, fullWidth = false }) => {
     const title = disabled ? tooltip : (hasContent ? 'Reformular con IA' : 'Escribir con IA')
     return (
       <button
-        style={{ ...styles.button, ...(disabled && styles.buttonDisabled) }}
+        style={{ ...styles.button, ...(disabled && styles.buttonDisabled), ...(fullWidth && { width: '100%', marginRight: 0, flex: 1 }) }}
         onClick={onClick}
         disabled={disabled}
         title={title}
@@ -795,6 +2019,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
   }
 
   const canCreateProposal = isProposalReadyToCreate()
+  const canSaveDraft = !!formData.carrera && !!formData.asignatura
   const canSaveEdits = !!formData.carrera && !!formData.asignatura
 
   return (
@@ -821,7 +2046,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       {/* Main Content */}
       <div style={styles.main}>
         {statusMsg && (
-          <div style={{ ...styles.status, ...(statusType === 'error' && styles.statusError), ...(statusType === 'success' && styles.statusSuccess), ...(statusType === 'info' && styles.statusInfo) }}>
+          <div style={{ ...styles.statusToast, ...(statusType === 'error' && styles.statusError), ...(statusType === 'success' && styles.statusSuccess), ...(statusType === 'info' && styles.statusInfo) }}>
             {statusMsg}
           </div>
         )}
@@ -916,6 +2141,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                         <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Año Académico</th>
                         <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Año Carrera</th>
                         <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Cuatrimestre</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Estado</th>
                         <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>Acciones</th>
                       </tr>
                     </thead>
@@ -928,11 +2154,14 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                           <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
+                          <td style={{ padding: '10px' }}>{prop.status || '-'}</td>
                           <td style={{ padding: '10px', textAlign: 'center' }}>
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
                               onClick={() => openProposalView(prop.id)}>Ver</button>
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px', background: '#ff9900', color: 'white' }} 
                               onClick={() => loadProposalForEdit(prop.id)}>Editar</button>
+                            <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }}
+                              onClick={() => downloadProposalDocx(prop.id)}>Descargar</button>
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', color: 'white' }} 
                               onClick={() => deleteProposal(prop.id)}>Eliminar</button>
                           </td>
@@ -1069,24 +2298,24 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               {/* CONTENT SECTIONS */}
               <div style={styles.section}>
                 <h3>Contenidos Mínimos *</h3>
-                <textarea style={styles.textarea} value={formData.contenidosMin} onChange={(e) => updateFormData('contenidosMin', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.contenidosMin} onChange={(e) => updateFormData('contenidosMin', e.target.value)} />
               </div>
 
               <div style={styles.section}>
                 <h3>Competencias Genéricas *</h3>
-                <textarea style={styles.textarea} value={formData.competenciasGen} onChange={(e) => updateFormData('competenciasGen', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.competenciasGen} onChange={(e) => updateFormData('competenciasGen', e.target.value)} />
               </div>
 
               <div style={styles.section}>
                 <h3>Competencias Específicas *</h3>
-                <textarea style={styles.textarea} value={formData.competenciasEsp} onChange={(e) => updateFormData('competenciasEsp', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.competenciasEsp} onChange={(e) => updateFormData('competenciasEsp', e.target.value)} />
               </div>
 
               {/* FUNDAMENTALS */}
               <div style={styles.section}>
                 <h3>Fundamentos</h3>
                 <label style={styles.label}>Importancia (100-200 palabras)</label>
-                <textarea style={styles.textarea} value={formData.fundamentosP1} onChange={(e) => updateFormData('fundamentosP1', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.fundamentosP1} onChange={(e) => updateFormData('fundamentosP1', e.target.value)} />
                 <AIButton
                   onClick={() => runAiForField({
                     target: { type: 'form', field: 'fundamentosP1' },
@@ -1099,7 +2328,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 />
 
                 <label style={styles.label}>Perfil Profesional (100-200 palabras)</label>
-                <textarea style={styles.textarea} value={formData.fundamentosP2} onChange={(e) => updateFormData('fundamentosP2', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.fundamentosP2} onChange={(e) => updateFormData('fundamentosP2', e.target.value)} />
                 <AIButton
                   onClick={() => runAiForField({
                     target: { type: 'form', field: 'fundamentosP2' },
@@ -1130,18 +2359,30 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 {formData.resultadosAprendizaje.map((ra, idx) => (
                   <div key={ra.id} style={{ marginBottom: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
                     <div style={{ fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>RA {idx + 1}</div>
-                    <textarea style={styles.textarea} placeholder="Resultado de aprendizaje" value={ra.descripcion} onChange={(e) => updateRA(ra.id, 'descripcion', e.target.value)} />
-                    <AIButton
-                      onClick={() => runAiForField({
-                        target: { type: 'ra', id: ra.id, field: 'descripcion' },
-                        currentValue: ra.descripcion,
-                        label: 'Resultado de Aprendizaje'
-                      })}
-                      hasContent={!!ra.descripcion}
-                      disabled={!isFormComplete()}
-                      tooltip={isFormComplete() ? '' : 'Completa info general primero'}
-                    />
-                    <button style={{ ...styles.button, background: '#d32f2f' }} onClick={() => deleteRA(ra.id)}>Eliminar</button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'start' }}>
+                      <textarea
+                        style={{ ...styles.textarea, marginBottom: 0, minHeight: '60px' }}
+                        placeholder="Resultado de aprendizaje"
+                        data-autoresize="true"
+                        onInput={autoResizeTextarea}
+                        value={ra.descripcion}
+                        onChange={(e) => updateRA(ra.id, 'descripcion', e.target.value)}
+                      />
+                      <div style={{ display: 'flex', gap: '8px', minWidth: '240px' }}>
+                        <AIButton
+                          onClick={() => runAiForField({
+                            target: { type: 'ra', id: ra.id, field: 'descripcion' },
+                            currentValue: ra.descripcion,
+                            label: 'Resultado de Aprendizaje'
+                          })}
+                          hasContent={!!ra.descripcion}
+                          disabled={!isFormComplete()}
+                          tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                          fullWidth
+                        />
+                        <button style={{ ...styles.button, background: '#d32f2f', marginRight: 0, flex: 1 }} onClick={() => deleteRA(ra.id)}>Eliminar</button>
+                      </div>
+                    </div>
                   </div>
                 ))}
                 <button style={styles.button} onClick={addRA}>+ Agregar RA</button>
@@ -1150,12 +2391,82 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               {/* UNITS */}
               <div style={styles.section}>
                 <h3>Unidades de Contenido</h3>
-                {formData.unidades.map(u => (
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
+                  <label style={{ fontWeight: 600, color: '#1a3d5c' }}>Generar</label>
+                  <input
+                    style={{ ...styles.input, width: '80px', marginBottom: 0 }}
+                    type="number"
+                    min="1"
+                    max="12"
+                    value={unitBatchCount}
+                    onChange={(e) => setUnitBatchCount(e.target.value)}
+                  />
+                  <button style={styles.button} onClick={handleGenerateUnitsClick}>Generar Unidades con IA</button>
+                </div>
+                {unitDebug && (
+                  <details style={{ marginBottom: '12px', background: '#f3f6f8', padding: '10px', borderRadius: '6px' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#1a3d5c' }}>Debug IA - Unidades</summary>
+                    <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>Ultima ejecucion: {unitDebug.at}</div>
+                    {(unitDebug.steps || []).map((step, idx) => (
+                      <div key={`${step.label || 'Paso'}-${idx}`} style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #d9e1e6' }}>
+                        <div style={{ fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>{step.label || `Paso ${idx + 1}`}</div>
+                        <label style={{ ...styles.label, marginTop: '6px' }}>Prompt enviado</label>
+                        <textarea style={{ ...styles.textarea, minHeight: '120px' }} data-autoresize="true" onInput={autoResizeTextarea} value={step.prompt || ''} readOnly />
+                        <label style={{ ...styles.label, marginTop: '6px' }}>Respuesta recibida</label>
+                        <textarea style={{ ...styles.textarea, minHeight: '120px' }} data-autoresize="true" onInput={autoResizeTextarea} value={step.response || ''} readOnly />
+                        {step.cleaned ? (
+                          <>
+                            <label style={{ ...styles.label, marginTop: '6px' }}>Respuesta limpiada</label>
+                            <textarea style={{ ...styles.textarea, minHeight: '120px' }} data-autoresize="true" onInput={autoResizeTextarea} value={step.cleaned} readOnly />
+                          </>
+                        ) : null}
+                      </div>
+                    ))}
+                  </details>
+                )}
+                {formData.unidades.map((u, idx) => (
                   <div key={u.id} style={{ marginBottom: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Unidad {idx + 1}</div>
                     <input style={styles.input} placeholder="Nombre de la Unidad" value={u.nombre} onChange={(e) => updateUnidad(u.id, 'nombre', e.target.value)} />
-                    <textarea style={styles.textarea} placeholder="Contenidos" value={u.contenidos} onChange={(e) => updateUnidad(u.id, 'contenidos', e.target.value)} />
-                    <textarea style={styles.textarea} placeholder="Bibliografía Básica" value={u.bibBasica} onChange={(e) => updateUnidad(u.id, 'bibBasica', e.target.value)} />
-                    <textarea style={styles.textarea} placeholder="Bibliografía Complementaria" value={u.bibCompl} onChange={(e) => updateUnidad(u.id, 'bibCompl', e.target.value)} />
+                    <label style={styles.label}>Contenidos</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'start' }}>
+                      <textarea style={{ ...styles.textarea, marginBottom: 0 }} placeholder="Contenidos" data-autoresize="true" onInput={autoResizeTextarea} value={u.contenidos} onChange={(e) => updateUnidad(u.id, 'contenidos', e.target.value)} />
+                      <AIButton
+                        onClick={() => runAiForField({
+                          target: { type: 'unidad', id: u.id, field: 'contenidos' },
+                          currentValue: u.contenidos,
+                          label: 'Contenidos de la Unidad'
+                        })}
+                        hasContent={!!u.contenidos}
+                        disabled={!isNonEmptyText(u.nombre) || !isNonEmptyText(formData.contenidosMin)}
+                        tooltip={!isNonEmptyText(u.nombre) ? 'Completa el nombre de la unidad' : (!isNonEmptyText(formData.contenidosMin) ? 'Completa contenidos minimos primero' : '')}
+                        fullWidth
+                      />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      <div>
+                        <label style={styles.label}>Bibliografia Basica</label>
+                        <textarea
+                          style={{ ...styles.textarea, marginBottom: 0 }}
+                          placeholder="Bibliografia Basica"
+                          data-autoresize="true"
+                          onInput={autoResizeTextarea}
+                          value={u.bibBasica}
+                          onChange={(e) => updateUnidad(u.id, 'bibBasica', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label style={styles.label}>Bibliografia Complementaria</label>
+                        <textarea
+                          style={{ ...styles.textarea, marginBottom: 0 }}
+                          placeholder="Bibliografia Complementaria"
+                          data-autoresize="true"
+                          onInput={autoResizeTextarea}
+                          value={u.bibCompl}
+                          onChange={(e) => updateUnidad(u.id, 'bibCompl', e.target.value)}
+                        />
+                      </div>
+                    </div>
                     <button style={{ ...styles.button, background: '#d32f2f' }} onClick={() => deleteUnidad(u.id)}>Eliminar Unidad</button>
                   </div>
                 ))}
@@ -1165,23 +2476,50 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               {/* PRACTICALS */}
               <div style={styles.section}>
                 <h3>Trabajos Prácticos</h3>
-                {formData.trabajosPracticos.map(tp => (
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
+                  <label style={{ fontWeight: 600, color: '#1a3d5c' }}>Generar</label>
+                  <input
+                    style={{ ...styles.input, width: '80px', marginBottom: 0 }}
+                    type="number"
+                    min="1"
+                    max="12"
+                    value={tpBatchCount}
+                    onChange={(e) => setTpBatchCount(e.target.value)}
+                  />
+                  <button style={styles.button} onClick={handleGeneratePracticalsClick}>Generar TP con IA</button>
+                </div>
+                {formData.trabajosPracticos.map((tp, idx) => (
                   <div key={tp.id} style={{ marginBottom: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Trabajo Practico {tp.numero || idx + 1}</div>
                     <input style={styles.input} placeholder="Nombre del TP" value={tp.nombre} onChange={(e) => updateTP(tp.id, 'nombre', e.target.value)} />
-                    <textarea style={styles.textarea} placeholder="Objetivo" value={tp.objetivo} onChange={(e) => updateTP(tp.id, 'objetivo', e.target.value)} />
-                    <AIButton
-                      onClick={() => runAiForField({
-                        target: { type: 'tp', id: tp.id, field: 'objetivo' },
-                        currentValue: tp.objetivo,
-                        label: 'Objetivo del Trabajo Practico'
-                      })}
-                      hasContent={!!tp.objetivo}
-                      disabled={!isFormComplete()}
-                      tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                    <label style={styles.label}>Resultados de aprendizaje cubiertos</label>
+                    <div style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '8px', background: '#fff' }}>
+                      {formData.resultadosAprendizaje.length === 0 ? (
+                        <div style={{ color: '#888', fontSize: '13px' }}>No hay RA cargados</div>
+                      ) : (
+                        formData.resultadosAprendizaje.map((ra, raIdx) => (
+                          <label key={ra.id} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '13px', marginBottom: '6px' }}>
+                            <input
+                              type="checkbox"
+                              checked={Array.isArray(tp.raIds) && tp.raIds.includes(ra.id)}
+                              onChange={() => toggleTpRa(tp.id, ra.id)}
+                            />
+                            <span>RA {raIdx + 1}: {ra.descripcion || ra.verbo || ''}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    <label style={{ ...styles.label, marginTop: '8px' }}>Objetivo (RA seleccionados)</label>
+                    <textarea
+                      style={{ ...styles.textarea, minHeight: '90px' }}
+                      data-autoresize="true"
+                      onInput={autoResizeTextarea}
+                      value={getTpObjectiveFromRaIds(tp.raIds) || tp.objetivo || ''}
+                      readOnly
                     />
-                    <textarea style={styles.textarea} placeholder="Actividades" value={tp.actividades} onChange={(e) => updateTP(tp.id, 'actividades', e.target.value)} />
-                    <textarea style={styles.textarea} placeholder="Materiales" value={tp.materiales} onChange={(e) => updateTP(tp.id, 'materiales', e.target.value)} />
-                    <textarea style={styles.textarea} placeholder="Ámbito de Práctica" value={tp.ambito} onChange={(e) => updateTP(tp.id, 'ambito', e.target.value)} />
+                    <textarea style={styles.textarea} placeholder="Actividades" data-autoresize="true" onInput={autoResizeTextarea} value={tp.actividades} onChange={(e) => updateTP(tp.id, 'actividades', e.target.value)} />
+                    <textarea style={styles.textarea} placeholder="Materiales" data-autoresize="true" onInput={autoResizeTextarea} value={tp.materiales} onChange={(e) => updateTP(tp.id, 'materiales', e.target.value)} />
+                    <textarea style={styles.textarea} placeholder="Ámbito de Práctica (opcional)" data-autoresize="true" onInput={autoResizeTextarea} value={tp.ambito} onChange={(e) => updateTP(tp.id, 'ambito', e.target.value)} />
                     <button style={{ ...styles.button, background: '#d32f2f' }} onClick={() => deleteTP(tp.id)}>Eliminar TP</button>
                   </div>
                 ))}
@@ -1191,7 +2529,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               {/* OTHER SECTIONS */}
               <div style={styles.section}>
                 <h3>Metodología</h3>
-                <textarea style={styles.textarea} value={formData.metodologia} onChange={(e) => updateFormData('metodologia', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.metodologia} onChange={(e) => updateFormData('metodologia', e.target.value)} />
                 <AIButton
                   onClick={() => runAiForField({
                     target: { type: 'form', field: 'metodologia' },
@@ -1206,7 +2544,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
               <div style={styles.section}>
                 <h3>Evaluación</h3>
-                <textarea style={styles.textarea} value={formData.evaluacion} onChange={(e) => updateFormData('evaluacion', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.evaluacion} onChange={(e) => updateFormData('evaluacion', e.target.value)} />
                 <AIButton
                   onClick={() => runAiForField({
                     target: { type: 'form', field: 'evaluacion' },
@@ -1221,35 +2559,167 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
               <div style={styles.section}>
                 <h3>Bibliografía</h3>
-                <textarea style={styles.textarea} value={formData.bibliografia} onChange={(e) => updateFormData('bibliografia', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.bibliografia} onChange={(e) => updateFormData('bibliografia', e.target.value)} />
               </div>
 
               <div style={styles.section}>
                 <h3>Observaciones</h3>
-                <textarea style={styles.textarea} value={formData.observaciones} onChange={(e) => updateFormData('observaciones', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.observaciones} onChange={(e) => updateFormData('observaciones', e.target.value)} />
               </div>
 
-              {/* SAVE BUTTON - STICKY */}
-              <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 100 }}>
-                <button
-                  style={{
-                    ...styles.button,
-                    background: '#388e3c',
-                    fontSize: '16px',
-                    padding: '15px 30px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-                    ...((editingProposalId ? !canSaveEdits : !canCreateProposal) && { opacity: 0.45, cursor: 'not-allowed' })
-                  }}
-                  onClick={saveProposal}
-                  disabled={editingProposalId ? !canSaveEdits : !canCreateProposal}
-                  title={editingProposalId
-                    ? (canSaveEdits ? 'Guardar cambios de la propuesta' : 'Completa Carrera y Asignatura')
-                    : (canCreateProposal ? 'Crear propuesta completa' : 'Completa todos los campos para habilitar')}
-                >
-                  {editingProposalId ? 'Guardar Cambios' : 'Crear Propuesta'}
-                </button>
+              {/* SAVE BUTTONS - STICKY */}
+              <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* Draft button - show when creating new OR editing EnProceso */}
+                {(!editingProposalId || editingProposalStatus === 'EnProceso') && (
+                  <button
+                    style={{
+                      ...styles.button,
+                      background: '#757575',
+                      fontSize: '14px',
+                      padding: '12px 24px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                      ...(!canSaveDraft && { opacity: 0.45, cursor: 'not-allowed' })
+                    }}
+                    onClick={saveProposal}
+                    disabled={!canSaveDraft}
+                    title={canSaveDraft ? 'Guardar borrador (estado: En Proceso)' : 'Completa Carrera y Asignatura'}
+                  >
+                    Guardar Borrador
+                  </button>
+                )}
+                
+                {/* Create/Edit button */}
+                {(!editingProposalId || editingProposalStatus === 'EnProceso') ? (
+                  <button
+                    style={{
+                      ...styles.button,
+                      background: '#388e3c',
+                      fontSize: '16px',
+                      padding: '15px 30px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                      ...(!canCreateProposal && { opacity: 0.45, cursor: 'not-allowed' })
+                    }}
+                    onClick={saveProposal}
+                    disabled={!canCreateProposal}
+                    title={canCreateProposal 
+                      ? 'Crear propuesta completa (estado: Creada)' 
+                      : (() => {
+                          const errors = getValidationErrors()
+                          return errors.length <= 3 
+                            ? `Faltan: ${errors.join(', ')}`
+                            : `Faltan ${errors.length} campos. Haz clic para ver detalles.`
+                        })()
+                    }
+                  >
+                    Crear Propuesta
+                  </button>
+                ) : (
+                  <button
+                    style={{
+                      ...styles.button,
+                      background: '#388e3c',
+                      fontSize: '16px',
+                      padding: '15px 30px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                      ...(!canSaveEdits && { opacity: 0.45, cursor: 'not-allowed' })
+                    }}
+                    onClick={saveProposal}
+                    disabled={!canSaveEdits}
+                    title={canSaveEdits ? 'Guardar cambios en propuesta' : 'Completa Carrera y Asignatura'}
+                  >
+                    Guardar Cambios
+                  </button>
+                )}
               </div>
             </div>
+
+            {showUnitBibliografiaModal && (
+              <div
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+                onClick={cancelUnitBibliografiaModal}
+              >
+                <div
+                  style={{ background: '#fff', padding: '24px 30px', borderRadius: '8px', maxWidth: '720px', width: '92%' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 style={{ marginTop: 0 }}>Bibliografia para Unidades</h3>
+                  <p style={{ color: '#555', marginTop: 0 }}>
+                    Completa la bibliografia basica y complementaria. Se usara para distribuirla en cada unidad.
+                  </p>
+                  <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>
+                    {isNonEmptyText(formData.bibliografia)
+                      ? 'Se cargo automaticamente desde la seccion Bibliografia.'
+                      : 'No hay bibliografia en la seccion inferior. Cargala aqui para continuar.'}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={styles.label}>Bibliografia Basica</label>
+                      <textarea
+                        style={{ ...styles.textarea, minHeight: '140px' }}
+                        placeholder="Una referencia por linea"
+                        data-autoresize="true"
+                        onInput={autoResizeTextarea}
+                        value={unitBibliografiaDraft.basica}
+                        onChange={(e) => setUnitBibliografiaDraft(prev => ({ ...prev, basica: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Bibliografia Complementaria</label>
+                      <textarea
+                        style={{ ...styles.textarea, minHeight: '140px' }}
+                        placeholder="Una referencia por linea"
+                        data-autoresize="true"
+                        onInput={autoResizeTextarea}
+                        value={unitBibliografiaDraft.complementaria}
+                        onChange={(e) => setUnitBibliografiaDraft(prev => ({ ...prev, complementaria: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <label style={{ ...styles.label, marginTop: '10px' }}>Preferencias para el orden o enfoque (opcional)</label>
+                  <textarea
+                    style={{ ...styles.textarea, minHeight: '90px' }}
+                    placeholder="Ej: priorizar fundamentos al inicio, luego aplicacion en practicas..."
+                    data-autoresize="true"
+                    onInput={autoResizeTextarea}
+                    value={unitBibliografiaDraft.preferencia}
+                    onChange={(e) => setUnitBibliografiaDraft(prev => ({ ...prev, preferencia: e.target.value }))}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={cancelUnitBibliografiaModal}>Cancelar</button>
+                    <button style={styles.button} onClick={confirmUnitBibliografiaModal}>Continuar</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showTpCommentModal && (
+              <div
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+                onClick={cancelTpCommentModal}
+              >
+                <div
+                  style={{ background: '#fff', padding: '24px 30px', borderRadius: '8px', maxWidth: '640px', width: '92%' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 style={{ marginTop: 0 }}>Comentario para Trabajos Practicos</h3>
+                  <p style={{ color: '#555', marginTop: 0 }}>
+                    Opcional. Indica el enfoque o ideas para los TP.
+                  </p>
+                  <textarea
+                    style={{ ...styles.textarea, minHeight: '120px' }}
+                    placeholder="Ej: enfocar en estructuras dinamicas primero, luego en busqueda y archivos"
+                    data-autoresize="true"
+                    onInput={autoResizeTextarea}
+                    value={tpCommentDraft}
+                    onChange={(e) => setTpCommentDraft(e.target.value)}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={cancelTpCommentModal}>Cancelar</button>
+                    <button style={styles.button} onClick={confirmTpCommentModal}>Continuar</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* COMPARISON MODAL */}
             {aiLoading && (
@@ -1328,6 +2798,8 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Asignatura</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Carrera</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Creada</th>
+                    <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Estado</th>
+                    <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #006ba8' }}>Descargar</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1337,6 +2809,15 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                       <td style={{ padding: '10px' }}>{p.title || 'Sin título'}</td>
                       <td style={{ padding: '10px' }}>{p.career || '-'}</td>
                       <td style={{ padding: '10px' }}>{new Date(p.created_at).toLocaleDateString()}</td>
+                      <td style={{ padding: '10px' }}>{p.status || '-'}</td>
+                      <td style={{ padding: '10px', textAlign: 'center' }}>
+                        <button
+                          style={{ ...styles.button, padding: '6px 10px', fontSize: '12px', marginRight: 0 }}
+                          onClick={() => downloadProposalDocx(p.id)}
+                        >
+                          Descargar propuesta
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1363,6 +2844,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                       <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Año Académico</th>
                       <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Año Carrera</th>
                       <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Cuatrimestre</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Estado</th>
                       <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>Acciones</th>
                     </tr>
                   </thead>
@@ -1375,9 +2857,12 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                         <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
+                        <td style={{ padding: '10px' }}>{prop.status || '-'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
                             onClick={() => loadProposalForEdit(prop.id)}>Continuar</button>
+                          <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }}
+                            onClick={() => downloadProposalDocx(prop.id)}>Descargar</button>
                           <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', marginRight: '5px' }} 
                             onClick={() => deleteProposal(prop.id)}>Eliminar</button>
                         </td>
@@ -1393,14 +2878,111 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         {/* IMPORT PROPOSAL */}
         {activeMenu === 'propuestas' && proposalsMode === 'import' && (
           <div style={styles.section}>
-            <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
+            <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => {
+              setProposalsMode(null)
+              setImportPreview(null)
+              setImportFile(null)
+              setImportError('')
+            }}>← Volver</button>
             <h2>Importar Propuesta</h2>
-            <div style={{ marginTop: '20px', padding: '20px', background: '#f6ffed', borderRadius: '8px', border: '2px dashed #00a854' }}>
-              <p style={{ color: '#00a854', fontWeight: 'bold' }}>Sube un archivo PDF o DOC</p>
-              <input type="file" accept=".pdf,.doc,.docx" style={{ marginTop: '10px' }} />
-              <button style={{ ...styles.button, marginTop: '10px', background: '#00a854', color: 'white' }}>Importar Archivo</button>
-              <p style={{ color: '#999', fontSize: '12px', marginTop: '10px' }}>El sistema extraerá automáticamente los campos de la propuesta</p>
-            </div>
+            
+            {!importPreview ? (
+              <div style={{ marginTop: '20px', padding: '20px', background: '#f6ffed', borderRadius: '8px', border: '2px dashed #00a854' }}>
+                <p style={{ color: '#00a854', fontWeight: 'bold' }}>Sube un archivo DOCX</p>
+                <div style={{ marginTop: '10px' }}>
+                  <input 
+                    type="file" 
+                    accept=".docx" 
+                    onChange={handleImportDocxFile}
+                    disabled={importLoading}
+                    style={{ marginTop: '10px', padding: '5px' }}
+                  />
+                </div>
+                {importLoading && <p style={{ color: '#00a854', marginTop: '10px' }}>Procesando archivo...</p>}
+                {importError && <p style={{ color: '#d32f2f', marginTop: '10px' }}>{importError}</p>}
+                <p style={{ color: '#999', fontSize: '12px', marginTop: '15px' }}>El sistema extraerá automáticamente los campos de la propuesta de forma similar a la que se generan en el sistema.</p>
+              </div>
+            ) : (
+              // Previsualización de datos importados
+              <div style={{ marginTop: '20px' }}>
+                <div style={{ background: '#e8f5e9', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #4caf50' }}>
+                  <h3 style={{ margin: '0 0 10px 0', color: '#2e7d32' }}>Datos Extraídos</h3>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '15px' }}>
+                    <div><strong>Carrera:</strong> {importPreview.preview.career || '-'}</div>
+                    <div><strong>Asignatura:</strong> {importPreview.preview.subject || '-'}</div>
+                    <div><strong>Docentes:</strong> {importPreview.preview.teachers || '-'}</div>
+                    <div><strong>Año de Carrera:</strong> {importPreview.preview.year || '-'}</div>
+                    <div><strong>Cuatrimestre:</strong> {importPreview.preview.quarter || '-'}</div>
+                    <div><strong>Horas:</strong> {importPreview.preview.hours || '-'}</div>
+                    <div><strong>Régimen:</strong> {importPreview.preview.regime || '-'}</div>
+                    <div><strong>Unidades:</strong> {importPreview.preview.units_count || 0}</div>
+                    <div><strong>Trabajos Prácticos:</strong> {importPreview.preview.practicals_count || 0}</div>
+                    <div><strong>Resultados de Aprendizaje:</strong> {importPreview.preview.ra_count || 0}</div>
+                  </div>
+                </div>
+                
+                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                  <button 
+                    style={{ ...styles.button, background: '#4caf50', color: 'white' }}
+                    onClick={handleLoadImportedProposal}
+                  >
+                    ✓ Cargar Propuesta al Formulario
+                  </button>
+                  <button 
+                    style={{ ...styles.button, background: '#ff9800', color: 'white' }}
+                    onClick={() => {
+                      setImportPreview(null)
+                      setImportFile(null)
+                      setImportError('')
+                      document.querySelector('input[type="file"]')?.click()
+                    }}
+                  >
+                    ↺ Importar Otro Archivo
+                  </button>
+                </div>
+                
+                {/* Detalles de Unidades */}
+                {importPreview.data?.units && importPreview.data.units.length > 0 && (
+                  <div style={{ marginTop: '20px', padding: '15px', background: '#f5f5f5', borderRadius: '8px' }}>
+                    <h4>Unidades Extraídas ({importPreview.data.units.length})</h4>
+                    {importPreview.data.units.slice(0, 3).map((unit, idx) => (
+                      <div key={idx} style={{ padding: '10px', marginTop: '8px', background: '#fff', borderRadius: '4px', borderLeft: '3px solid #0066cc' }}>
+                        <strong>{unit.name || `Unidad ${idx + 1}`}</strong>
+                        <p style={{ margin: '5px 0', color: '#666', fontSize: '12px' }}>
+                          Contenidos: {unit.content?.substring(0, 60) || '-'}...
+                        </p>
+                      </div>
+                    ))}
+                    {importPreview.data.units.length > 3 && (
+                      <p style={{ marginTop: '10px', color: '#999', fontSize: '12px' }}>
+                        ... y {importPreview.data.units.length - 3} unidades más
+                      </p>
+                    )}
+                  </div>
+                )}
+                
+                {/* Detalles de TPs */}
+                {importPreview.data?.practicals && importPreview.data.practicals.length > 0 && (
+                  <div style={{ marginTop: '20px', padding: '15px', background: '#f5f5f5', borderRadius: '8px' }}>
+                    <h4>Trabajos Prácticos Extraídos ({importPreview.data.practicals.length})</h4>
+                    {importPreview.data.practicals.slice(0, 3).map((tp, idx) => (
+                      <div key={idx} style={{ padding: '10px', marginTop: '8px', background: '#fff', borderRadius: '4px', borderLeft: '3px solid #ff9900' }}>
+                        <strong>{tp.name || `TP ${idx + 1}`}</strong>
+                        <p style={{ margin: '5px 0', color: '#666', fontSize: '12px' }}>
+                          Objetivo: {tp.objective?.substring(0, 60) || '-'}...
+                        </p>
+                      </div>
+                    ))}
+                    {importPreview.data.practicals.length > 3 && (
+                      <p style={{ marginTop: '10px', color: '#999', fontSize: '12px' }}>
+                        ... y {importPreview.data.practicals.length - 3} TPs más
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
