@@ -68,12 +68,10 @@ async def upload_proposal(
         raise HTTPException(status_code=500, detail=str(e))
 
     proposal = models.Proposal(
-        filename=dest_path,
         original_filename=file.filename,
-        uploader=uploader,
+        source_type="upload",
         career=career,
         subject=subject,
-        status="uploaded",
     )
     db.add(proposal)
     db.commit()
@@ -125,18 +123,22 @@ def suggest_for_proposal(proposal_id: int = Form(...), prompt_context: str = For
 
 
 
-@app.patch("/proposals/{proposal_id}")
-def update_proposal(proposal_id: int, payload: dict, db: Session = Depends(get_db)):
+@app.get("/proposals/{proposal_id}", response_model=schemas.Proposal)
+def get_proposal(proposal_id: int, db: Session = Depends(get_db)):
     proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
-    # allow updating notes and status
-    notes = payload.get("notes")
-    status = payload.get("status")
-    if notes is not None:
-        proposal.notes = notes
-    if status is not None:
-        proposal.status = status
+    return proposal
+
+
+@app.patch("/proposals/{proposal_id}", response_model=schemas.Proposal)
+def update_proposal(proposal_id: int, payload: schemas.ProposalUpdate, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    data = payload.dict(exclude_unset=True)
+    for key, value in data.items():
+        setattr(proposal, key, value)
     db.add(proposal)
     db.commit()
     db.refresh(proposal)
@@ -180,7 +182,7 @@ def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_
             bibliography=proposal.bibliography,
             observations=proposal.observations,
             original_filename="form_submission",
-            status="draft"
+            source_type="manual"
         )
         db.add(db_proposal)
         db.commit()

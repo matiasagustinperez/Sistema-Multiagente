@@ -15,8 +15,10 @@ export default function App() {
   
   // Form state
   const [equipoDocente, setEquipoDocente] = useState([
-    { id: 1, nombre: '', categoria: 'TITULAR', dedic: '' }
+    { id: 1, nombre: '', categoria: 'TITULAR', correo: '' }
   ])
+
+  const [editingProposalId, setEditingProposalId] = useState(null)
   
   const [formData, setFormData] = useState({
     carrera: '',
@@ -98,7 +100,7 @@ export default function App() {
   // Docent management
   const addDocente = () => {
     const newId = Math.max(...equipoDocente.map(d => d.id), 0) + 1
-    setEquipoDocente([...equipoDocente, { id: newId, nombre: '', categoria: 'AYUDANTE 1º', dedic: '' }])
+    setEquipoDocente([...equipoDocente, { id: newId, nombre: '', categoria: 'AYUDANTE 1º', correo: '' }])
   }
 
   const updateDocente = (id, field, value) => {
@@ -281,63 +283,157 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       setStatusType('error')
       return
     }
-    
+
+    const payload = {
+      title: formData.asignatura,
+      career: formData.carrera,
+      subject: formData.asignatura,
+      study_plan: formData.plan,
+      academic_year: formData.anio,
+      year_of_career: formData.ciclo,
+      quarter: formData.cuatrimestre,
+      character: formData.caracter,
+      regime: formData.regimen,
+      theoretical_hours: parseInt(formData.hsTeo) || 0,
+      practical_hours: parseInt(formData.hsPrac) || 0,
+      total_hours: getCartTotal(),
+      weekly_hours: getHsSemanales(),
+      minimum_content: formData.contenidosMin,
+      generic_competencies: formData.competenciasGen,
+      specific_competencies: formData.competenciasEsp,
+      fundamentals_part1: formData.fundamentosP1,
+      fundamentals_part2: formData.fundamentosP2,
+      learning_outcomes: (formData.resultadosAprendizaje || []).map(ra => ({
+        id: ra.id,
+        description: ra.descripcion || '',
+        observable_verb: ra.verbo || ''
+      })),
+      units: (formData.unidades || []).map(u => ({
+        id: u.id,
+        name: u.nombre || '',
+        content: u.contenidos || '',
+        bibliography_basic: u.bibBasica || '',
+        bibliography_complementary: u.bibCompl || ''
+      })),
+      practicals: (formData.trabajosPracticos || []).map(tp => ({
+        id: tp.id,
+        name: tp.nombre || '',
+        objective: tp.objetivo || '',
+        activities: tp.actividades || '',
+        materials: tp.materiales || '',
+        scope: tp.ambito || ''
+      })),
+      methodology: formData.metodologia,
+      evaluation: formData.evaluacion,
+      bibliography: formData.bibliografia,
+      observations: formData.observaciones
+    }
+
     try {
-      const res = await fetch('http://localhost:8001/proposals', {
-        method: 'POST',
+      const isEditing = !!editingProposalId
+      const res = await fetch(`http://localhost:8001/proposals${isEditing ? `/${editingProposalId}` : ''}`, {
+        method: isEditing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: formData.asignatura,
-          career: formData.carrera,
-          subject: formData.asignatura,
-          study_plan: formData.plan,
-          academic_year: formData.anio,
-          year_of_career: formData.ciclo,
-          quarter: formData.cuatrimestre,
-          character: formData.caracter,
-          regime: formData.regimen,
-          theoretical_hours: parseInt(formData.hsTeo) || 0,
-          practical_hours: parseInt(formData.hsPrac) || 0,
-          minimum_content: formData.contenidosMin,
-          generic_competencies: formData.competenciasGen,
-          specific_competencies: formData.competenciasEsp,
-          fundamentals_part1: formData.fundamentosP1,
-          fundamentals_part2: formData.fundamentosP2,
-          learning_outcomes: formData.resultadosAprendizaje || [],
-          units: formData.unidades || [],
-          practicals: formData.trabajosPracticos || [],
-          methodology: formData.metodologia,
-          evaluation: formData.evaluacion,
-          bibliography: formData.bibliografia,
-          observations: formData.observaciones
-        })
+        body: JSON.stringify(payload)
       })
-      
+
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
-      
+
       const data = await res.json()
-      setStatusMsg('Borrador guardado - ID: ' + data.id)
+      setStatusMsg(isEditing ? `Borrador actualizado - ID: ${data.id}` : 'Borrador guardado - ID: ' + data.id)
       setStatusType('success')
-      // Reset form
-      setFormData({
-        carrera: '', asignatura: '', cuatrimestre: '', plan: '', anio: '', ciclo: '',
-        caracter: '', regimen: '', hsTeo: '', hsPrac: '', contenidosMin: '',
-        competenciasGen: '', competenciasEsp: '', fundamentosP1: '', fundamentosP2: '',
-        resultadosAprendizaje: [], unidades: [], trabajosPracticos: [], metodologia: '',
-        evaluacion: '', bibliografia: '', observaciones: ''
-      })
+      if (!isEditing) {
+        // Reset form
+        setFormData({
+          carrera: '', asignatura: '', cuatrimestre: '', plan: '', anio: '', ciclo: '',
+          caracter: 'Obligatoria', regimen: 'Cuatrimestral', hsTeo: '', hsPrac: '', contenidosMin: '',
+          competenciasGen: '', competenciasEsp: '', fundamentosP1: '', fundamentosP2: '',
+          resultadosAprendizaje: [], unidades: [], trabajosPracticos: [], metodologia: '',
+          evaluacion: '', bibliografia: '', observaciones: ''
+        })
+        // Auto-switch to list view after 2 seconds
+        setTimeout(() => setProposalsMode('list'), 2000)
+      }
       // Reload proposals list
       fetchProposals()
-      // Auto-switch to list view after 2 seconds
-      setTimeout(() => setProposalsMode('list'), 2000)
     } catch (err) {
       const msg = err.message === 'Failed to fetch' 
         ? 'No hay conexión con el Backend (8001)' 
         : err.message
       setStatusMsg('Error al guardar: ' + msg)
+      setStatusType('error')
+    }
+  }
+
+  const isProposalComplete = (proposal) => {
+    return !!(
+      proposal.career &&
+      proposal.subject &&
+      proposal.minimum_content &&
+      proposal.generic_competencies &&
+      proposal.specific_competencies
+    )
+  }
+
+  const loadProposalForEdit = async (proposalId) => {
+    try {
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}`)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      setFormData({
+        carrera: data.career || '',
+        asignatura: data.subject || data.title || '',
+        plan: data.study_plan || '',
+        anio: data.academic_year || '',
+        ciclo: data.year_of_career || '',
+        cuatrimestre: data.quarter || '',
+        caracter: data.character || 'Obligatoria',
+        regimen: data.regime || 'Cuatrimestral',
+        hsTeo: data.theoretical_hours ?? 0,
+        hsPrac: data.practical_hours ?? 0,
+        contenidosMin: data.minimum_content || '',
+        competenciasGen: data.generic_competencies || '',
+        competenciasEsp: data.specific_competencies || '',
+        fundamentosP1: data.fundamentals_part1 || '',
+        fundamentosP2: data.fundamentals_part2 || '',
+        resultadosAprendizaje: (data.learning_outcomes || []).map((ra, idx) => ({
+          id: ra.id ?? Date.now() + idx,
+          verbo: ra.observable_verb || '',
+          descripcion: ra.description || ''
+        })),
+        unidades: (data.units || []).map((u, idx) => ({
+          id: u.id ?? Date.now() + idx,
+          nombre: u.name || '',
+          contenidos: u.content || '',
+          bibBasica: u.bibliography_basic || '',
+          bibCompl: u.bibliography_complementary || ''
+        })),
+        trabajosPracticos: (data.practicals || []).map((tp, idx) => ({
+          id: tp.id ?? Date.now() + idx,
+          nombre: tp.name || '',
+          objetivo: tp.objective || '',
+          actividades: tp.activities || '',
+          materiales: tp.materials || '',
+          ambito: tp.scope || ''
+        })),
+        metodologia: data.methodology || '',
+        evaluacion: data.evaluation || '',
+        bibliografia: data.bibliography || '',
+        observaciones: data.observations || ''
+      })
+      setEditingProposalId(proposalId)
+      setActiveMenu('propuestas')
+      setProposalsMode('create')
+      setStatusMsg(`Editando propuesta #${proposalId}`)
+      setStatusType('info')
+    } catch (err) {
+      setStatusMsg('Error al cargar propuesta: ' + err.message)
       setStatusType('error')
     }
   }
@@ -511,7 +607,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
                               onClick={() => alert(`Detalles de propuesta #${prop.id}`)}>Ver</button>
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px', background: '#ff9900', color: 'white' }} 
-                              onClick={() => alert(`Editar propuesta #${prop.id}`)}>Editar</button>
+                              onClick={() => loadProposalForEdit(prop.id)}>Editar</button>
                             <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', color: 'white' }} 
                               onClick={() => alert(`Eliminar propuesta #${prop.id}`)}>Eliminar</button>
                           </td>
@@ -553,56 +649,74 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     <label style={styles.label}>Asignatura</label>
                     <input style={styles.input} value={formData.asignatura} onChange={(e) => updateFormData('asignatura', e.target.value)} />
                   </div>
-                  <div>
-                    <label style={styles.label}>Plan de Estudios</label>
-                    <input style={styles.input} value={formData.plan} onChange={(e) => updateFormData('plan', e.target.value)} />
+
+                  {/* ROW 1: Plan, Año, Ciclo, Cuatrimestre */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '30px', padding: '0 10px', gridColumn: '1 / -1' }}>
+                    <div>
+                      <label style={styles.label}>Plan de Estudios</label>
+                      <input style={styles.input} value={formData.plan} onChange={(e) => updateFormData('plan', e.target.value)} placeholder="Ej: Plan 2023" />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Año Académico</label>
+                      <input style={styles.input} value={formData.anio} onChange={(e) => updateFormData('anio', e.target.value)} placeholder="Ej: 2024" />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Ciclo (Año en carrera)</label>
+                      <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} placeholder="Ej: 1º, 2º, 3º" />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Cuatrimestre *</label>
+                      <select style={styles.input} value={formData.cuatrimestre} onChange={(e) => updateFormData('cuatrimestre', e.target.value)}>
+                        <option value="">Seleccionar...</option>
+                        <option>1er Cuatrimestre</option>
+                        <option>2do Cuatrimestre</option>
+                        <option>Anual</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label style={styles.label}>Año Académico</label>
-                    <input style={styles.input} value={formData.anio} onChange={(e) => updateFormData('anio', e.target.value)} />
-                  </div>
-                  <div>
-                    <label style={styles.label}>Ciclo</label>
-                    <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} />
-                  </div>
-                  <div>
-                    <label style={styles.label}>Cuatrimestre *</label>
-                    <select style={styles.input} value={formData.cuatrimestre} onChange={(e) => updateFormData('cuatrimestre', e.target.value)}>
-                      <option value="">Seleccionar...</option>
-                      <option>1er Cuatrimestre</option>
-                      <option>2do Cuatrimestre</option>
-                      <option>Anual</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={styles.label}>Carácter</label>
-                    <select style={styles.input} value={formData.caracter} onChange={(e) => updateFormData('caracter', e.target.value)}>
-                      <option>Obligatoria</option>
-                      <option>Optativa</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={styles.label}>Régimen</label>
-                    <select style={styles.input} value={formData.regimen} onChange={(e) => updateFormData('regimen', e.target.value)}>
-                      <option>Cuatrimestral</option>
-                      <option>Anual</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={styles.label}>Horas Teóricas</label>
-                    <input style={styles.input} type="number" value={formData.hsTeo} onChange={(e) => updateFormData('hsTeo', e.target.value)} />
-                  </div>
-                  <div>
-                    <label style={styles.label}>Horas Prácticas</label>
-                    <input style={styles.input} type="number" value={formData.hsPrac} onChange={(e) => updateFormData('hsPrac', e.target.value)} />
-                  </div>
-                  <div>
-                    <label style={styles.label}>Carga Horaria Total</label>
-                    <div style={{ ...styles.input, ...styles.readonlyField, color: '#666' }}>{getCartTotal()}</div>
-                  </div>
-                  <div>
-                    <label style={styles.label}>Hs Semanales</label>
-                    <div style={{ ...styles.input, ...styles.readonlyField, color: '#666' }}>{getHsSemanales()}</div>
+
+                  {/* ROW 2: Carácter, Régimen, Hs Teóricas, Hs Prácticas, Total, Hs Semanales */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '20px', padding: '0 10px', gridColumn: '1 / -1' }}>
+                    <div>
+                      <label style={styles.label}>Carácter</label>
+                      <select style={styles.input} value={formData.caracter} onChange={(e) => updateFormData('caracter', e.target.value)}>
+                        <option>Obligatoria</option>
+                        <option>Optativa</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={styles.label}>Régimen</label>
+                      <select style={styles.input} value={formData.regimen} onChange={(e) => updateFormData('regimen', e.target.value)}>
+                        <option>Cuatrimestral</option>
+                        <option>Anual</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={styles.label}>Hs Teóricas</label>
+                      <input style={styles.input} type="number" value={formData.hsTeo} onChange={(e) => updateFormData('hsTeo', e.target.value)} min="0" />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Hs Prácticas</label>
+                      <input style={styles.input} type="number" value={formData.hsPrac} onChange={(e) => updateFormData('hsPrac', e.target.value)} min="0" />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Total</label>
+                      <div
+                        style={{ ...styles.input, ...styles.readonlyField, color: '#666', fontWeight: 'bold' }}
+                        title="Suma de Hs Teoricas + Hs Practicas"
+                      >
+                        {getCartTotal()}
+                      </div>
+                    </div>
+                    <div>
+                      <label style={styles.label}>Hs Semanales</label>
+                      <div
+                        style={{ ...styles.input, ...styles.readonlyField, color: '#666', fontWeight: 'bold' }}
+                        title="Total de horas dividido en 15 si es Cuatrimestral o en 30 si es Anual"
+                      >
+                        {getHsSemanales()}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -620,7 +734,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                       <option>JTP</option>
                       <option>AYUDANTE 1º</option>
                     </select>
-                    <input style={styles.input} placeholder="Dedicación" value={doc.dedic} onChange={(e) => updateDocente(doc.id, 'dedic', e.target.value)} />
+                    <input style={styles.input} placeholder="Correo" value={doc.correo} onChange={(e) => updateDocente(doc.id, 'correo', e.target.value)} />
                     <button style={{ ...styles.button, marginRight: 0 }} onClick={() => deleteDocente(doc.id)} disabled={equipoDocente.length === 1}>X</button>
                   </div>
                 ))}
@@ -726,9 +840,18 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
               {/* SAVE BUTTON - STICKY */}
               <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 100 }}>
-                <button style={{ ...styles.button, background: '#388e3c', fontSize: '16px', padding: '15px 30px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }} 
+                <button
+                  style={{
+                    ...styles.button,
+                    background: '#388e3c',
+                    fontSize: '16px',
+                    padding: '15px 30px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                    ...((!formData.carrera || !formData.asignatura) && { opacity: 0.45, cursor: 'not-allowed' })
+                  }}
                   onClick={saveProposal}
-                  disabled={!formData.carrera || !formData.asignatura}>
+                  disabled={!formData.carrera || !formData.asignatura}
+                >
                   Guardar Borrador
                 </button>
               </div>
@@ -766,7 +889,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
             <h2>Propuestas Guardadas</h2>
-            {proposals.length === 0 ? (
+            {proposals.filter(isProposalComplete).length === 0 ? (
               <p>No hay propuestas guardadas</p>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -779,7 +902,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                   </tr>
                 </thead>
                 <tbody>
-                  {proposals.map(p => (
+                  {proposals.filter(isProposalComplete).map(p => (
                     <tr key={p.id} style={{ borderBottom: '1px solid #ddd' }}>
                       <td style={{ padding: '10px' }}>{p.id}</td>
                       <td style={{ padding: '10px' }}>{p.title || 'Sin título'}</td>
@@ -798,7 +921,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
             <h2>Propuestas en Proceso</h2>
-            {proposals.length === 0 ? (
+            {proposals.filter(p => !isProposalComplete(p)).length === 0 ? (
               <p style={{ color: '#999', marginTop: '20px' }}>No hay propuestas en edición aún.</p>
             ) : (
               <div style={{ overflowX: 'auto', marginTop: '20px' }}>
@@ -815,7 +938,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     </tr>
                   </thead>
                   <tbody>
-                    {proposals.map((prop, idx) => (
+                    {proposals.filter(p => !isProposalComplete(p)).map((prop, idx) => (
                       <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
                         <td style={{ padding: '10px' }}>#{prop.id}</td>
                         <td style={{ padding: '10px' }}>{prop.career || '-'}</td>
@@ -825,7 +948,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                         <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
-                            onClick={() => alert(`Continuar edición de propuesta #${prop.id}`)}>Continuar</button>
+                            onClick={() => loadProposalForEdit(prop.id)}>Continuar</button>
                           <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', marginRight: '5px' }} 
                             onClick={() => alert(`Eliminar propuesta #${prop.id}`)}>Eliminar</button>
                         </td>

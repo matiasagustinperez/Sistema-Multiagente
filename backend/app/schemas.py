@@ -59,6 +59,17 @@ class ProposalUpdate(BaseModel):
     title: Optional[str] = None
     career: Optional[str] = None
     subject: Optional[str] = None
+    study_plan: Optional[str] = None
+    academic_year: Optional[str] = None
+    year_of_career: Optional[str] = None
+    quarter: Optional[str] = None
+    character: Optional[str] = None
+    regime: Optional[str] = None
+    theoretical_hours: Optional[int] = None
+    practical_hours: Optional[int] = None
+    total_hours: Optional[int] = None
+    weekly_hours: Optional[int] = None
+
     minimum_content: Optional[str] = None
     generic_competencies: Optional[str] = None
     specific_competencies: Optional[str] = None
@@ -86,6 +97,13 @@ class ProposalOut(BaseModel):
     original_filename: Optional[str] = None
     career: Optional[str] = None
     subject: Optional[str] = None
+    academic_year: Optional[str] = None
+    year_of_career: Optional[str] = None
+    quarter: Optional[str] = None
+    minimum_content: Optional[str] = None
+    generic_competencies: Optional[str] = None
+    specific_competencies: Optional[str] = None
+    source_type: Optional[str] = None
     created_at: datetime
     
     class Config:
