@@ -384,8 +384,108 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         {activeMenu === 'propuestas' && !proposalsMode && (
           <div style={styles.section}>
             <h2>Propuestas Académicas</h2>
-            <button style={styles.button} onClick={() => setProposalsMode('create')}>Crear Nueva Propuesta</button>
-            <button style={styles.button} onClick={() => setProposalsMode('list')}>Ver Propuestas</button>
+            
+            {/* CARDS SECTION */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px', marginBottom: '30px', marginTop: '20px' }}>
+              {/* Card 1: Crear Propuesta */}
+              <div style={{ 
+                border: '2px solid #0066cc', 
+                borderRadius: '8px', 
+                padding: '20px', 
+                textAlign: 'center', 
+                cursor: 'pointer', 
+                transition: 'all 0.3s ease',
+                backgroundColor: '#f0f8ff',
+                ':hover': { backgroundColor: '#e6f2ff', boxShadow: '0 4px 12px rgba(0, 102, 204, 0.2)' }
+              }}
+              onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(0, 102, 204, 0.2)'; e.target.style.backgroundColor = '#e6f2ff'; }}
+              onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f0f8ff'; }}
+              onClick={() => setProposalsMode('create')}>
+                <div style={{ fontSize: '32px', marginBottom: '10px' }}>📝</div>
+                <h3 style={{ color: '#0066cc', margin: '0 0 10px 0' }}>Crear Propuesta</h3>
+                <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Crear una nueva propuesta desde cero</p>
+              </div>
+
+              {/* Card 2: En Proceso */}
+              <div style={{ 
+                border: '2px solid #ff9900', 
+                borderRadius: '8px', 
+                padding: '20px', 
+                textAlign: 'center', 
+                cursor: 'pointer', 
+                transition: 'all 0.3s ease',
+                backgroundColor: '#fffbf0'
+              }}
+              onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(255, 153, 0, 0.2)'; e.target.style.backgroundColor = '#fffaf0'; }}
+              onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#fffbf0'; }}
+              onClick={() => setProposalsMode('pending')}>
+                <div style={{ fontSize: '32px', marginBottom: '10px' }}>⏳</div>
+                <h3 style={{ color: '#ff9900', margin: '0 0 10px 0' }}>Propuestas en Proceso</h3>
+                <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Ver y completar propuestas en edición</p>
+              </div>
+
+              {/* Card 3: Importar */}
+              <div style={{ 
+                border: '2px solid #00a854', 
+                borderRadius: '8px', 
+                padding: '20px', 
+                textAlign: 'center', 
+                cursor: 'pointer', 
+                transition: 'all 0.3s ease',
+                backgroundColor: '#f6ffed'
+              }}
+              onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(0, 168, 84, 0.2)'; e.target.style.backgroundColor = '#f0fdf4'; }}
+              onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f6ffed'; }}
+              onClick={() => setProposalsMode('import')}>
+                <div style={{ fontSize: '32px', marginBottom: '10px' }}>📂</div>
+                <h3 style={{ color: '#00a854', margin: '0 0 10px 0' }}>Importar Propuesta</h3>
+                <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Importar desde PDF o DOC</p>
+              </div>
+            </div>
+
+            {/* PROPOSALS TABLE */}
+            <div style={{ ...styles.section, marginTop: '30px', borderTop: '2px solid #ddd', paddingTop: '20px' }}>
+              <h3>Propuestas Cargadas ({proposals.length})</h3>
+              {proposals.length > 0 ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#0066cc', color: 'white' }}>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>ID</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Carrera</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Asignatura</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Año Académico</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Año Carrera</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Cuatrimestre</th>
+                        <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {proposals.map((prop, idx) => (
+                        <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
+                          <td style={{ padding: '10px' }}>#{prop.id}</td>
+                          <td style={{ padding: '10px' }}>{prop.career || '-'}</td>
+                          <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
+                          <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
+                          <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
+                          <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
+                          <td style={{ padding: '10px', textAlign: 'center' }}>
+                            <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
+                              onClick={() => alert(`Detalles de propuesta #${prop.id}`)}>Ver</button>
+                            <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px', background: '#ff9900', color: 'white' }} 
+                              onClick={() => alert(`Editar propuesta #${prop.id}`)}>Editar</button>
+                            <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', color: 'white' }} 
+                              onClick={() => alert(`Eliminar propuesta #${prop.id}`)}>Eliminar</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p style={{ color: '#999', fontStyle: 'italic' }}>No hay propuestas cargadas aún.</p>
+              )}
+            </div>
           </div>
         )}
 
@@ -650,6 +750,30 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 </tbody>
               </table>
             )}
+          </div>
+        )}
+
+        {/* PENDING PROPOSALS */}
+        {activeMenu === 'propuestas' && proposalsMode === 'pending' && (
+          <div style={styles.section}>
+            <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
+            <h2>Propuestas en Proceso</h2>
+            <p style={{ color: '#ff9900', marginTop: '20px' }}>Esta sección te permitirá ver y completar propuestas que están en edición.</p>
+            <p>Por ahora no hay propuestas en proceso.</p>
+          </div>
+        )}
+
+        {/* IMPORT PROPOSAL */}
+        {activeMenu === 'propuestas' && proposalsMode === 'import' && (
+          <div style={styles.section}>
+            <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
+            <h2>Importar Propuesta</h2>
+            <div style={{ marginTop: '20px', padding: '20px', background: '#f6ffed', borderRadius: '8px', border: '2px dashed #00a854' }}>
+              <p style={{ color: '#00a854', fontWeight: 'bold' }}>Sube un archivo PDF o DOC</p>
+              <input type="file" accept=".pdf,.doc,.docx" style={{ marginTop: '10px' }} />
+              <button style={{ ...styles.button, marginTop: '10px', background: '#00a854', color: 'white' }}>Importar Archivo</button>
+              <p style={{ color: '#999', fontSize: '12px', marginTop: '10px' }}>El sistema extraerá automáticamente los campos de la propuesta</p>
+            </div>
           </div>
         )}
 
