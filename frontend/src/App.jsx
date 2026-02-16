@@ -264,6 +264,13 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
   }
 
   const saveProposal = async () => {
+    // Validate required fields: carrera and asignatura only
+    if (!formData.carrera || !formData.asignatura) {
+      setStatusMsg('Requiere al menos: Carrera y Asignatura')
+      setStatusType('error')
+      return
+    }
+    
     try {
       const res = await fetch('http://localhost:8001/proposals', {
         method: 'POST',
@@ -297,11 +304,11 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
-        throw new Error(errorData.detail || `HTTP ${res.status}`)
+        throw new Error(errorData.detail || `Error ${res.status}`)
       }
       
       const data = await res.json()
-      setStatusMsg('Propuesta guardada correctamente - ID: ' + data.id)
+      setStatusMsg('Borrador guardado - ID: ' + data.id)
       setStatusType('success')
       // Reset form
       setFormData({
@@ -316,7 +323,10 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       // Auto-switch to list view after 2 seconds
       setTimeout(() => setProposalsMode('list'), 2000)
     } catch (err) {
-      setStatusMsg('Error al guardar: ' + (err.message || 'Error desconocido'))
+      const msg = err.message === 'Failed to fetch' 
+        ? 'No hay conexión con el Backend (8001)' 
+        : err.message
+      setStatusMsg('Error al guardar: ' + msg)
       setStatusType('error')
     }
   }
@@ -707,8 +717,8 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 100 }}>
                 <button style={{ ...styles.button, background: '#388e3c', fontSize: '16px', padding: '15px 30px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }} 
                   onClick={saveProposal}
-                  disabled={!formData.asignatura}>
-                  Guardar Propuesta
+                  disabled={!formData.carrera || !formData.asignatura}>
+                  Guardar Borrador
                 </button>
               </div>
             </div>
