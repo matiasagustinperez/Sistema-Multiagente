@@ -77,20 +77,32 @@ def extract_header_fields(doc: Document) -> Dict[str, str]:
         
         if 'régimen' in table_text or 'regimen' in table_text:
             # Esta es la tabla de características
-            for row in table.rows:
-                for cell_idx, cell in enumerate(row.cells):
+            # Estructura: Row 0 = Headers, Row 1+ = Valores
+            if len(table.rows) >= 2:
+                header_row = table.rows[0]
+                data_row = table.rows[1]
+                
+                # Encontrar índices de las columnas
+                regime_idx = None
+                hours_idx = None
+                
+                for cell_idx, cell in enumerate(header_row.cells):
                     cell_lower = cell.text.lower()
-                    cell_text = cell.text.strip()
-                    
                     if 'régimen' in cell_lower or 'regimen' in cell_lower:
-                        # El valor está en la siguiente celda
-                        if cell_idx + 1 < len(row.cells):
-                            fields['regime'] = row.cells[cell_idx + 1].text.strip()
-                    
-                    elif 'carga horaria' in cell_lower and not fields['hours']:
-                        # El valor está en la siguiente celda
-                        if cell_idx + 1 < len(row.cells):
-                            fields['hours'] = row.cells[cell_idx + 1].text.strip()
+                        regime_idx = cell_idx
+                    elif 'carga horaria' in cell_lower:
+                        hours_idx = cell_idx
+                
+                # Extraer valores de la fila de datos
+                if regime_idx is not None and regime_idx < len(data_row.cells):
+                    regime_val = data_row.cells[regime_idx].text.strip()
+                    if regime_val and regime_val not in ['{{regimen}}', '-']:
+                        fields['regime'] = regime_val
+                
+                if hours_idx is not None and hours_idx < len(data_row.cells):
+                    hours_val = data_row.cells[hours_idx].text.strip()
+                    if hours_val and hours_val not in ['{{cargaHoraria}}', '-']:
+                        fields['hours'] = hours_val
     
     # 3. EXTRAER TABLA DE EQUIPO DOCENTE
     for table in doc.tables:
