@@ -361,8 +361,8 @@ async def import_proposal_docx(file: UploadFile = File(...)):
             tmp_path = tmp.name
         
         try:
-            # Extraer datos del DOCX
-            extracted_data = import_proposal_from_docx(tmp_path)
+            # Extraer datos del DOCX (pasar filename original para parsing)
+            extracted_data = import_proposal_from_docx(tmp_path, file.filename)
             return {
                 "success": True,
                 "data": extracted_data,

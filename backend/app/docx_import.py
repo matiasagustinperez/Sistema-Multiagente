@@ -15,13 +15,14 @@ def extract_text_from_table_cell(cell) -> str:
     return '\n'.join([p.text for p in cell.paragraphs if p.text.strip()])
 
 
-def extract_header_fields(doc: Document) -> Dict[str, str]:
+def extract_header_fields(doc: Document, filename: str = "") -> Dict[str, str]:
     """
     Extrae campos del encabezado del documento.
-    Busca en tres lugares:
-    1. Párrafos iniciales (carrera, asignatura, plan, ciclo, año, cuatrimestre)
-    2. Tabla de Programa Analítico (régimen, carga horaria, horas)
-    3. Tabla de Equipo Docente (profesores, categorías, emails)
+    Busca en cuatro lugares:
+    1. Nombre del archivo (ej: "5°_2° - Proyecto de Ingeniería Mecatrónica")
+    2. Párrafos iniciales (carrera, asignatura, plan, ciclo, año, cuatrimestre)
+    3. Tabla de Programa Analítico (régimen, carga horaria, horas)
+    4. Tabla de Equipo Docente (profesores, categorías, emails)
     """
     fields = {
         'career': '',
@@ -33,6 +34,26 @@ def extract_header_fields(doc: Document) -> Dict[str, str]:
         'regime': '',
         'teaching_team': [],
     }
+    
+    # 0. EXTRAER DEL NOMBRE DEL ARCHIVO
+    # Formato típico: "5°_2° - Nombre de Asignatura.docx"
+    if filename:
+        # Buscar patrón como "5°" o "5°_2°" etc
+        year_match = re.search(r'(\d+)[°º]', filename)
+        if year_match:
+            fields['year_of_career'] = year_match.group(1)
+        
+        # Buscar segundo número para cuatrimestre: "5°_2°"
+        quarter_match = re.search(r'(\d+)[°º]\s*[-_]\s*(\d+)[°º]', filename)
+        if quarter_match:
+            fields['quarter'] = quarter_match.group(2)
+        
+        # Extraer asignatura: todo después del guion " - "
+        if ' - ' in filename:
+            subject_part = filename.split(' - ', 1)[1]
+            subject_part = subject_part.replace('.docx', '').replace('.DOCX', '').strip()
+            if subject_part:
+                fields['subject'] = subject_part
     
     # 1. EXTRAER DEL ENCABEZADO (párrafos iniciales)
     # Limitar a los primeros 15 párrafos para evitar buscar en contenido
@@ -50,7 +71,7 @@ def extract_header_fields(doc: Document) -> Dict[str, str]:
         if text_lower.startswith('carrera:') and not fields['career']:
             fields['career'] = text.split(':', 1)[1].strip()
         
-        # Asignatura/Nombre de Asignatura
+        # Asignatura/Nombre de Asignatura (no reemplazar si ya tenemos del filename)
         elif text_lower.startswith('asignatura:') and not fields['subject']:
             fields['subject'] = text.split(':', 1)[1].strip()
         
@@ -62,11 +83,11 @@ def extract_header_fields(doc: Document) -> Dict[str, str]:
         elif 'ciclo' in text_lower and ':' in text and not fields.get('cycle'):
             fields['cycle'] = text.split(':', 1)[1].strip()
         
-        # Año de Carrera - ser más específico
+        # Año de Carrera - no reemplazar si ya tenemos del filename
         elif text_lower.startswith('año') and 'carrera' in text_lower and ':' in text and not fields['year_of_career']:
             fields['year_of_career'] = text.split(':', 1)[1].strip()
         
-        # Cuatrimestre
+        # Cuatrimestre - no reemplazar si ya tenemos del filename
         elif 'cuatrimestre' in text_lower and ':' in text and not fields['quarter']:
             fields['quarter'] = text.split(':', 1)[1].strip()
     
@@ -145,6 +166,53 @@ def extract_header_fields(doc: Document) -> Dict[str, str]:
             for t in fields['teaching_team'] 
             if t.get('name')
         ])
+    
+    # 4. BÚSQUEDA ADICIONAL EN TABLAS Y PÁRRAFOS PARA CARRERA
+    # Si no tenemos carrera aún, buscar en texto de "Importancia en Plan de estudio"
+    if not fields['career']:
+        # Buscar en todas las tablas y párrafos
+        carrera_keywords = ['ingeniería mecatrónica', 'ingeniería en sistemas', 'ingeniería civil', 
+                           'ingeniería industrial', 'ingeniería eléctrica', 'ingeniería electrónica',
+                           'licenciatura', 'profesorado']
+        
+        # Buscar en párrafos
+        for para in doc.paragraphs[:100]:  # Buscar en más párrafos
+            text_lower = para.text.lower()
+            for career_kw in carrera_keywords:
+                if career_kw in text_lower:
+                    # Intentar extraer directamente
+                    for match in re.finditer(career_kw, text_lower):
+                        start_idx = text_lower.rfind(' ', 0, match.start()) + 1
+                        end_idx = text_lower.find(' ', match.end())
+                        if end_idx == -1:
+                            end_idx = len(text_lower)
+                        extracted = para.text[start_idx:end_idx].strip()
+                        if 8 <= len(extracted) <= 60 and any(c.isalpha() for c in extracted):
+                            fields['career'] = extracted
+                            break
+            if fields['career']:
+                break
+        
+        # Si aún no tenemos carrera, buscar en celdas de tablas
+        if not fields['career']:
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        cell_text = cell.text.lower()
+                        for career_kw in carrera_keywords:
+                            if career_kw in cell_text:
+                                # Intentar extraer
+                                for match in re.finditer(career_kw, cell_text):
+                                    start_idx = cell_text.rfind(' ', 0, match.start()) + 1
+                                    end_idx = cell_text.find(' ', match.end())
+                                    if end_idx == -1:
+                                        end_idx = len(cell_text)
+                                    extracted = cell.text[start_idx:end_idx].strip()
+                                    if 8 <= len(extracted) <= 60 and any(c.isalpha() for c in extracted):
+                                        fields['career'] = extracted
+                                        break
+                if fields['career']:
+                    break
     
     return fields
 
@@ -380,15 +448,24 @@ def extract_learning_outcomes(doc: Document) -> List[str]:
     return outcomes
 
 
-def import_proposal_from_docx(file_path: str) -> Dict[str, Any]:
+def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, Any]:
     """
     Importa una propuesta completa desde un DOCX.
     Retorna un diccionario con todos los campos extraídos.
+    
+    Args:
+        file_path: Ruta del archivo DOCX
+        filename: Nombre original del archivo (para parsing de metadata). Si no se proporciona, se extrae de file_path.
     """
     doc = Document(file_path)
     
-    # Extraer headers con la nueva lógica mejorada
-    header_fields = extract_header_fields(doc)
+    # Usar el filename proporcionado, o extraer del path
+    if not filename:
+        import os
+        filename = os.path.basename(file_path).replace('.docx', '').replace('.DOCX', '')
+    
+    # Extraer headers con la nueva lógica mejorada (incluyendo filename para parsing)
+    header_fields = extract_header_fields(doc, filename)
     
     # Extraer teaching team si existe
     teaching_team = header_fields.pop('teaching_team', [])
