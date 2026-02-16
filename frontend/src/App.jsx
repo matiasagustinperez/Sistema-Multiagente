@@ -306,9 +306,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
   const styles = {
     container: { display: 'flex', height: '100vh', fontFamily: 'Segoe UI, Arial' },
-    sidebar: { width: '220px', background: '#1a3d5c', color: '#fff', padding: '20px', overflowY: 'auto' },
+    sidebar: { width: '220px', background: '#e8f4f8', color: '#333', padding: '20px', overflowY: 'auto' },
     main: { flex: 1, overflowY: 'auto', background: '#f5f5f5' },
-    menuBtn: { display: 'block', width: '100%', padding: '12px', margin: '8px 0', background: '#006ba8', color: '#fff', border: 'none', cursor: 'pointer', borderRadius: '4px', fontSize: '14px' },
+    menuBtn: { display: 'block', width: '100%', padding: '12px', margin: '8px 0', background: '#0066cc', color: '#fff', border: 'none', cursor: 'pointer', borderRadius: '4px', fontSize: '14px' },
     menuBtnActive: { background: '#004d7a' },
     header: { background: '#1a3d5c', color: '#fff', padding: '20px', marginBottom: '20px' },
     section: { background: '#fff', margin: '15px 20px', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' },
@@ -353,9 +353,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     <div style={styles.container}>
       {/* Sidebar */}
       <div style={styles.sidebar}>
-        <div style={{ textAlign: 'center', marginBottom: '20px', paddingBottom: '15px', borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
+        <div style={{ textAlign: 'center', marginBottom: '20px', paddingBottom: '15px', borderBottom: '1px solid #ddd' }}>
           <img src={logoMacau} alt="MACAU" style={{ maxWidth: '140px', height: 'auto' }} />
-          <h3 style={{ color: '#fff', fontSize: '16px', marginTop: '10px' }}>MACAU</h3>
+          <h3 style={{ color: '#1a3d5c', fontSize: '16px', marginTop: '10px' }}>MACAU</h3>
         </div>
         <MenuButton label="Home" onClick={() => setActiveMenu('home')} active={activeMenu === 'home'} />
         <MenuButton label="Propuestas" onClick={() => setActiveMenu('propuestas')} active={activeMenu === 'propuestas'} />
@@ -686,9 +686,11 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 <textarea style={styles.textarea} value={formData.observaciones} onChange={(e) => updateFormData('observaciones', e.target.value)} />
               </div>
 
-              {/* SAVE BUTTON */}
-              <div style={styles.section}>
-                <button style={{ ...styles.button, background: '#388e3c', fontSize: '16px', padding: '15px 30px' }} onClick={saveProposal}>
+              {/* SAVE BUTTON - STICKY */}
+              <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 100 }}>
+                <button style={{ ...styles.button, background: '#388e3c', fontSize: '16px', padding: '15px 30px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }} 
+                  onClick={saveProposal}
+                  disabled={!formData.asignatura}>
                   Guardar Propuesta
                 </button>
               </div>
@@ -758,8 +760,43 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
             <h2>Propuestas en Proceso</h2>
-            <p style={{ color: '#ff9900', marginTop: '20px' }}>Esta sección te permitirá ver y completar propuestas que están en edición.</p>
-            <p>Por ahora no hay propuestas en proceso.</p>
+            {proposals.length === 0 ? (
+              <p style={{ color: '#999', marginTop: '20px' }}>No hay propuestas en edición aún.</p>
+            ) : (
+              <div style={{ overflowX: 'auto', marginTop: '20px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#ff9900', color: 'white' }}>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>ID</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Carrera</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Asignatura</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Año Académico</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Año Carrera</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Cuatrimestre</th>
+                      <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {proposals.map((prop, idx) => (
+                      <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
+                        <td style={{ padding: '10px' }}>#{prop.id}</td>
+                        <td style={{ padding: '10px' }}>{prop.career || '-'}</td>
+                        <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
+                        <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
+                        <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
+                        <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
+                            onClick={() => alert(`Continuar edición de propuesta #${prop.id}`)}>Continuar</button>
+                          <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', marginRight: '5px' }} 
+                            onClick={() => alert(`Eliminar propuesta #${prop.id}`)}>Eliminar</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
