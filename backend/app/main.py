@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from .database import SessionLocal, init_db
 from agents import extract as extract_agent
-from .docx_import import import_proposal_from_docx
+from .docx_import_final import import_proposal_from_docx
 from openai import OpenAI
 import shutil
 import tempfile
