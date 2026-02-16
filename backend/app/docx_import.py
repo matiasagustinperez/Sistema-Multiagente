@@ -142,6 +142,38 @@ def extract_section_tables(doc: Document, section_start_idx: int, section_end_id
     return tables_in_range
 
 
+def extract_learning_outcomes_from_tables(doc: Document) -> List[str]:
+    """
+    Extrae Resultados de Aprendizaje (RA1, RA2, etc.) desde TABLAS.
+    Busca en TODAS las tablas por líneas que contengan 'RA1:', 'RA2:', etc.
+    """
+    learning_outcomes = []
+    seen_numbers = set()
+    
+    for table_idx, table in enumerate(doc.tables):
+        # Buscar en cada celda de la tabla
+        for row_idx, row in enumerate(table.rows):
+            for cell_idx, cell in enumerate(row.cells):
+                cell_text = cell.text.strip()
+                
+                # Buscar patrón "RAX:" o "RAX -"
+                ra_matches = re.findall(r'RA\d+\s*[:\-]?\s*(.+?)(?=RA\d+\s*[:\-]|$)', cell_text, re.IGNORECASE | re.DOTALL)
+                
+                for match in ra_matches:
+                    # Extraer el número
+                    num_match = re.search(r'RA(\d+)', cell_text, re.IGNORECASE)
+                    if num_match:
+                        ra_num = num_match.group(1)
+                        if ra_num not in seen_numbers:
+                            seen_numbers.add(ra_num)
+                            # Limpiar el texto
+                            ra_text = match.strip().split('\n')[0][:200]  # Primeras 200 chars
+                            if ra_text:
+                                learning_outcomes.append(ra_text)
+    
+    return learning_outcomes
+
+
 def extract_programa_analitico(doc: Document) -> Dict[str, str]:
     """
     Extrae TODOS los campos de la tabla "Programa Analítico":
@@ -456,6 +488,10 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
                 # Buscar RA1, RA2, etc.
                 learning_outcomes = re.findall(r'RA\d+[:\-]?\s*([^\n]+)', ra_text, re.IGNORECASE)
             break
+    
+    # Si no se encontraron RAs en párrafos, buscar en TABLAS
+    if not learning_outcomes:
+        learning_outcomes = extract_learning_outcomes_from_tables(doc)
     
     # Extraer unidades (sección 4)
     units = extract_units_from_docx(doc, 0, len(doc.paragraphs))

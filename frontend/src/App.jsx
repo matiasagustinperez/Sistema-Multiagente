@@ -1909,22 +1909,24 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     setFormData({
       carrera: data.career || '',
       asignatura: data.subject || '',
-      plan: data.plan || '',
+      plan: data.study_plan || data.plan || '',
       anio: data.year_of_career || '',
       ciclo: '',
       cuatrimestre: data.quarter || '',
-      caracter: 'Obligatoria',
+      caracter: data.character || 'Obligatoria',
       regimen: data.regime || 'Cuatrimestral',
-      hsTeo: parseInt(data.hours) || 0,
-      hsPrac: 0,
-      contenidosMin: data.contenidos_minimos || '',
-      competenciasGen: data.importance || '',
-      competenciasEsp: '',
-      fundamentosP1: data.fundamentals || '',
+      hsTotal: parseInt(data.total_hours) || 0,
+      hsTeo: parseInt(data.theoretical_hours) || 0,
+      hsPrac: parseInt(data.practical_hours) || 0,
+      hsSemanal: parseInt(data.weekly_hours) || 0,
+      contenidosMin: data.minimum_content || '',
+      competenciasGen: data.generic_competencies || data.importance || '',
+      competenciasEsp: data.specific_competencies || '',
+      fundamentosP1: data.fundamentals || data.importance || '',
       fundamentosP2: '',
       resultadosAprendizaje: data.learning_outcomes?.map((ra, idx) => ({
         id: idx + 1,
-        descripcion: ra
+        descripcion: typeof ra === 'string' ? ra : ra.descripcion || ra
       })) || [],
       unidades: data.units?.map((unit, idx) => ({
         id: idx + 1,
@@ -1944,15 +1946,23 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       })) || [],
       metodologia: data.methodology || '',
       evaluacion: data.evaluation || '',
-      bibliografia: data.bibliography_complementary_apa || '',
+      bibliografia: data.bibliography || '',
       observaciones: data.observations || ''
     })
     
-    // Cargar equipo docente
-    if (data.teachers) {
+    // Cargar equipo docente desde teaching_team array
+    if (data.teaching_team && Array.isArray(data.teaching_team)) {
+      setEquipoDocente(data.teaching_team.map((docente, idx) => ({
+        id: idx + 1,
+        nombre: docente.name || '',
+        categoria: docente.category || '',
+        correo: docente.email || ''
+      })))
+    } else if (data.teachers && typeof data.teachers === 'string') {
+      // Fallback para compatibilidad con formato antiguo
       setEquipoDocente([{
         id: 1,
-        nombre: data.teachers.toUpperCase(),
+        nombre: data.teachers,
         categoria: 'TITULAR',
         correo: ''
       }])
@@ -2913,7 +2923,10 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     <div><strong>Asignatura:</strong> {importPreview.preview.subject || '-'}</div>
                     <div><strong>Año de Carrera:</strong> {importPreview.preview.year || '-'}</div>
                     <div><strong>Cuatrimestre:</strong> {importPreview.preview.quarter || '-'}</div>
-                    <div><strong>Horas:</strong> {importPreview.preview.hours || '-'}</div>
+                    <div><strong>Carga Horaria Total:</strong> {importPreview.preview.total_hours || '-'} hs</div>
+                    <div><strong>Horas Teóricas:</strong> {importPreview.preview.theoretical_hours || '-'} hs</div>
+                    <div><strong>Horas Prácticas:</strong> {importPreview.preview.practical_hours || '-'} hs</div>
+                    <div><strong>Horas Semanales:</strong> {importPreview.preview.weekly_hours || '-'} hs</div>
                     <div><strong>Régimen:</strong> {importPreview.preview.regime || '-'}</div>
                     <div><strong>Unidades:</strong> {importPreview.preview.units_count || 0}</div>
                     <div><strong>Trabajos Prácticos:</strong> {importPreview.preview.practicals_count || 0}</div>
@@ -2970,19 +2983,14 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 {importPreview.data?.units && importPreview.data.units.length > 0 && (
                   <div style={{ marginTop: '20px', padding: '15px', background: '#f5f5f5', borderRadius: '8px' }}>
                     <h4>Unidades Extraídas ({importPreview.data.units.length})</h4>
-                    {importPreview.data.units.slice(0, 3).map((unit, idx) => (
+                    {importPreview.data.units.map((unit, idx) => (
                       <div key={idx} style={{ padding: '10px', marginTop: '8px', background: '#fff', borderRadius: '4px', borderLeft: '3px solid #0066cc' }}>
-                        <strong>{unit.name || `Unidad ${idx + 1}`}</strong>
+                        <strong>Unidad {unit.number || idx + 1}: {unit.name || `Unidad ${idx + 1}`}</strong>
                         <p style={{ margin: '5px 0', color: '#666', fontSize: '12px' }}>
-                          Contenidos: {unit.content?.substring(0, 60) || '-'}...
+                          Contenidos: {unit.content?.substring(0, 80) || '-'}...
                         </p>
                       </div>
                     ))}
-                    {importPreview.data.units.length > 3 && (
-                      <p style={{ marginTop: '10px', color: '#999', fontSize: '12px' }}>
-                        ... y {importPreview.data.units.length - 3} unidades más
-                      </p>
-                    )}
                   </div>
                 )}
                 
@@ -2990,19 +2998,14 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 {importPreview.data?.practicals && importPreview.data.practicals.length > 0 && (
                   <div style={{ marginTop: '20px', padding: '15px', background: '#f5f5f5', borderRadius: '8px' }}>
                     <h4>Trabajos Prácticos Extraídos ({importPreview.data.practicals.length})</h4>
-                    {importPreview.data.practicals.slice(0, 3).map((tp, idx) => (
+                    {importPreview.data.practicals.map((tp, idx) => (
                       <div key={idx} style={{ padding: '10px', marginTop: '8px', background: '#fff', borderRadius: '4px', borderLeft: '3px solid #ff9900' }}>
-                        <strong>{tp.name || `TP ${idx + 1}`}</strong>
+                        <strong>TP {tp.number || idx + 1}: {tp.name || `TP ${idx + 1}`}</strong>
                         <p style={{ margin: '5px 0', color: '#666', fontSize: '12px' }}>
-                          Objetivo: {tp.objective?.substring(0, 60) || '-'}...
+                          Objetivo: {tp.objective?.substring(0, 80) || '-'}...
                         </p>
                       </div>
                     ))}
-                    {importPreview.data.practicals.length > 3 && (
-                      <p style={{ marginTop: '10px', color: '#999', fontSize: '12px' }}>
-                        ... y {importPreview.data.practicals.length - 3} TPs más
-                      </p>
-                    )}
                   </div>
                 )}
               </div>
