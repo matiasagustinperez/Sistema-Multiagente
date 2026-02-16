@@ -149,39 +149,43 @@ def list_proposals(skip: int = 0, limit: int = 100, db: Session = Depends(get_db
     return proposals
 
 
-@app.post("/proposals", response_model=schemas.ProposalOut)
+@app.post("/proposals")
 def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_db)):
     """Create a new proposal from form data (no file upload)."""
-    db_proposal = models.Proposal(
-        title=proposal.title,
-        career=proposal.career,
-        subject=proposal.subject,
-        study_plan=proposal.study_plan,
-        academic_year=proposal.academic_year,
-        year_of_career=proposal.year_of_career,
-        quarter=proposal.quarter,
-        character=proposal.character,
-        regime=proposal.regime,
-        theoretical_hours=proposal.theoretical_hours,
-        practical_hours=proposal.practical_hours,
-        total_hours=proposal.total_hours,
-        weekly_hours=proposal.weekly_hours,
-        minimum_content=proposal.minimum_content,
-        generic_competencies=proposal.generic_competencies,
-        specific_competencies=proposal.specific_competencies,
-        fundamentals_part1=proposal.fundamentals_part1,
-        fundamentals_part2=proposal.fundamentals_part2,
-        learning_outcomes=proposal.learning_outcomes,
-        units=proposal.units,
-        practicals=proposal.practicals,
-        methodology=proposal.methodology,
-        evaluation=proposal.evaluation,
-        bibliography=proposal.bibliography,
-        observations=proposal.observations,
-        original_filename="form_submission",
-        status="draft"
-    )
-    db.add(db_proposal)
-    db.commit()
-    db.refresh(db_proposal)
-    return db_proposal
+    try:
+        db_proposal = models.Proposal(
+            title=proposal.title,
+            career=proposal.career,
+            subject=proposal.subject,
+            study_plan=proposal.study_plan,
+            academic_year=proposal.academic_year,
+            year_of_career=proposal.year_of_career,
+            quarter=proposal.quarter,
+            character=proposal.character,
+            regime=proposal.regime,
+            theoretical_hours=proposal.theoretical_hours,
+            practical_hours=proposal.practical_hours,
+            total_hours=proposal.total_hours,
+            weekly_hours=proposal.weekly_hours,
+            minimum_content=proposal.minimum_content,
+            generic_competencies=proposal.generic_competencies,
+            specific_competencies=proposal.specific_competencies,
+            fundamentals_part1=proposal.fundamentals_part1,
+            fundamentals_part2=proposal.fundamentals_part2,
+            learning_outcomes=proposal.learning_outcomes,
+            units=proposal.units,
+            practicals=proposal.practicals,
+            methodology=proposal.methodology,
+            evaluation=proposal.evaluation,
+            bibliography=proposal.bibliography,
+            observations=proposal.observations,
+            original_filename="form_submission",
+            status="draft"
+        )
+        db.add(db_proposal)
+        db.commit()
+        db.refresh(db_proposal)
+        return {"id": db_proposal.id, "title": db_proposal.title, "career": db_proposal.career, "subject": db_proposal.subject, "created_at": db_proposal.created_at}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Error creating proposal: {str(e)}")

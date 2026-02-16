@@ -51,6 +51,17 @@ export default function App() {
     fetchProposals()
   }, [])
 
+  // Auto-clear status messages after 3 seconds
+  useEffect(() => {
+    if (statusMsg) {
+      const timer = setTimeout(() => {
+        setStatusMsg('')
+        setStatusType('')
+      }, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [statusMsg])
+
   const fetchProposals = async () => {
     try {
       const res = await fetch('http://localhost:8001/proposals')
