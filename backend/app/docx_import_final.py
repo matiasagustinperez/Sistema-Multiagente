@@ -262,34 +262,42 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
     bibliography = ''
     observations = ''
     
-    # Buscar tablas por keyword
-    for table in doc.tables:
+    # Estrategia: buscar tablas por contenido/keyword, pero siendo inteligente:
+    # - Tabla después de Equipo Docente probablemente sea Contenidos Mínimos
+    # - Si una tabla no tiene "unidad", "práctico", "caracter", etc., probablemente sea contenido
+    
+    for table_idx, table in enumerate(doc.tables):
         table_text = ' '.join([cell.text for row in table.rows for cell in row.cells]).lower()
+        table_content = extract_content_from_single_cell_table(table) if len(table.rows) >= 1 else ''
+        
+        # Tabla 2 es típicamente Contenidos Mínimos (después de Programa Analítico y Equipo Docente)
+        if table_idx == 2 and not contenidos_minimos and len(table_content) > 50:
+            contenidos_minimos = table_content
         
         # Buscar cada sección por palabra clave
         if not contenidos_minimos and ('contenidos' in table_text and 'mínimos' in table_text):
-            contenidos_minimos = extract_content_from_single_cell_table(table)
+            contenidos_minimos = table_content
         
         if not importance and ('importancia' in table_text or 'fundamentos' in table_text):
-            importance = extract_content_from_single_cell_table(table)
+            importance = table_content
         
         if not generic_comp and 'competencias' in table_text and 'genéricas' in table_text:
-            generic_comp = extract_content_from_single_cell_table(table)
+            generic_comp = table_content
         
         if not specific_comp and 'competencias' in table_text and 'específicas' in table_text:
-            specific_comp = extract_content_from_single_cell_table(table)
+            specific_comp = table_content
         
         if not methodology and ('metodología' in table_text or 'metodologia' in table_text):
-            methodology = extract_content_from_single_cell_table(table)
+            methodology = table_content
         
         if not evaluation and ('evaluación' in table_text or 'evaluacion' in table_text):
-            evaluation = extract_content_from_single_cell_table(table)
+            evaluation = table_content
         
         if not bibliography and ('bibliografía' in table_text or 'bibliografia' in table_text):
-            bibliography = extract_content_from_single_cell_table(table)
+            bibliography = table_content
         
         if not observations and ('observaciones' in table_text or 'laboratorio' in table_text):
-            observations = extract_content_from_single_cell_table(table)
+            observations = table_content
     
     # Extraer TODAS las unidades desde TODAS las tablas
     # Buscar cada celda que tenga "Unidad N°:" sin importar en qué tabla esté
@@ -301,7 +309,7 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
             for cell_idx, cell in enumerate(row.cells):
                 cell_text = cell.text
                 # Buscar "Unidad N°:" en cualquier celda
-                if 'unidad' in cell_text.lower() and 'n[°º]' in re.sub(r'[°º]', 'N', cell_text.lower()):
+                if 'unidad' in cell_text.lower():
                     match = re.search(r'unidad\s+n[°º]?\s*:?\s*(\d+)', cell_text, re.IGNORECASE)
                     if match:
                         unit_num = match.group(1)
@@ -313,7 +321,7 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
                             if cell_idx + 1 < len(row.cells):
                                 unit_data['name'] = row.cells[cell_idx + 1].text.strip()
                             
-                            # Buscar contenidos en la siguente fila
+                            # Buscar contenidos en la siguiente fila
                             if row_idx + 1 < len(table.rows):
                                 next_row = table.rows[row_idx + 1]
                                 if len(next_row.cells) >= 1:
@@ -332,7 +340,7 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
             for cell_idx, cell in enumerate(row.cells):
                 cell_text = cell.text
                 # Buscar "Práctico Nº:" en cualquier celda
-                if ('práctico' in cell_text.lower() or 'practico' in cell_text.lower()) and 'n[°º]' in re.sub(r'[°º]', 'N', cell_text.lower()):
+                if ('práctico' in cell_text.lower() or 'practico' in cell_text.lower()):
                     match = re.search(r'pr[áa]ctico\s+n[°º]?\s*:?\s*(\d+)', cell_text, re.IGNORECASE)
                     if match:
                         tp_num = match.group(1)
