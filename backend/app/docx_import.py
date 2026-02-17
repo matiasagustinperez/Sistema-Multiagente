@@ -305,30 +305,26 @@ def extract_section_tables(doc: Document, section_start_idx: int, section_end_id
 def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
     """
     Extrae Competencias Genéricas (CG + letra: CGS, CGT, CGU, etc) del texto.
-    Formato: "- CGS1 - Descripción" o "- CGT. Descripción" o "- CGU: Descripción" o "- CGS Descripción"
-    Retorna: [{'code': 'CGS1', 'description': 'Descripción', 'level': ''}, ...]
-    Soporta múltiples competencias, cada una en su propia línea
-    El separador es OPCIONAL (-:.)
+    Soporta formato: "CGX - descripción (Nivel - CGY - descripción - Nivel - ..."
+    Retorna: [{'code': 'CGS1', 'description': 'Descripción', 'level': 'Medio'}, ...]
     """
     competencies = []
-    # Buscar líneas que comiencen con "- CG" + cualquier letra + número
-    # Patrón: CG seguido de una letra (S, T, U, etc) seguido de opcional número
-    # Separador es opcional para mayor flexibilidad
-    pattern = r'^\s*[-•]\s*([Cc][Gg][A-Za-z]\d*)\s*[-:.]?\s*(.+)$'
-    matches = re.finditer(pattern, text, re.MULTILINE)
     
-    for match in matches:
+    # Patrón: CGX - descripción SEGUIDO de (Nivel o - Nivel o ) al final
+    # Descripción va hasta encontrar un nivel o el siguiente código
+    # Patrón: CG[letra][dígitos] - [desc no contiene (] - [nivel]
+    pattern = r'([Cc][Gg][A-Za-z]\d+)\s*-\s*([^-()]+?)(?:\s*[\(-]\s*([Aa]lto|[Mm]edio|[Bb]ajo))?(?=\s*[-\)])'
+    
+    for match in re.finditer(pattern, text):
         code = match.group(1).upper()
-        description = match.group(2).strip()
-        
-        # Limpiar trailing separators
-        description = re.sub(r'\s*[-:.]\s*$', '', description).strip()
+        description = ' '.join(match.group(2).split()).strip()
+        level = (match.group(3) or '').capitalize() if match.group(3) else ''
         
         if description and len(description) > 2:
             competencies.append({
                 'code': code,
                 'description': description,
-                'level': ''
+                'level': level
             })
     
     return competencies
@@ -337,30 +333,26 @@ def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
 def extract_specific_competencies(text: str) -> List[Dict[str, str]]:
     """
     Extrae Competencias Específicas (CEx) del texto.
-    Formato: "- CE1 - Descripción" o "- CE2. Descripción" o "- CE3: Descripción" o "- CE4 Descripción"
-    Retorna: [{'code': 'CE1', 'description': 'Descripción', 'level': ''}, ...]
-    Soporta múltiples competencias, cada una en su propia línea
-    El separador es OPCIONAL (-:.)
+    Soporta formato: "CEX - descripción (Nivel - CEY - descripción - Nivel - ..."
+    Retorna: [{'code': 'CE1', 'description': 'Descripción', 'level': 'Medio'}, ...]
     """
     competencies = []
-    # Buscar líneas que comiencen con "- CE" + números
-    # Patrón: CE seguido de dígitos
-    # Separador es opcional para mayor flexibilidad
-    pattern = r'^\s*[-•]\s*([Cc][Ee]\d+)\s*[-:.]?\s*(.+)$'
-    matches = re.finditer(pattern, text, re.MULTILINE)
     
-    for match in matches:
+    # Patrón: CEX - descripción SEGUIDO de (Nivel o - Nivel o ) al final
+    # Descripción va hasta encontrar un nivel o el siguiente código
+    # Patrón: CE[dígitos] - [desc no contiene (] - [nivel]
+    pattern = r'([Cc][Ee]\d+)\s*-\s*([^-()]+?)(?:\s*[\(-]\s*([Aa]lto|[Mm]edio|[Bb]ajo))?(?=\s*[-\)])'
+    
+    for match in re.finditer(pattern, text):
         code = match.group(1).upper()
-        description = match.group(2).strip()
-        
-        # Limpiar trailing separators
-        description = re.sub(r'\s*[-:.]\s*$', '', description).strip()
+        description = ' '.join(match.group(2).split()).strip()
+        level = (match.group(3) or '').capitalize() if match.group(3) else ''
         
         if description and len(description) > 2:
             competencies.append({
                 'code': code,
                 'description': description,
-                'level': ''
+                'level': level
             })
     
     return competencies
