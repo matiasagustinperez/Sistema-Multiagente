@@ -123,7 +123,7 @@ export default function App() {
     return formData.carrera && formData.asignatura && formData.plan &&
            formData.ciclo && formData.cuatrimestre && formData.caracter &&
            formData.regimen && formData.contenidosMin && 
-           formData.competenciasGen && formData.competenciasEsp
+           formData.competenciasGen
   }
 
   const isNonEmptyText = (value) => typeof value === 'string' && value.trim().length > 0
