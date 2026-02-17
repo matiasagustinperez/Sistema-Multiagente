@@ -144,7 +144,8 @@ export default function App() {
     // Sección Contenidos
     if (!isNonEmptyText(formData.contenidosMin)) errors.push('Contenidos Mínimos')
     if (!isNonEmptyText(formData.competenciasGen)) errors.push('Competencias Genéricas')
-    if (!isNonEmptyText(formData.competenciasEsp)) errors.push('Competencias Específicas')
+    // Competencias Específicas es opcional
+    // if (!isNonEmptyText(formData.competenciasEsp)) errors.push('Competencias Específicas')
     
     // Sección Fundamentación
     if (!isNonEmptyText(formData.fundamentosP1)) errors.push('Fundamentación P1')
@@ -832,8 +833,8 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       setStatusType('info')
       return
     }
-    if (!isNonEmptyText(formData.competenciasGen) || !isNonEmptyText(formData.competenciasEsp)) {
-      setStatusMsg('Completa Competencias Genericas y Especificas antes de generar RA')
+    if (!isNonEmptyText(formData.competenciasGen)) {
+      setStatusMsg('Completa Competencias Genéricas antes de generar RA')
       setStatusType('info')
       return
     }
@@ -2424,7 +2425,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               </div>
 
               <div style={styles.section}>
-                <h3>Competencias Específicas *</h3>
+                <h3>Competencias Específicas</h3>
                 <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.competenciasEsp} onChange={(e) => updateFormData('competenciasEsp', e.target.value)} />
               </div>
 
@@ -3080,9 +3081,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                   )}
 
                   {/* Competencias Específicas */}
-                  {importPreview.data?.specific_competencies && importPreview.data.specific_competencies.length > 0 && (
-                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
-                      <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Específicas ({importPreview.data.specific_competencies.length}):</strong>
+                  <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                    <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Específicas {importPreview.data?.specific_competencies && importPreview.data.specific_competencies.length > 0 ? `(${importPreview.data.specific_competencies.length})` : ''}:</strong>
+                    {importPreview.data?.specific_competencies && importPreview.data.specific_competencies.length > 0 ? (
                       <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
                         {importPreview.data.specific_competencies.map((comp, idx) => (
                           <div key={idx} style={{ padding: '5px', marginBottom: '5px', background: '#f9f9f9', borderRadius: '3px', fontSize: '13px' }}>
@@ -3090,8 +3091,10 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                           </div>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <div style={{ background: '#f5f5f5', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', color: '#999', fontStyle: 'italic' }}>No Aplica</div>
+                    )}
+                  </div>
 
                   {/* Resultados de Aprendizaje */}
                   {importPreview.data?.learning_outcomes && importPreview.data.learning_outcomes.length > 0 && (
@@ -3312,7 +3315,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               <div style={{ marginTop: '15px' }}>
                 <h3>Competencias</h3>
                 <div style={{ whiteSpace: 'pre-wrap' }}><strong>Genericas:</strong> {viewProposal.generic_competencies || '-'}</div>
-                <div style={{ whiteSpace: 'pre-wrap' }}><strong>Especificas:</strong> {viewProposal.specific_competencies || '-'}</div>
+                <div style={{ whiteSpace: 'pre-wrap' }}><strong>Especificas:</strong> {viewProposal.specific_competencies || 'No Aplica'}</div>
               </div>
 
               <div style={{ marginTop: '15px' }}>
