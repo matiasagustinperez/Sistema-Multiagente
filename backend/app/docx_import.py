@@ -378,17 +378,24 @@ def extract_learning_outcomes_parsed(text: str) -> List[Dict[str, str]]:
     """
     outcomes = []
     # Patrón flexible: guión opcional, RA con espacio opcional, separadores diversos
-    # (?:[-•]\s*)? - Opcionalmente: guión/bullet y espacios (no captura)
-    # ([Rr][Aa]\s*\d+) - RA con espacio opcional entre RA y número (CAPTURA)
+    # Captura descripciones que pueden ocupar múltiples líneas hasta el siguiente RA
+    # (?:^|\n)\s* - Inicio de línea con espacios
+    # (?:[-•]\s*)?\s* - Opcionalmente: guión/bullet con espacios
+    # ([Rr][Aa]\s*\d+) - RA con espacio opcional entre RA y número (CAPTURA 1)
     # \s*[-:.]?\s* - Espacios y separadores opcionales
-    # ([^\n]+) - Descripción hasta fin de línea (CAPTURA)
-    pattern = r'(?:^|\n)(?:[-•]\s*)?([Rr][Aa]\s*\d+)\s*[-:.]?\s*([^\n]+)'
+    # ([^\n]*(?:\n(?!\s*(?:[-•]\s*)?\s*[Rr][Aa]\s*\d+)[^\n]*)*) - Descripción multi-línea (CAPTURA 2)
+    #   [^\n]* - Caracteres hasta fin de línea
+    #   (?:\n(?!\s*(?:[-•]\s*)?\s*[Rr][Aa]\s*\d+)[^\n]*)* - Líneas adicionales que no empiezan con RA
+    pattern = r'(?:^|\n)\s*(?:[-•]\s*)?\s*([Rr][Aa]\s*\d+)\s*[-:.]?\s*([^\n]*(?:\n(?!\s*(?:[-•]\s*)?\s*[Rr][Aa]\s*\d+)[^\n]*)*)'
     matches = re.finditer(pattern, text, re.MULTILINE)
     
     seen_codes = set()
     for match in matches:
         code = match.group(1).upper().replace(' ', '')  # RA 1 -> RA1
         description = match.group(2).strip()
+        
+        # Limpiar descripción: convertir saltos de línea en espacios y normalizar espacios
+        description = ' '.join(description.split())  # Convierte múltiples espacios/saltos en espacios simples
         
         # Limpiar descripción de separadores leading
         description = re.sub(r'^[-:.]\s*', '', description).strip()
