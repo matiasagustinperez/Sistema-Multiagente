@@ -886,9 +886,60 @@ def extract_practicals_from_docx(doc: Document) -> List[Dict[str, str]]:
                 segments['scope'] = after
 
         objective_raw = segments.get('objective', '')
+        ra_text = ''
+        line_sections = None
+
+        if not segments.get('activities') and not segments.get('materials') and not segments.get('scope'):
+            line_sections = {
+                'objective': [],
+                'ra': [],
+                'activities': [],
+                'materials': [],
+                'scope': [],
+            }
+            current = None
+
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                norm_line = normalize_docx_text(line)
+
+                if re.search(r'\bobjetivo\b', norm_line):
+                    current = 'objective'
+                    continue
+                if re.search(r'resultados?\s+de\s+aprendizaje', norm_line):
+                    current = 'ra'
+                    continue
+                if 'actividades' in norm_line and 'desarrollar' in norm_line:
+                    current = 'activities'
+                    continue
+                if re.search(r'\bmateriales?\b', norm_line):
+                    current = 'materials'
+                    continue
+                if 'ambito' in norm_line:
+                    current = 'scope'
+                    continue
+
+                if current:
+                    line_sections[current].append(line)
+
+            if any(line_sections.values()):
+                if line_sections['objective']:
+                    objective_raw = '\n'.join(line_sections['objective']).strip()
+                if line_sections['ra']:
+                    ra_text = '\n'.join(line_sections['ra']).strip()
+                if line_sections['activities']:
+                    segments['activities'] = '\n'.join(line_sections['activities']).strip()
+                if line_sections['materials']:
+                    segments['materials'] = '\n'.join(line_sections['materials']).strip()
+                if line_sections['scope']:
+                    segments['scope'] = '\n'.join(line_sections['scope']).strip()
+
         ra_codes = []
+        ra_source = ra_text or objective_raw
         # Busca RAs en formatos: "RA 3", "RA3", "RA 3.", "RA 3:", etc.
-        for match in re.finditer(r'RA\s*(\d+)', objective_raw, re.IGNORECASE):
+        for match in re.finditer(r'RA\s*(\d+)', ra_source, re.IGNORECASE):
             code = f"RA{match.group(1)}"
             if code not in ra_codes:
                 ra_codes.append(code)
@@ -907,11 +958,28 @@ def extract_practicals_from_docx(doc: Document) -> List[Dict[str, str]]:
         if not objective_clean and objective_raw:
             objective_clean = objective_raw.strip()
 
+        def clean_scope(value: str) -> str:
+            if not value:
+                return ''
+            cleaned = re.sub(r'(?i)[áa]mbito(?:\s+de\s+pr[áa]ctica)?\s*:?','', value).strip()
+            earliest = None
+            for _, pattern in label_patterns:
+                match = pattern.search(cleaned)
+                if match:
+                    earliest = match.start() if earliest is None else min(earliest, match.start())
+            if earliest is not None:
+                cleaned = cleaned[:earliest].strip()
+            for line in cleaned.splitlines():
+                line = line.strip()
+                if line:
+                    return line
+            return cleaned.strip()
+
         return {
             'objective': objective_clean,
             'activities': segments.get('activities', '').strip(),
             'materials': segments.get('materials', '').strip(),
-            'scope': segments.get('scope', '').strip(),
+            'scope': clean_scope(segments.get('scope', '')),
             'ra_codes': ra_codes,
         }
 
@@ -1159,6 +1227,32 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
     
     # Extraer equipo docente
     teaching_team = extract_equipo_docente(doc)
+    if teaching_team:
+        category_priority = {
+            'titular': 0,
+            'asociado': 1,
+            'adjunto': 2,
+            'jtp': 3,
+            'ayudante 1o': 4,
+            'ayudante 1º': 4,
+            'ayudante 1': 4,
+            'ayudante': 4,
+        }
+
+        def teacher_rank(entry: Dict[str, str], original_idx: int) -> Tuple[int, int]:
+            category_raw = entry.get('category') or ''
+            normalized = normalize_docx_text(category_raw)
+            normalized = normalized.replace('1°', '1o').replace('1º', '1o')
+            rank = category_priority.get(normalized, 99)
+            return (rank, original_idx)
+
+        teaching_team = [
+            entry
+            for _, entry in sorted(
+                enumerate(teaching_team),
+                key=lambda pair: teacher_rank(pair[1], pair[0])
+            )
+        ]
     teaching_team_str = '; '.join([
         f"{t['name']} ({t['category']})"
         for t in teaching_team if t.get('name')
@@ -1317,6 +1411,15 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
     if not observations:
         observations = extract_labeled_table_content(doc, ['observaciones', 'observación', 'observacion'])
     observations = strip_observations_footer(observations)
+
+    quarter_raw = header_fields.get('quarter', '')
+    quarter_norm = normalize_docx_text(quarter_raw)
+    regime_value = programa_analitico.get('regime', '')
+    if quarter_norm:
+        if 'anual' in quarter_norm or quarter_norm.strip() == 'a':
+            regime_value = 'Anual'
+        elif '1' in quarter_norm or '2' in quarter_norm:
+            regime_value = 'Cuatrimestral'
     
     # Compilar respuesta final
     data = {
@@ -1330,7 +1433,7 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
         
         # Programa Analítico
         'character': programa_analitico.get('character', ''),
-        'regime': programa_analitico.get('regime', ''),
+        'regime': regime_value,
         'total_hours': programa_analitico.get('total_hours', ''),
         'theoretical_hours': programa_analitico.get('theoretical_hours', ''),
         'practical_hours': programa_analitico.get('practical_hours', ''),

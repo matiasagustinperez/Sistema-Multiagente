@@ -19,6 +19,7 @@ const App = () => {
 
   // AI state
   const [aiSection, setAiSection] = useState(null)
+  const [aiLoading, setAiLoading] = useState(false)
   const [showComparison, setShowComparison] = useState(false)
   const [aiError, setAiError] = useState('')
   const [raBatchCount, setRaBatchCount] = useState(5)
@@ -3052,6 +3053,9 @@ const App = () => {
       setActiveCareer(normalizedCareer)
     }
     setProposalsMode('create')
+    setEditingProposalId(null)
+    setEditingProposalStatus(null)
+    setViewProposal(null)
     setImportPreview(null)
     setImportFile(null)
     setStatusMsg('Propuesta cargada en el formulario')
@@ -4862,41 +4866,6 @@ const App = () => {
                       </tbody>
                     </table>
                   )}
-                      {catalogUsageInfo.itemId && catalogUsageInfo.type === 'generic' && (
-                        <div style={{ marginTop: '12px', background: '#f7f7f7', border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                            <strong>
-                              Propuestas afectadas {catalogUsageInfo.code ? `(${catalogUsageInfo.code})` : ''}
-                            </strong>
-                            <button
-                              style={{ ...styles.button, background: '#999', padding: '4px 10px', marginRight: 0 }}
-                              onClick={clearCatalogUsage}
-                            >
-                              Limpiar
-                            </button>
-                          </div>
-                          {catalogUsageInfo.loading ? (
-                            <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
-                          ) : catalogUsageInfo.error ? (
-                            <div style={{ marginTop: '8px', color: '#b00020' }}>{catalogUsageInfo.error}</div>
-                          ) : (catalogUsageInfo.items.length === 0 && catalogUsageInfo.ids.length === 0) ? (
-                            <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
-                          ) : (
-                            <div style={{ marginTop: '8px', maxHeight: '120px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px', padding: '8px' }}>
-                              <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
-                                Total: {catalogUsageInfo.items.length || catalogUsageInfo.ids.length}
-                              </div>
-                              <div style={{ display: 'grid', gap: '4px' }}>
-                                {(catalogUsageInfo.items.length ? catalogUsageInfo.items : catalogUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
-                                  <div key={`${row.id}-${idx}`}>
-                                    #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
                 </div>
 
                 <div style={{ background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd' }}>
@@ -5016,41 +4985,6 @@ const App = () => {
                       </tbody>
                     </table>
                   )}
-                      {catalogUsageInfo.itemId && catalogUsageInfo.type === 'specific' && (
-                        <div style={{ marginTop: '12px', background: '#f7f7f7', border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                            <strong>
-                              Propuestas afectadas {catalogUsageInfo.code ? `(${catalogUsageInfo.code})` : ''}
-                            </strong>
-                            <button
-                              style={{ ...styles.button, background: '#999', padding: '4px 10px', marginRight: 0 }}
-                              onClick={clearCatalogUsage}
-                            >
-                              Limpiar
-                            </button>
-                          </div>
-                          {catalogUsageInfo.loading ? (
-                            <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
-                          ) : catalogUsageInfo.error ? (
-                            <div style={{ marginTop: '8px', color: '#b00020' }}>{catalogUsageInfo.error}</div>
-                          ) : (catalogUsageInfo.items.length === 0 && catalogUsageInfo.ids.length === 0) ? (
-                            <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
-                          ) : (
-                            <div style={{ marginTop: '8px', maxHeight: '120px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px', padding: '8px' }}>
-                              <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
-                                Total: {catalogUsageInfo.items.length || catalogUsageInfo.ids.length}
-                              </div>
-                              <div style={{ display: 'grid', gap: '4px' }}>
-                                {(catalogUsageInfo.items.length ? catalogUsageInfo.items : catalogUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
-                                  <div key={`${row.id}-${idx}`}>
-                                    #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
                 </div>
               </div>
             </div>
@@ -5102,6 +5036,82 @@ const App = () => {
                   Confirmar eliminación
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {catalogUsageInfo.itemId && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+            <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', maxWidth: '560px', width: '92%', maxHeight: '80vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <h3 style={{ marginTop: 0 }}>
+                  Propuestas afectadas {catalogUsageInfo.code ? `(${catalogUsageInfo.code})` : ''}
+                </h3>
+                <button
+                  style={{ ...styles.button, background: '#999', padding: '4px 10px', marginRight: 0 }}
+                  onClick={clearCatalogUsage}
+                >
+                  Cerrar
+                </button>
+              </div>
+              {catalogUsageInfo.loading ? (
+                <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
+              ) : catalogUsageInfo.error ? (
+                <div style={{ marginTop: '8px', color: '#b00020' }}>{catalogUsageInfo.error}</div>
+              ) : (catalogUsageInfo.items.length === 0 && catalogUsageInfo.ids.length === 0) ? (
+                <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
+              ) : (
+                <div style={{ marginTop: '8px', maxHeight: '320px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', padding: '10px' }}>
+                  <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
+                    Total: {catalogUsageInfo.items.length || catalogUsageInfo.ids.length}
+                  </div>
+                  <div style={{ display: 'grid', gap: '6px' }}>
+                    {(catalogUsageInfo.items.length ? catalogUsageInfo.items : catalogUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
+                      <div key={`${row.id}-${idx}`}>
+                        #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {teacherUsageInfo.teacherId && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+            <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', maxWidth: '560px', width: '92%', maxHeight: '80vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <h3 style={{ marginTop: 0 }}>
+                  Propuestas afectadas {teacherUsageInfo.name ? `(${teacherUsageInfo.name})` : ''}
+                </h3>
+                <button
+                  style={{ ...styles.button, background: '#999', padding: '4px 10px', marginRight: 0 }}
+                  onClick={clearTeacherUsage}
+                >
+                  Cerrar
+                </button>
+              </div>
+              {teacherUsageInfo.loading ? (
+                <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
+              ) : teacherUsageInfo.error ? (
+                <div style={{ marginTop: '8px', color: '#b00020' }}>{teacherUsageInfo.error}</div>
+              ) : (teacherUsageInfo.items.length === 0 && teacherUsageInfo.ids.length === 0) ? (
+                <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
+              ) : (
+                <div style={{ marginTop: '8px', maxHeight: '320px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', padding: '10px' }}>
+                  <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
+                    Total: {teacherUsageInfo.items.length || teacherUsageInfo.ids.length}
+                  </div>
+                  <div style={{ display: 'grid', gap: '6px' }}>
+                    {(teacherUsageInfo.items.length ? teacherUsageInfo.items : teacherUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
+                      <div key={`${row.id}-${idx}`}>
+                        #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -5396,41 +5406,6 @@ const App = () => {
                   </table>
                 )}
 
-                {teacherUsageInfo.teacherId && (
-                  <div style={{ marginTop: '12px', background: '#f7f7f7', border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                      <strong>
-                        Propuestas afectadas {teacherUsageInfo.name ? `(${teacherUsageInfo.name})` : ''}
-                      </strong>
-                      <button
-                        style={{ ...styles.button, background: '#999', padding: '4px 10px', marginRight: 0 }}
-                        onClick={clearTeacherUsage}
-                      >
-                        Limpiar
-                      </button>
-                    </div>
-                    {teacherUsageInfo.loading ? (
-                      <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
-                    ) : teacherUsageInfo.error ? (
-                      <div style={{ marginTop: '8px', color: '#b00020' }}>{teacherUsageInfo.error}</div>
-                    ) : (teacherUsageInfo.items.length === 0 && teacherUsageInfo.ids.length === 0) ? (
-                      <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
-                    ) : (
-                      <div style={{ marginTop: '8px', maxHeight: '120px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px', padding: '8px' }}>
-                        <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
-                          Total: {teacherUsageInfo.items.length || teacherUsageInfo.ids.length}
-                        </div>
-                        <div style={{ display: 'grid', gap: '4px' }}>
-                          {(teacherUsageInfo.items.length ? teacherUsageInfo.items : teacherUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
-                            <div key={`${row.id}-${idx}`}>
-                              #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </>
             )}
           </div>

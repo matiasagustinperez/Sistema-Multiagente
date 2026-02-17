@@ -392,13 +392,26 @@ def generate_proposal_docx(proposal, template_path: str) -> str:
     # Dividir bibliografía en básica y complementaria
     basic_bib, comp_bib = _split_bibliography(safe(proposal.bibliography))
     
+    def normalize_quarter(value: str) -> str:
+        text = safe(value).strip()
+        if not text:
+            return ""
+        lower = text.lower()
+        if "anual" in lower or lower.strip() == "a":
+            return "A"
+        if "1" in lower or "primer" in lower:
+            return "1º"
+        if "2" in lower or "segundo" in lower:
+            return "2º"
+        return text
+
     mapping = {
         "nombreCarrera": safe(proposal.career),
         "nombreAsignatura": safe(proposal.subject or proposal.title),
         "plan": safe(proposal.study_plan),
         "anio": format_year_of_career(proposal.year_of_career),
         "anioAcadem": safe(proposal.academic_year),
-        "cuat": safe(proposal.quarter),
+        "cuat": normalize_quarter(proposal.quarter),
         "caracter": safe(proposal.character),
         "regimen": safe(proposal.regime),
         "horasTeoria": safe(proposal.theoretical_hours),

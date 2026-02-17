@@ -1000,15 +1000,15 @@ def download_proposal_docx(
     quarter_raw = proposal.quarter or "0"
     subject = proposal.subject or "Sin_Asignatura"
     
-    # Normalize quarter to 1, 2, or A
+    # Normalize quarter to 1º, 2º, or A
     import re
     quarter_lower = str(quarter_raw).lower()
     if "anual" in quarter_lower or quarter_lower.strip() == "a":
         quarter = "A"
     elif "1" in quarter_lower or "primer" in quarter_lower:
-        quarter = "1"
+        quarter = "1º"
     elif "2" in quarter_lower or "segundo" in quarter_lower:
-        quarter = "2"
+        quarter = "2º"
     else:
         quarter = quarter_raw
     
