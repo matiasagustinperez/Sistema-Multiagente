@@ -221,36 +221,88 @@ def extract_learning_outcomes_parsed(text: str) -> List[Dict[str, str]]:
     return outcomes
 
 
-def extract_learning_outcomes_from_tables(doc: Document) -> List[str]:
+def extract_competencies_from_table(doc: Document, table_idx: int) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
     """
-    Extrae Resultados de Aprendizaje (RA1, RA2, etc.) desde TABLAS.
-    Busca en TODAS las tablas por líneas que contengan 'RA1:', 'RA2:', etc.
+    Extrae competencias genéricas y específicas desde una tabla específica.
+    La tabla generalmente está entre 'OBJETIVOS' y 'CONTENIDOS DE LA ASIGNATURA'.
     """
-    learning_outcomes = []
-    seen_numbers = set()
+    gen_comp = []
+    spec_comp = []
     
-    for table_idx, table in enumerate(doc.tables):
-        # Buscar en cada celda de la tabla
-        for row_idx, row in enumerate(table.rows):
-            for cell_idx, cell in enumerate(row.cells):
-                cell_text = cell.text.strip()
-                
-                # Buscar patrón "RAX:" o "RAX -"
-                ra_matches = re.findall(r'RA\d+\s*[:\-]?\s*(.+?)(?=RA\d+\s*[:\-]|$)', cell_text, re.IGNORECASE | re.DOTALL)
-                
-                for match in ra_matches:
-                    # Extraer el número
-                    num_match = re.search(r'RA(\d+)', cell_text, re.IGNORECASE)
-                    if num_match:
-                        ra_num = num_match.group(1)
-                        if ra_num not in seen_numbers:
-                            seen_numbers.add(ra_num)
-                            # Limpiar el texto
-                            ra_text = match.strip().split('\n')[0][:200]  # Primeras 200 chars
-                            if ra_text:
-                                learning_outcomes.append(ra_text)
+    if table_idx >= len(doc.tables):
+        return gen_comp, spec_comp
     
-    return learning_outcomes
+    table = doc.tables[table_idx]
+    
+    # Buscar en todas las celdas de la tabla
+    for row in table.rows:
+        for cell in row.cells:
+            text = cell.text.strip()
+            
+            # Buscar CGT - Competencias Genéricas
+            cgt_matches = re.findall(r'([Cc][Gg][Tt]\d+)\s*[-:]\s*([^-\n]+?)(?:\s*[-(\[]([^)\]]+))?(?=\n|$)', text)
+            for match in cgt_matches:
+                code = match[0].upper()
+                description = match[1].strip()
+                level = match[2].strip() if len(match) > 2 and match[2] else ""
+                
+                if description and code not in [c['code'] for c in gen_comp]:
+                    gen_comp.append({
+                        'code': code,
+                        'description': description,
+                        'level': level
+                    })
+            
+            # Buscar CE - Competencias Específicas
+            ce_matches = re.findall(r'([Cc][Ee]\d+)\s*[-:]\s*([^-\n]+?)(?:\s*[-(\[]([^)\]]+))?(?=\n|$)', text)
+            for match in ce_matches:
+                code = match[0].upper()
+                description = match[1].strip()
+                level = match[2].strip() if len(match) > 2 and match[2] else ""
+                
+                if description and code not in [c['code'] for c in spec_comp]:
+                    spec_comp.append({
+                        'code': code,
+                        'description': description,
+                        'level': level
+                    })
+    
+    return gen_comp, spec_comp
+
+
+def extract_fundamentals_from_table(doc: Document, table_idx: int) -> Tuple[str, str]:
+    """
+    Extrae secciones de 'Importancia' y 'Perfil Profesional' desde una tabla.
+    Típicamente la Tabla 3 en documentos con tablas de fundamentos.
+    """
+    importance = ""
+    professional_profile = ""
+    
+    if table_idx >= len(doc.tables):
+        return importance, professional_profile
+    
+    table = doc.tables[table_idx]
+    
+    # Buscar en las celdas de la tabla
+    for row in table.rows:
+        for cell in row.cells:
+            text = cell.text.strip()
+            
+            # Buscar "Importancia"
+            if "importancia" in text.lower() and "plan" in text.lower():
+                # Extraer todo lo que viene después de los dos puntos
+                match = re.search(r'importancia[^:]*:\s*(.+?)(?=relación|$)', text, re.IGNORECASE | re.DOTALL)
+                if match:
+                    importance = match.group(1).strip()
+            
+            # Buscar "Perfil Profesional"
+            if "relación" in text.lower() and "perfil" in text.lower():
+                # Extraer todo lo que viene después
+                match = re.search(r'relación[^:]*:\s*(.+?)$', text, re.IGNORECASE | re.DOTALL)
+                if match:
+                    professional_profile = match.group(1).strip()
+    
+    return importance, professional_profile
 
 
 def extract_programa_analitico(doc: Document) -> Dict[str, str]:
@@ -498,8 +550,8 @@ def extract_header_fields_improved(doc: Document, filename: str = "") -> Dict[st
 
 def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, Any]:
     """
-    Importa una propuesta completa desde un DOCX usando estrategia de secciones.
-    Retorna un diccionario con TODOS los campos extraídos.
+    Importa una propuesta completa desde un DOCX.
+    Estrategia: Buscar secciones en párrafos TAMBIÉN en tablas.
     """
     doc = Document(file_path)
     
@@ -516,7 +568,7 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
         for t in teaching_team if t.get('name')
     ])
     
-    # Buscar secciones numeradas
+    # Buscar secciones numeradas en párrafos
     sections = find_section_paragraphs(doc)
     
     # Extraer contenidos mínimos (sección 1)
@@ -527,54 +579,86 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
             contenidos_minimos = extract_section_content(doc, start_idx, end_idx)
             break
     
+    # Si no se encontró en párrafos, buscar en tablas (Tabla 2)
+    if not contenidos_minimos and len(doc.tables) > 2:
+        table = doc.tables[2]
+        contenidos_minimos = extract_text_from_table_cell(table.rows[0].cells[0]) if table.rows else ""
+    
     # Extraer fundamentos (sección 2)
     fundamentals = ""
     importance = ""
     professional_profile = ""
-    for section_key in sections.keys():
-        if 'FUNDAMENTOS' in section_key:
-            start_idx, end_idx = sections[section_key]
-            fundamentals_text = extract_section_content(doc, start_idx, end_idx)
-            
-            # Separar subsecciones con regex (case-insensitive)
-            import_match = re.search(r'importancia\s+en\s+el\s+plan\s+de\s+estudio\s*:?\s*(.+?)(?=relación\s+con\s+el\s+perfil|$)', 
-                                    fundamentals_text, re.IGNORECASE | re.DOTALL)
-            if import_match:
-                importance = import_match.group(1).strip()
-            
-            profile_match = re.search(r'relación\s+con\s+el\s+perfil\s+profesional\s+esperado\s*:?\s*(.+?)$', 
-                                     fundamentals_text, re.IGNORECASE | re.DOTALL)
-            if profile_match:
-                professional_profile = profile_match.group(1).strip()
-            
-            fundamentals = fundamentals_text
-            break
+    
+    # Primero intentar desde tabla (más probable)  
+    if len(doc.tables) > 3:
+        importance, professional_profile = extract_fundamentals_from_table(doc, 3)
+    
+    # Si no se encontró, buscar en párrafos
+    if not importance:
+        for section_key in sections.keys():
+            if 'FUNDAMENTOS' in section_key:
+                start_idx, end_idx = sections[section_key]
+                fundamentals_text = extract_section_content(doc, start_idx, end_idx)
+                
+                # Separar subsecciones con regex
+                import_match = re.search(r'importancia\s+en\s+el\s+plan\s+de\s+estudio\s*:?\s*(.+?)(?=relación\s+con\s+el\s+perfil|$)', 
+                                        fundamentals_text, re.IGNORECASE | re.DOTALL)
+                if import_match:
+                    importance = import_match.group(1).strip()
+                
+                profile_match = re.search(r'relación\s+con\s+el\s+perfil\s+profesional\s+esperado\s*:?\s*(.+?)$', 
+                                         fundamentals_text, re.IGNORECASE | re.DOTALL)
+                if profile_match:
+                    professional_profile = profile_match.group(1).strip()
+                
+                fundamentals = fundamentals_text
+                break
     
     # Extraer objetivos (sección 3)
     generic_competencies_list = []
     specific_competencies_list = []
     learning_outcomes = []
     
-    for section_key in sections.keys():
-        if 'OBJETIVOS' in section_key:
-            start_idx, end_idx = sections[section_key]
-            objectives_text = extract_section_content(doc, start_idx, end_idx)
-            
-            # Extraer competencias genéricas directamente del texto (sin necesidad de separar bloques)
-            generic_competencies_list = extract_generic_competencies(objectives_text)
-            
-            # Extraer competencias específicas directamente del texto
-            specific_competencies_list = extract_specific_competencies(objectives_text)
-            
-            # Extraer RAs using regex search para encontrar la sección
-            learning_outcomes = extract_learning_outcomes_parsed(objectives_text)
-            
-            break
+    # Primero intentar desde tabla de competencias (Tabla 4)
+    if len(doc.tables) > 4:
+        gen_comp_from_table, spec_comp_from_table = extract_competencies_from_table(doc, 4)
+        if gen_comp_from_table or spec_comp_from_table:
+            generic_competencies_list = gen_comp_from_table
+            specific_competencies_list = spec_comp_from_table
+    
+    # Si no se encontró en tablas, buscar en párrafos
+    if not generic_competencies_list:
+        for section_key in sections.keys():
+            if 'OBJETIVOS' in section_key:
+                start_idx, end_idx = sections[section_key]
+                objectives_text = extract_section_content(doc, start_idx, end_idx)
+                
+                generic_competencies_list = extract_generic_competencies(objectives_text)
+                specific_competencies_list = extract_specific_competencies(objectives_text)
+                learning_outcomes = extract_learning_outcomes_parsed(objectives_text)
+                
+                break
     
     # Si no se encontraron RAs en párrafos, intentar desde TABLAS
     if not learning_outcomes:
-        ra_strings = extract_learning_outcomes_from_tables(doc)
-        learning_outcomes = [{'code': f'RA{i+1}', 'description': ra} for i, ra in enumerate(ra_strings)]
+        for table_idx, table in enumerate(doc.tables):
+            # Buscar tablas que contengan "RA"
+            for row in table.rows:
+                for cell in row.cells:
+                    cell_text = cell.text
+                    if 'RA1' in cell_text or 'RA2' in cell_text or 'RA3' in cell_text:
+                        # Encontrada tabla con RAs
+                        ra_pattern = r'(RA\d+)\s*[-:]\s*([^\n]+)'
+                        ra_matches = re.finditer(ra_pattern, cell_text, re.IGNORECASE)
+                        for match in ra_matches:
+                            code = match.group(1).upper()
+                            description = match.group(2).strip()
+                            if description:
+                                learning_outcomes.append({
+                                    'code': code,
+                                    'description': description
+                                })
+                        break
     
     # Extraer unidades (sección 4)
     units = extract_units_from_docx(doc, 0, len(doc.paragraphs))
@@ -623,7 +707,7 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
         'year_of_career': header_fields.get('year_of_career', ''),
         'quarter': header_fields.get('quarter', ''),
         
-        # Programa Analítico (TODO)
+        # Programa Analítico
         'character': programa_analitico.get('character', ''),
         'regime': programa_analitico.get('regime', ''),
         'total_hours': programa_analitico.get('total_hours', ''),
@@ -637,12 +721,12 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
         
         # Secciones del documento
         'minimum_content': contenidos_minimos,
-        'importance': importance.strip(),
-        'professional_profile': professional_profile.strip(),
+        'importance': importance.strip() if importance else "",
+        'professional_profile': professional_profile.strip() if professional_profile else "",
         'fundamentals': fundamentals,
-        'generic_competencies': generic_competencies_list,  # Lista de dicts con code, description, level
-        'specific_competencies': specific_competencies_list,  # Lista de dicts con code, description, level
-        'learning_outcomes': learning_outcomes,  # Lista de dicts con code, description
+        'generic_competencies': generic_competencies_list,
+        'specific_competencies': specific_competencies_list,
+        'learning_outcomes': learning_outcomes,
         
         # Contenido
         'units': units,

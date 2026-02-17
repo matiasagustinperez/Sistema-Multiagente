@@ -1905,6 +1905,27 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     if (!importPreview?.data) return
     
     const data = importPreview.data
+    
+    // Helper para convertir array de competencias a string
+    const competenciasListToString = (compArray) => {
+      if (!Array.isArray(compArray)) return ''
+      return compArray.map(comp => {
+        if (typeof comp === 'string') return comp
+        const level = comp.level ? ` - ${comp.level}` : ''
+        return `${comp.code} - ${comp.description}${level}`
+      }).join('\n')
+    }
+    
+    // Helper para convertir array de RAs a formato esperado
+    const raListToArray = (raArray) => {
+      if (!Array.isArray(raArray)) return []
+      return raArray.map((ra, idx) => ({
+        id: idx + 1,
+        codigo: typeof ra === 'string' ? `RA${idx + 1}` : ra.code || `RA${idx + 1}`,
+        descripcion: typeof ra === 'string' ? ra : ra.description || ra
+      }))
+    }
+    
     // Mapear datos extraídos al formulario
     setFormData({
       carrera: data.career || '',
@@ -1920,14 +1941,15 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       hsPrac: parseInt(data.practical_hours) || 0,
       hsSemanal: parseInt(data.weekly_hours) || 0,
       contenidosMin: data.minimum_content || '',
-      competenciasGen: data.generic_competencies || data.importance || '',
-      competenciasEsp: data.specific_competencies || '',
-      fundamentosP1: data.fundamentals || data.importance || '',
-      fundamentosP2: '',
-      resultadosAprendizaje: data.learning_outcomes?.map((ra, idx) => ({
-        id: idx + 1,
-        descripcion: typeof ra === 'string' ? ra : ra.descripcion || ra
-      })) || [],
+      // Competencias genéricas: convertir de array de objetos a string
+      competenciasGen: competenciasListToString(data.generic_competencies),
+      // Competencias específicas: convertir de array de objetos a string
+      competenciasEsp: competenciasListToString(data.specific_competencies),
+      // Fundamentos: usar la sección de importancia correctamente
+      fundamentosP1: data.importance || data.fundamentals || '',
+      fundamentosP2: data.professional_profile || '',
+      // Resultados de aprendizaje: convertir de array de objetos a array de items
+      resultadosAprendizaje: raListToArray(data.learning_outcomes) || [],
       unidades: data.units?.map((unit, idx) => ({
         id: idx + 1,
         nombre: unit.name || '',
@@ -2955,6 +2977,71 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+
+                  {/* Competencias Genéricas */}
+                  {importPreview.data?.generic_competencies && importPreview.data.generic_competencies.length > 0 && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Genéricas ({importPreview.data.generic_competencies.length}):</strong>
+                      <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
+                        {importPreview.data.generic_competencies.map((comp, idx) => (
+                          <div key={idx} style={{ padding: '5px', marginBottom: '5px', background: '#f9f9f9', borderRadius: '3px', fontSize: '13px' }}>
+                            <strong>{comp.code || `CGT${idx + 1}`}</strong> - {comp.description || ''} {comp.level && <span style={{ color: '#d32f2f' }}>({comp.level})</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Competencias Específicas */}
+                  {importPreview.data?.specific_competencies && importPreview.data.specific_competencies.length > 0 && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Específicas ({importPreview.data.specific_competencies.length}):</strong>
+                      <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
+                        {importPreview.data.specific_competencies.map((comp, idx) => (
+                          <div key={idx} style={{ padding: '5px', marginBottom: '5px', background: '#f9f9f9', borderRadius: '3px', fontSize: '13px' }}>
+                            <strong>{comp.code || `CE${idx + 1}`}</strong> - {comp.description || ''} {comp.level && <span style={{ color: '#d32f2f' }}>({comp.level})</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Resultados de Aprendizaje */}
+                  {importPreview.data?.learning_outcomes && importPreview.data.learning_outcomes.length > 0 && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Resultados de Aprendizaje ({importPreview.data.learning_outcomes.length}):</strong>
+                      <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
+                        {importPreview.data.learning_outcomes.map((ra, idx) => (
+                          <div key={idx} style={{ padding: '5px', marginBottom: '5px', background: '#f9f9f9', borderRadius: '3px', fontSize: '13px' }}>
+                            <strong>{ra.code || `RA${idx + 1}`}</strong> - {ra.description || ''}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Fundamentos */}
+                  {(importPreview.data?.importance || importPreview.data?.professional_profile) && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Fundamentos:</strong>
+                      {importPreview.data?.importance && (
+                        <div style={{ marginBottom: '10px' }}>
+                          <strong style={{ fontSize: '13px', color: '#0066cc' }}>Importancia:</strong>
+                          <p style={{ margin: '5px 0', padding: '8px', background: '#f9f9f9', borderRadius: '3px', fontSize: '12px', lineHeight: '1.4' }}>
+                            {importPreview.data.importance.substring(0, 200)}...
+                          </p>
+                        </div>
+                      )}
+                      {importPreview.data?.professional_profile && (
+                        <div>
+                          <strong style={{ fontSize: '13px', color: '#0066cc' }}>Perfil Profesional:</strong>
+                          <p style={{ margin: '5px 0', padding: '8px', background: '#f9f9f9', borderRadius: '3px', fontSize: '12px', lineHeight: '1.4' }}>
+                            {importPreview.data.professional_profile.substring(0, 200)}...
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from .database import SessionLocal, init_db
 from agents import extract as extract_agent
-from .docx_import_final import import_proposal_from_docx
+from .docx_import import import_proposal_from_docx
 from openai import OpenAI
 import shutil
 import tempfile
@@ -380,6 +380,8 @@ async def import_proposal_docx(file: UploadFile = File(...)):
                     "units_count": len(extracted_data.get('units', [])),
                     "practicals_count": len(extracted_data.get('practicals', [])),
                     "ra_count": len(extracted_data.get('learning_outcomes', [])),
+                    "generic_comp_count": len(extracted_data.get('generic_competencies', [])),
+                    "specific_comp_count": len(extracted_data.get('specific_competencies', [])),
                 }
             }
         finally:
