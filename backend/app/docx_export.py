@@ -13,6 +13,14 @@ from docx.oxml.text.paragraph import CT_P
 
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{(.*?)\}\}")
+HEADER_LABELS_TO_REMOVE = [
+    "Cuatrimestre:",
+    "Año de Carrera:",
+    "Ciclo:",
+    "Plan de Estudio:",
+    "Asignatura:",
+    "Carrera:",
+]
 
 
 def _iter_block_items(doc: Document) -> Iterable[Paragraph | Table]:
@@ -75,6 +83,16 @@ def _replace_placeholders(doc: Document, mapping: dict[str, str]) -> None:
             _replace_placeholders_in_paragraph(paragraph, mapping)
         for table in header.tables:
             _replace_placeholders_in_table(table, mapping)
+
+
+def _remove_header_paragraphs_in_body(doc: Document) -> None:
+    labels = [label.lower() for label in HEADER_LABELS_TO_REMOVE]
+    for paragraph in list(doc.paragraphs):
+        text = paragraph.text.strip().lower()
+        if any(text.startswith(label.lower()) for label in labels):
+            p = paragraph._element
+            p.getparent().remove(p)
+            paragraph._p = paragraph._element = None
 
 
 def _fill_first_empty_paragraph(paragraphs: List[Paragraph], value: str) -> None:
@@ -236,12 +254,26 @@ def _fill_units(doc: Document, units: List[dict]) -> None:
 
 def _find_practical_tables(doc: Document) -> List[Table]:
     tables = []
+    practical_placeholders = ("{{object}}", "{{activities}}", "{{maters}}", "{{ambito}}")
     for table in doc.tables:
-        # Buscar "práctico" o "practico" (con y sin tilde)
-        has_practico = any(("practico" in cell.text.lower() or "práctico" in cell.text.lower()) 
-                          for row in table.rows for cell in row.cells)
-        has_objetivo = any("objetivo" in cell.text.lower() for row in table.rows for cell in row.cells)
-        if has_practico and has_objetivo:
+        # Identificar por encabezado y por placeholders caracteristicos del TP.
+        if not table.rows or not table.rows[0].cells:
+            continue
+        header_text = " ".join(cell.text.lower() for cell in table.rows[0].cells)
+        has_practico_header = "practico" in header_text or "práctico" in header_text
+
+        has_tp_placeholders = False
+        if has_practico_header:
+            for row in table.rows:
+                for cell in row.cells:
+                    text = cell.text
+                    if any(ph in text for ph in practical_placeholders):
+                        has_tp_placeholders = True
+                        break
+                if has_tp_placeholders:
+                    break
+
+        if has_practico_header and has_tp_placeholders:
             tables.append(table)
     return tables
 
@@ -300,6 +332,25 @@ def _fill_section_after_heading(doc: Document, heading_text: str, value: str) ->
                     return
 
 
+def _overwrite_table_after_heading(doc: Document, heading_text: str, value: str) -> None:
+    if not value:
+        return
+    blocks = list(_iter_block_items(doc))
+    for idx, block in enumerate(blocks):
+        if isinstance(block, Paragraph) and heading_text in block.text.upper():
+            for next_block in blocks[idx + 1:]:
+                if isinstance(next_block, Table):
+                    cell = next_block.cell(0, 0)
+                    # Limpiar todo el contenido existente y reemplazar por el valor.
+                    for paragraph in cell.paragraphs:
+                        paragraph.text = ""
+                    if cell.paragraphs:
+                        cell.paragraphs[0].text = value
+                    else:
+                        cell.text = value
+                    return
+
+
 def _split_bibliography(text: str) -> Tuple[str, str]:
     if not text:
         return "", ""
@@ -317,10 +368,21 @@ def _split_bibliography(text: str) -> Tuple[str, str]:
 def generate_proposal_docx(proposal, template_path: str) -> str:
     doc = Document(template_path)
 
+    # El template ya incluye el encabezado; eliminar duplicados del cuerpo.
+    _remove_header_paragraphs_in_body(doc)
+
     def safe(value) -> str:
         if value is None:
             return ""
         return str(value)
+
+    def format_year_of_career(value) -> str:
+        text = safe(value).strip()
+        if not text:
+            return ""
+        if text.endswith("º"):
+            return text
+        return f"{text}º"
 
     teaching_team = proposal.teaching_team or []
     doc1 = teaching_team[0] if len(teaching_team) > 0 else {}
@@ -334,7 +396,7 @@ def generate_proposal_docx(proposal, template_path: str) -> str:
         "nombreCarrera": safe(proposal.career),
         "nombreAsignatura": safe(proposal.subject or proposal.title),
         "plan": safe(proposal.study_plan),
-        "anio": safe(proposal.year_of_career),
+        "anio": format_year_of_career(proposal.year_of_career),
         "anioAcadem": safe(proposal.academic_year),
         "cuat": safe(proposal.quarter),
         "caracter": safe(proposal.character),
@@ -375,6 +437,7 @@ def generate_proposal_docx(proposal, template_path: str) -> str:
 
     _fill_units(doc, proposal.units or [])
     _fill_practicals(doc, proposal.practicals or [])
+    _overwrite_table_after_heading(doc, "METODOLOGÍA", safe(proposal.methodology))
 
     output_dir = tempfile.mkdtemp(prefix="proposal_docx_")
     output_path = os.path.join(output_dir, f"Propuesta_{proposal.id}.docx")

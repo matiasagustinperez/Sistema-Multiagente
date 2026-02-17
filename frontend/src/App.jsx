@@ -176,7 +176,7 @@ export default function App() {
         if (!isNonEmptyText(u.nombre)) MissingFields.push('nombre')
         if (!isNonEmptyText(u.contenidos)) MissingFields.push('contenidos')
         if (!isNonEmptyText(u.bibBasica)) MissingFields.push('bibBasica')
-        if (!isNonEmptyText(u.bibCompl)) MissingFields.push('bibCompl')
+        // if (!isNonEmptyText(u.bibCompl)) MissingFields.push('bibCompl') - Bibliografía complementaria es opcional
         
         if (MissingFields.length > 0) {
           console.log(`Unidad ${idx + 1} incompleta:`, MissingFields.join(', '), '- Valores:', {
@@ -1948,7 +1948,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     
     // Helper para convertir array de competencias a string
     const competenciasListToString = (compArray) => {
-      if (!Array.isArray(compArray)) return ''
+      if (!Array.isArray(compArray) || compArray.length === 0) return 'No Aplica'
       return compArray.map(comp => {
         if (typeof comp === 'string') return comp
         const level = comp.level ? ` - ${comp.level}` : ''
@@ -2732,21 +2732,38 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     Crear Propuesta
                   </button>
                 ) : (
-                  <button
-                    style={{
-                      ...styles.button,
-                      background: '#388e3c',
-                      fontSize: '16px',
-                      padding: '15px 30px',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-                      ...(!canSaveEdits && { opacity: 0.45, cursor: 'not-allowed' })
-                    }}
-                    onClick={saveProposal}
-                    disabled={!canSaveEdits}
-                    title={canSaveEdits ? 'Guardar cambios en propuesta' : 'Completa Carrera y Asignatura'}
-                  >
-                    Guardar Cambios
-                  </button>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      style={{
+                        ...styles.button,
+                        background: '#ff9800',
+                        fontSize: '16px',
+                        padding: '15px 30px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                        ...(!canSaveEdits && { opacity: 0.45, cursor: 'not-allowed' })
+                      }}
+                      onClick={saveProposal}
+                      disabled={!canSaveEdits}
+                      title={canSaveEdits ? 'Guardar como borrador (incompleto)' : 'Completa Carrera y Asignatura'}
+                    >
+                      Guardar Borrador
+                    </button>
+                    <button
+                      style={{
+                        ...styles.button,
+                        background: '#388e3c',
+                        fontSize: '16px',
+                        padding: '15px 30px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                        ...(!canSaveEdits && { opacity: 0.45, cursor: 'not-allowed' })
+                      }}
+                      onClick={saveProposal}
+                      disabled={!canSaveEdits}
+                      title={canSaveEdits ? 'Guardar propuesta' : 'Completa Carrera y Asignatura'}
+                    >
+                      Guardar Propuesta
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

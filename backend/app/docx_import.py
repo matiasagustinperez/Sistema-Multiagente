@@ -304,62 +304,108 @@ def extract_section_tables(doc: Document, section_start_idx: int, section_end_id
 
 def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
     """
-    Extrae Competencias Genéricas del texto.
+    Extrae Competencias Genéricas del texto usando un enfoque basado en bloques.
     Soporta formatos:
     - Línea separada: "- CGT1 - Descripción - Nivel"
     - Línea única: "CGT1 - Descripción - Nivel - CGT2 - Descripción - Nivel - ..."
     Retorna: [{'code': 'CGT1', 'description': 'Descripción', 'level': 'Nivel'}, ...]
+    
+    ESTRATEGIA MEJORADA (similar a RAs): Buscar todos los códigos primero, 
+    luego extraer los datos entre ellos para evitar capturar a través de límites.
     """
     competencies = []
     
-    # Patrón para capturar: código - descripción - nivel
-    # Usa lookahead para encontrar el siguiente código CG, paréntesis de cierre, o fin de string
-    # El .+? es lazy pero se limita por el lookahead a capturar hasta "- [Nivel]"
-    # Ahora captura también el último CG al final del texto sin paréntesis
-    pattern = r'([Cc][Gg][A-Za-z]\d+)\s*-\s*(.+?)\s*-\s*(Alto|Medio|Bajo)(?=\s*(?:$|-\s*[Cc][Gg][A-Za-z])|\s*\))'
+    # Paso 1: Encontrar todos los códigos CG en el texto
+    code_pattern = r'([Cc][Gg][A-Za-z]\d+)'
+    codes = []
+    for match in re.finditer(code_pattern, text):
+        codes.append((match.group(1), match.start(), match.end()))
     
-    for match in re.finditer(pattern, text):
-        code = match.group(1).upper()
-        description = ' '.join(match.group(2).split()).strip()
-        level = (match.group(3) or '').capitalize() if match.group(3) else ''
+    if not codes:
+        return competencies
+    
+    # Paso 2: Para cada código CG, extraer description y nivel
+    for idx, (code, code_start, code_end) in enumerate(codes):
+        # El texto para este código va desde después del código hasta antes del siguiente código
+        if idx < len(codes) - 1:
+            next_code_start = codes[idx + 1][1]
+            block_text = text[code_end:next_code_start]
+        else:
+            block_text = text[code_end:]
         
-        if description and len(description) > 2:
-            competencies.append({
-                'code': code,
-                'description': description,
-                'level': level
-            })
+        # Extraer la descripción (todo hasta el nivel)
+        level_pattern = r'-\s*(Alto|Medio|Bajo)(?=\s*(?:$|-\s*[Cc][Gg][A-Za-z]|\s*\)))'
+        level_match = re.search(level_pattern, block_text, re.IGNORECASE)
+        
+        if level_match:
+            # La descripción es todo lo que hay entre el "-" después del código y donde comienza el "- Nivel"
+            desc_text = block_text[:level_match.start()].strip()
+            # Limpiar el guión inicial si existe
+            desc_text = desc_text.lstrip('-').strip()
+            # Normalizar espacios (reemplazar múltiples espacios y newlines)
+            description = ' '.join(desc_text.split())
+            level = level_match.group(1).capitalize()
+            
+            if description and len(description) > 2:
+                competencies.append({
+                    'code': code.upper(),
+                    'description': description,
+                    'level': level
+                })
     
     return competencies
 
 
 def extract_specific_competencies(text: str) -> List[Dict[str, str]]:
     """
-    Extrae Competencias Específicas del texto.
+    Extrae Competencias Específicas del texto usando un enfoque basado en bloques.
     Soporta formatos:
     - Línea separada: "- CE1 - Descripción - Nivel"
     - Línea única: "CE1 - Descripción - Nivel - CE2 - Descripción - Nivel - ..."
     Retorna: [{'code': 'CE1', 'description': 'Descripción', 'level': 'Nivel'}, ...]
+    
+    ESTRATEGIA MEJORADA (similar a RAs): Buscar todos los códigos primero, 
+    luego extraer los datos entre ellos para evitar capturar a través de límites.
     """
     competencies = []
     
-    # Patrón para capturar: código - descripción - nivel
-    # Usa lookahead para encontrar el siguiente código CE, paréntesis de cierre, o fin de string
-    # El .+? es lazy pero se limita por el lookahead a capturar hasta "- [Nivel]"
-    # Ahora captura también el último CE al final del texto sin paréntesis
-    pattern = r'([Cc][Ee]\d+)\s*-\s*(.+?)\s*-\s*(Alto|Medio|Bajo)(?=\s*(?:$|-\s*[Cc][Ee]\d+)|\s*\))'
+    # Paso 1: Encontrar todos los códigos CE en el texto
+    code_pattern = r'([Cc][Ee]\d+)'
+    codes = []
+    for match in re.finditer(code_pattern, text):
+        codes.append((match.group(1), match.start(), match.end()))
     
-    for match in re.finditer(pattern, text):
-        code = match.group(1).upper()
-        description = ' '.join(match.group(2).split()).strip()
-        level = (match.group(3) or '').capitalize() if match.group(3) else ''
+    if not codes:
+        return competencies
+    
+    # Paso 2: Para cada código CE, extraer description y nivel
+    for idx, (code, code_start, code_end) in enumerate(codes):
+        # El texto para este código va desde después del código hasta antes del siguiente código
+        if idx < len(codes) - 1:
+            next_code_start = codes[idx + 1][1]
+            block_text = text[code_end:next_code_start]
+        else:
+            block_text = text[code_end:]
         
-        if description and len(description) > 2:
-            competencies.append({
-                'code': code,
-                'description': description,
-                'level': level
-            })
+        # Extraer la descripción (todo hasta el nivel)
+        level_pattern = r'-\s*(Alto|Medio|Bajo)(?=\s*(?:$|-\s*[Cc][Ee]\d+|\s*\)))'
+        level_match = re.search(level_pattern, block_text, re.IGNORECASE)
+        
+        if level_match:
+            # La descripción es todo lo que hay entre el "-" después del código y donde comienza el "- Nivel"
+            desc_text = block_text[:level_match.start()].strip()
+            # Limpiar el guión inicial si existe
+            desc_text = desc_text.lstrip('-').strip()
+            # Normalizar espacios (reemplazar múltiples espacios y newlines)
+            description = ' '.join(desc_text.split())
+            level = level_match.group(1).capitalize()
+            
+            if description and len(description) > 2:
+                competencies.append({
+                    'code': code.upper(),
+                    'description': description,
+                    'level': level
+                })
     
     return competencies
 
@@ -466,6 +512,7 @@ def extract_competencies_from_table(doc: Document, table_idx: int) -> Tuple[List
     """
     Extrae competencias genéricas y específicas desde una tabla específica.
     La tabla generalmente está entre 'OBJETIVOS' y 'CONTENIDOS DE LA ASIGNATURA'.
+    Usa enfoque basado en bloques (similar a RAs) para evitar capturar entre límites.
     """
     gen_comp = []
     spec_comp = []
@@ -479,34 +526,70 @@ def extract_competencies_from_table(doc: Document, table_idx: int) -> Tuple[List
     for row in table.rows:
         for cell in row.cells:
             text = cell.text.strip()
+            if not text:
+                continue
             
-            # Buscar CGT - Competencias Genéricas
-            cgt_matches = re.findall(r'([Cc][Gg][Tt]\d+)\s*[-:]\s*([^-\n]+?)(?:\s*[-(\[]([^)\]]+))?(?=\n|$)', text)
-            for match in cgt_matches:
-                code = match[0].upper()
-                description = match[1].strip()
-                level = match[2].strip() if len(match) > 2 and match[2] else ""
-                
-                if description and code not in [c['code'] for c in gen_comp]:
-                    gen_comp.append({
-                        'code': code,
-                        'description': description,
-                        'level': level
-                    })
+            # ===  COMPETENCIAS GENÉRICAS ===
+            # Paso 1: Encontrar todos los códigos CGT
+            cgt_codes = []
+            for match in re.finditer(r'([Cc][Gg][Tt]\d+)', text):
+                cgt_codes.append((match.group(1), match.start(), match.end()))
             
-            # Buscar CE - Competencias Específicas
-            ce_matches = re.findall(r'([Cc][Ee]\d+)\s*[-:]\s*([^-\n]+?)(?:\s*[-(\[]([^)\]]+))?(?=\n|$)', text)
-            for match in ce_matches:
-                code = match[0].upper()
-                description = match[1].strip()
-                level = match[2].strip() if len(match) > 2 and match[2] else ""
+            # Paso 2: Extraer para cada código
+            for idx, (code, code_start, code_end) in enumerate(cgt_codes):
+                # El bloque va desde después del código hasta antes del siguiente código
+                if idx < len(cgt_codes) - 1:
+                    next_code_start = cgt_codes[idx + 1][1]
+                    block_text = text[code_end:next_code_start]
+                else:
+                    block_text = text[code_end:]
                 
-                if description and code not in [c['code'] for c in spec_comp]:
-                    spec_comp.append({
-                        'code': code,
-                        'description': description,
-                        'level': level
-                    })
+                # Buscar el nivel en este bloque
+                level_match = re.search(r'-\s*(Alto|Medio|Bajo)(?=\s*(?:-\s*[Cc][Gg]|$|\n))', block_text, re.IGNORECASE)
+                if level_match:
+                    # La descripción es todo antes del "- Nivel"
+                    desc_text = block_text[:level_match.start()].strip()
+                    desc_text = desc_text.lstrip('-').strip()
+                    description = ' '.join(desc_text.split())
+                    level = level_match.group(1).capitalize()
+                    
+                    if description and len(description) > 2 and code.upper() not in [c['code'] for c in gen_comp]:
+                        gen_comp.append({
+                            'code': code.upper(),
+                            'description': description,
+                            'level': level
+                        })
+            
+            # === COMPETENCIAS ESPECÍFICAS ===
+            # Paso 1: Encontrar todos los códigos CE
+            ce_codes = []
+            for match in re.finditer(r'([Cc][Ee]\d+)', text):
+                ce_codes.append((match.group(1), match.start(), match.end()))
+            
+            # Paso 2: Extraer para cada código
+            for idx, (code, code_start, code_end) in enumerate(ce_codes):
+                # El bloque va desde después del código hasta antes del siguiente código
+                if idx < len(ce_codes) - 1:
+                    next_code_start = ce_codes[idx + 1][1]
+                    block_text = text[code_end:next_code_start]
+                else:
+                    block_text = text[code_end:]
+                
+                # Buscar el nivel en este bloque
+                level_match = re.search(r'-\s*(Alto|Medio|Bajo)(?=\s*(?:-\s*[Cc][Ee]|$|\n))', block_text, re.IGNORECASE)
+                if level_match:
+                    # La descripción es todo antes del "- Nivel"
+                    desc_text = block_text[:level_match.start()].strip()
+                    desc_text = desc_text.lstrip('-').strip()
+                    description = ' '.join(desc_text.split())
+                    level = level_match.group(1).capitalize()
+                    
+                    if description and len(description) > 2 and code.upper() not in [c['code'] for c in spec_comp]:
+                        spec_comp.append({
+                            'code': code.upper(),
+                            'description': description,
+                            'level': level
+                        })
     
     return gen_comp, spec_comp
 
@@ -791,7 +874,8 @@ def extract_practicals_from_docx(doc: Document) -> List[Dict[str, str]]:
         for idx, (start, end, label) in enumerate(matches):
             next_start = matches[idx + 1][0] if idx + 1 < len(matches) else len(text)
             segment = text[end:next_start].strip()
-            segments[label] = strip_trailing_labels(segment)
+            # Do NOT clean - the strip_trailing_labels was too aggressive and cutting off content
+            segments[label] = segment  # strip_trailing_labels(segment)
 
         if not segments.get('scope') and segments.get('materials'):
             scope_match = label_patterns[3][1].search(segments['materials'])
@@ -803,7 +887,8 @@ def extract_practicals_from_docx(doc: Document) -> List[Dict[str, str]]:
 
         objective_raw = segments.get('objective', '')
         ra_codes = []
-        for match in re.finditer(r'\bRA\s*[-:]?\s*(\d+)\b', objective_raw, re.IGNORECASE):
+        # Busca RAs en formatos: "RA 3", "RA3", "RA 3.", "RA 3:", etc.
+        for match in re.finditer(r'RA\s*(\d+)', objective_raw, re.IGNORECASE):
             code = f"RA{match.group(1)}"
             if code not in ra_codes:
                 ra_codes.append(code)
@@ -912,6 +997,45 @@ def extract_header_fields_improved(doc: Document, filename: str = "") -> Dict[st
             last = text
         return texts
 
+    def _normalize_year_of_career(value: str) -> str:
+        if not value:
+            return ""
+        match = re.search(r'(\d+)', value)
+        if match:
+            return match.group(1)
+        return value.strip()
+
+    def _extract_from_header_paragraphs() -> None:
+        for section in doc.sections:
+            for header_attr in ('header', 'first_page_header', 'even_page_header'):
+                header = getattr(section, header_attr, None)
+                if header is None:
+                    continue
+                for para in header.paragraphs:
+                    text = para.text.strip()
+                    if not text or ':' not in text:
+                        continue
+
+                    normalized = normalize_docx_text(text)
+                    value = text.split(':', 1)[1].strip()
+                    if not value:
+                        continue
+
+                    if 'carrera' in normalized and not fields['career']:
+                        fields['career'] = value
+                    elif 'asignatura' in normalized and not fields['subject']:
+                        fields['subject'] = value
+                    elif 'plan' in normalized and not fields['study_plan']:
+                        fields['study_plan'] = value
+                    elif normalized.startswith('ciclo') and not fields['academic_year']:
+                        fields['academic_year'] = value
+                    elif 'ano de carrera' in normalized and not fields['year_of_career']:
+                        fields['year_of_career'] = _normalize_year_of_career(value)
+                    elif normalized.startswith('ano') and not fields['year_of_career']:
+                        fields['year_of_career'] = _normalize_year_of_career(value)
+                    elif 'cuatrimestre' in normalized and not fields['quarter']:
+                        fields['quarter'] = value
+
     def _extract_from_header_table() -> None:
         tables = list(doc.tables)
         for section in doc.sections:
@@ -935,17 +1059,30 @@ def extract_header_fields_improved(doc: Document, filename: str = "") -> Dict[st
 
                 normalized_cells = [normalize_docx_text(text) for text in row_cells]
 
-                for cell_text in row_cells:
+                for cell_idx, cell_text in enumerate(row_cells):
+                    label_raw = None
+                    value_raw = None
+
                     if ':' in cell_text:
                         label_raw, value_raw = cell_text.split(':', 1)
                     else:
                         parts = [p.strip() for p in cell_text.splitlines() if p.strip()]
-                        if len(parts) < 2:
-                            continue
-                        label_raw, value_raw = parts[0], ' '.join(parts[1:])
+                        if len(parts) >= 2:
+                            label_raw, value_raw = parts[0], ' '.join(parts[1:])
+
+                    if label_raw is None:
+                        continue
 
                     label = normalize_docx_text(label_raw)
-                    value = value_raw.strip()
+                    value = (value_raw or '').strip()
+
+                    # Si el valor esta en otra celda (label y valor separados)
+                    if not value:
+                        if cell_idx + 1 < len(row_cells):
+                            value = row_cells[cell_idx + 1].strip()
+                        elif len(row_cells) > 1:
+                            value = next((c.strip() for i, c in enumerate(row_cells) if i != cell_idx and c.strip()), '')
+
                     if not value:
                         continue
 
@@ -958,7 +1095,9 @@ def extract_header_fields_improved(doc: Document, filename: str = "") -> Dict[st
                     elif label.startswith('ciclo') and not fields['academic_year']:
                         fields['academic_year'] = value
                     elif 'ano' in label and 'carrera' in label and not fields['year_of_career']:
-                        fields['year_of_career'] = value
+                        fields['year_of_career'] = _normalize_year_of_career(value)
+                    elif label.startswith('ano') and not fields['year_of_career']:
+                        fields['year_of_career'] = _normalize_year_of_career(value)
                     elif 'cuatrimestre' in label and not fields['quarter']:
                         fields['quarter'] = value
 
@@ -973,21 +1112,9 @@ def extract_header_fields_improved(doc: Document, filename: str = "") -> Dict[st
 
             break
     
-    # Parsear filename para extraer metadatos
-    if filename:
-        year_match = re.search(r'(\d+)[°º]', filename)
-        if year_match:
-            fields['year_of_career'] = year_match.group(1)
-        
-        quarter_match = re.search(r'(\d+)[°º]\s*[-_]\s*(\d+)[°º]', filename)
-        if quarter_match:
-            fields['quarter'] = quarter_match.group(2)
-        
-        if ' - ' in filename:
-            subject_part = filename.split(' - ', 1)[1]
-            subject_part = subject_part.replace('.docx', '').replace('.DOCX', '').strip()
-            if subject_part:
-                fields['subject'] = subject_part
+    # Priorizar encabezado (parrafos y tablas) por sobre otras fuentes.
+    _extract_from_header_paragraphs()
+    _extract_from_header_table()
     
     # Buscar campos en párrafos iniciales
     for para in doc.paragraphs[:80]:
@@ -1007,16 +1134,12 @@ def extract_header_fields_improved(doc: Document, filename: str = "") -> Dict[st
         elif normalized.startswith('ciclo') and not fields['academic_year']:
             fields['academic_year'] = value
         elif 'ano de carrera' in normalized and not fields['year_of_career']:
-            fields['year_of_career'] = value
+            fields['year_of_career'] = _normalize_year_of_career(value)
+        elif normalized.startswith('ano') and not fields['year_of_career']:
+            fields['year_of_career'] = _normalize_year_of_career(value)
         elif 'cuatrimestre' in normalized and not fields['quarter']:
             fields['quarter'] = value
 
-    # Fallback: buscar en el encabezado basado en tablas
-    if not any(fields.values()):
-        _extract_from_header_table()
-    else:
-        if not fields['career'] or not fields['subject'] or not fields['study_plan'] or not fields['academic_year']:
-            _extract_from_header_table()
     
     return fields
 

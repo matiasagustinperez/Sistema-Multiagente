@@ -87,6 +87,7 @@ async def upload_proposal(
         raise HTTPException(status_code=500, detail=str(e))
 
     proposal = models.Proposal(
+        title=subject or file.filename,  # Use subject as title, or filename as fallback
         original_filename=file.filename,
         source_type="upload",
         status="Importada",
