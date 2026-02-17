@@ -313,9 +313,10 @@ def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
     competencies = []
     
     # Patrón para capturar: código - descripción - nivel
-    # Usa lookahead para encontrar el siguiente código CG o paréntesis de cierre
+    # Usa lookahead para encontrar el siguiente código CG, paréntesis de cierre, o fin de string
     # El .+? es lazy pero se limita por el lookahead a capturar hasta "- [Nivel]"
-    pattern = r'([Cc][Gg][A-Za-z]\d+)\s*-\s*(.+?)\s*-\s*(Alto|Medio|Bajo)(?=\s*-\s*[Cc][Gg][A-Za-z]|\s*\))'
+    # Ahora captura también el último CG al final del texto sin paréntesis
+    pattern = r'([Cc][Gg][A-Za-z]\d+)\s*-\s*(.+?)\s*-\s*(Alto|Medio|Bajo)(?=\s*(?:$|-\s*[Cc][Gg][A-Za-z])|\s*\))'
     
     for match in re.finditer(pattern, text):
         code = match.group(1).upper()
@@ -343,9 +344,10 @@ def extract_specific_competencies(text: str) -> List[Dict[str, str]]:
     competencies = []
     
     # Patrón para capturar: código - descripción - nivel
-    # Usa lookahead para encontrar el siguiente código CE o paréntesis de cierre
+    # Usa lookahead para encontrar el siguiente código CE, paréntesis de cierre, o fin de string
     # El .+? es lazy pero se limita por el lookahead a capturar hasta "- [Nivel]"
-    pattern = r'([Cc][Ee]\d+)\s*-\s*(.+?)\s*-\s*(Alto|Medio|Bajo)(?=\s*-\s*[Cc][Ee]\d+|\s*\))'
+    # Ahora captura también el último CE al final del texto sin paréntesis
+    pattern = r'([Cc][Ee]\d+)\s*-\s*(.+?)\s*-\s*(Alto|Medio|Bajo)(?=\s*(?:$|-\s*[Cc][Ee]\d+)|\s*\))'
     
     for match in re.finditer(pattern, text):
         code = match.group(1).upper()
