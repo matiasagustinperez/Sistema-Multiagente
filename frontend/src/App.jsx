@@ -41,6 +41,7 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   const autosaveTimerRef = useRef(null)
+  const informacionGeneralRef = useRef(null)
   
   const [formData, setFormData] = useState({
     carrera: '',
@@ -2075,8 +2076,10 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     setStatusMsg('Propuesta cargada en el formulario')
     setStatusType('success')
     
-    // Scroll al inicio de la página
-    window.scrollTo(0, 0)
+    // Scroll a la sección de Información General con delay para que el DOM se actualice
+    setTimeout(() => {
+      informacionGeneralRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }, 100)
   }
 
   const styles = {
@@ -2299,7 +2302,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               <h2>Nueva Propuesta Académica</h2>
 
               {/* HEADER SECTION */}
-              <div style={{ ...styles.section, marginTop: '20px' }}>
+              <div ref={informacionGeneralRef} style={{ ...styles.section, marginTop: '20px' }}>
                 <h3>Información General</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                   <div>
