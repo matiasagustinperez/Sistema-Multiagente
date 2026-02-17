@@ -365,19 +365,27 @@ def extract_specific_competencies(text: str) -> List[Dict[str, str]]:
 def extract_learning_outcomes_parsed(text: str) -> List[Dict[str, str]]:
     """
     Extrae Resultados de Aprendizaje (RAx) del texto con descripción completa.
-    Formato: "- RA1 - Descripción" o "- RA1. Descripción"
-    Soporta separadores: - : . después del código RA
+    Formatos soportados:
+    - "- RA1 - Descripción" (con guión al inicio)
+    - "- RA1. Descripción"
+    - "- RA1: Descripción"
+    - "RA 1: Descripción" (sin guión, con espacio entre RA y número)
+    - "RA1: Descripción" (sin guión, sin espacio)
+    
     Retorna: [{'code': 'RA1', 'description': 'Descripción'}, ...]
     """
     outcomes = []
-    # Buscar líneas que comiencen con "- RA" o "RA"
-    # Soporta: "- RA1 - desc", "- RA1. desc", "- RA1: desc", "- RA1 desc"
-    pattern = r'[-•]\s*([Rr][Aa]\d+)\s*[-:.]?\s*([^\n]+)'
+    # Patrón flexible: guión opcional, RA con espacio opcional, separadores diversos
+    # (?:[-•]\s*)? - Opcionalmente: guión/bullet y espacios (no captura)
+    # ([Rr][Aa]\s*\d+) - RA con espacio opcional entre RA y número (CAPTURA)
+    # \s*[-:.]?\s* - Espacios y separadores opcionales
+    # ([^\n]+) - Descripción hasta fin de línea (CAPTURA)
+    pattern = r'(?:^|\n)(?:[-•]\s*)?([Rr][Aa]\s*\d+)\s*[-:.]?\s*([^\n]+)'
     matches = re.finditer(pattern, text, re.MULTILINE)
     
     seen_codes = set()
     for match in matches:
-        code = match.group(1).upper()
+        code = match.group(1).upper().replace(' ', '')  # RA 1 -> RA1
         description = match.group(2).strip()
         
         # Limpiar descripción de separadores leading
