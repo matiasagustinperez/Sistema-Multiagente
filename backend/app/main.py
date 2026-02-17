@@ -15,8 +15,10 @@ import tempfile
 
 app = FastAPI(title="TesisMCD API")
 
-# Load environment variables from backend/.env (if present)
-load_dotenv()
+# Load environment variables from backend/.env
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_file = os.path.join(backend_dir, '.env')
+load_dotenv(dotenv_path=env_file, override=True)
 
 app.add_middleware(
     CORSMiddleware,

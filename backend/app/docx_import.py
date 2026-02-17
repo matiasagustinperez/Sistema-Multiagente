@@ -218,7 +218,35 @@ def extract_learning_outcomes_parsed(text: str) -> List[Dict[str, str]]:
                 'description': description
             })
     
+    # Renumerar RAs para que sean consecutivos (RA1, RA2, RA3, ...)
+    outcomes = normalize_learning_outcomes(outcomes)
     return outcomes
+
+
+def normalize_learning_outcomes(outcomes: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    Normaliza los RAs para que sean consecutivos (RA1, RA2, RA3, ...).
+    Si hay RAs con números no consecutivos (ej: RA1, RA3, RA5), 
+    se renumeran como RA1, RA2, RA3.
+    
+    Args:
+        outcomes: Lista de RAs extraídos
+        
+    Returns:
+        Lista de RAs con códigos consecutivos
+    """
+    if not outcomes:
+        return []
+    
+    # Renumerar cada RA con su posición en la lista
+    normalized = []
+    for idx, outcome in enumerate(outcomes, start=1):
+        normalized.append({
+            'code': f'RA{idx}',
+            'description': outcome.get('description', '')
+        })
+    
+    return normalized
 
 
 def extract_competencies_from_table(doc: Document, table_idx: int) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
@@ -650,15 +678,29 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
                         # Encontrada tabla con RAs
                         ra_pattern = r'(RA\d+)\s*[-:]\s*([^\n]+)'
                         ra_matches = re.finditer(ra_pattern, cell_text, re.IGNORECASE)
+                        
+                        # Deduplicación con seen_codes
+                        seen_codes = set()
+                        temp_outcomes = []
                         for match in ra_matches:
                             code = match.group(1).upper()
                             description = match.group(2).strip()
-                            if description:
-                                learning_outcomes.append({
+                            
+                            # Evitar duplicados
+                            if code not in seen_codes and description:
+                                seen_codes.add(code)
+                                temp_outcomes.append({
                                     'code': code,
                                     'description': description
                                 })
+                        
+                        # Normalizar RAs a consecutivos
+                        learning_outcomes = normalize_learning_outcomes(temp_outcomes)
                         break
+            
+            # Si ya encontramos RAs, salir del bucle externo
+            if learning_outcomes:
+                break
     
     # Extraer unidades (sección 4)
     units = extract_units_from_docx(doc, 0, len(doc.paragraphs))
