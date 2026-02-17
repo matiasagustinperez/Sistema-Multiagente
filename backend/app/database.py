@@ -18,6 +18,7 @@ def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
     ensure_proposals_columns()
+    ensure_teachers_columns()
 
 
 def ensure_proposals_columns():
@@ -32,6 +33,18 @@ def ensure_proposals_columns():
             conn.commit()
         if "teaching_team" not in columns:
             conn.execute(text("ALTER TABLE proposals ADD COLUMN teaching_team JSON"))
+            conn.commit()
+
+
+def ensure_teachers_columns():
+    """Add missing columns to teachers table (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(teachers)"))
+        columns = {row[1] for row in result}
+        if "dedication" not in columns:
+            conn.execute(text("ALTER TABLE teachers ADD COLUMN dedication VARCHAR(50)"))
             conn.commit()
 
 def get_db():

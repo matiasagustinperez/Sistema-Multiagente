@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from .database import Base
 
 class Proposal(Base):
@@ -47,6 +48,91 @@ class Proposal(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    competencies = relationship(
+        "ProposalCompetency",
+        back_populates="proposal",
+        cascade="all, delete-orphan",
+    )
+
+    teachers = relationship(
+        "ProposalTeacher",
+        back_populates="proposal",
+        cascade="all, delete-orphan",
+    )
     
     def __repr__(self):
         return f"<Proposal(id={self.id}, title={self.title}, career={self.career})>"
+
+
+class CompetencyCatalog(Base):
+    __tablename__ = "competency_catalog"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career = Column(String(255), nullable=False, index=True)
+    competency_type = Column(String(20), nullable=False, index=True)  # generic | specific
+    code = Column(String(50), nullable=False, index=True)
+    description = Column(Text, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ProposalCompetency(Base):
+    __tablename__ = "proposal_competencies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    proposal_id = Column(Integer, ForeignKey("proposals.id"), nullable=False, index=True)
+    competency_type = Column(String(20), nullable=False, index=True)  # generic | specific
+    code = Column(String(50), nullable=False)
+    description = Column(Text, nullable=False)
+    level = Column(Integer, nullable=False, default=0)
+
+    proposal = relationship("Proposal", back_populates="competencies")
+
+
+class Teacher(Base):
+    __tablename__ = "teachers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    normalized_key = Column(String(255), nullable=False, index=True)
+    email = Column(String(255), nullable=True, index=True)
+    category = Column(String(50), nullable=True)
+    dedication = Column(String(50), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    proposals = relationship(
+        "ProposalTeacher",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+    )
+
+    careers = relationship(
+        "TeacherCareer",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+    )
+
+
+class TeacherCareer(Base):
+    __tablename__ = "teacher_careers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=False, index=True)
+    career = Column(String(255), nullable=False, index=True)
+
+    teacher = relationship("Teacher", back_populates="careers")
+
+
+class ProposalTeacher(Base):
+    __tablename__ = "proposal_teachers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    proposal_id = Column(Integer, ForeignKey("proposals.id"), nullable=False, index=True)
+    teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=False, index=True)
+
+    proposal = relationship("Proposal", back_populates="teachers")
+    teacher = relationship("Teacher", back_populates="proposals")

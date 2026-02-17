@@ -28,6 +28,67 @@ class TeachingStaff(BaseModel):
     name: Optional[str] = ""
     category: Optional[str] = ""
     email: Optional[str] = ""
+    dedication: Optional[str] = ""
+
+
+class TeacherBase(BaseModel):
+    name: str
+    category: Optional[str] = None
+    email: Optional[str] = None
+    dedication: Optional[str] = None
+
+
+class TeacherCreate(TeacherBase):
+    career: Optional[str] = None
+
+
+class TeacherUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    email: Optional[str] = None
+    dedication: Optional[str] = None
+
+
+class TeacherOut(TeacherBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class CompetencyItem(BaseModel):
+    id: Optional[int] = None
+    code: Optional[str] = ""
+    description: Optional[str] = ""
+    level: Optional[int] = 0
+    level_label: Optional[str] = None
+
+
+class CompetencyCatalogBase(BaseModel):
+    career: str
+    competency_type: str
+    code: str
+    description: str
+
+
+class CompetencyCatalogCreate(CompetencyCatalogBase):
+    pass
+
+
+class CompetencyCatalogUpdate(BaseModel):
+    career: Optional[str] = None
+    competency_type: Optional[str] = None
+    code: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CompetencyCatalogOut(CompetencyCatalogBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 class ProposalBase(BaseModel):
     title: str
@@ -54,6 +115,8 @@ class ProposalBase(BaseModel):
     units: Optional[List[Unit]] = []
     practicals: Optional[List[Practical]] = []
     teaching_team: Optional[List[TeachingStaff]] = []
+    generic_competencies_items: Optional[List[CompetencyItem]] = []
+    specific_competencies_items: Optional[List[CompetencyItem]] = []
     
     methodology: Optional[str] = None
     evaluation: Optional[str] = None
@@ -88,6 +151,8 @@ class ProposalUpdate(BaseModel):
     units: Optional[List[Unit]] = None
     practicals: Optional[List[Practical]] = None
     teaching_team: Optional[List[TeachingStaff]] = None
+    generic_competencies_items: Optional[List[CompetencyItem]] = None
+    specific_competencies_items: Optional[List[CompetencyItem]] = None
     methodology: Optional[str] = None
     evaluation: Optional[str] = None
     bibliography: Optional[str] = None

@@ -1,19 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react'
 import logoMacau from '../Logo MACAU.png'
 
-export default function App() {
+const careerOptions = [
+  'Ingeniería en Sistemas',
+  'Ingeniería Mecatrónica'
+]
+
+const App = () => {
   // Main navigation
   const [activeMenu, setActiveMenu] = useState('home')
   const [proposalsMode, setProposalsMode] = useState(null)
-  
-  // Import state
+  const [activeCareer, setActiveCareer] = useState(() => localStorage.getItem('activeCareer') || '')
+
   const [importFile, setImportFile] = useState(null)
   const [importLoading, setImportLoading] = useState(false)
-  const [importPreview, setImportPreview] = useState(null)
   const [importError, setImportError] = useState('')
-  
+  const [importPreview, setImportPreview] = useState(null)
+
   // AI state
-  const [aiLoading, setAiLoading] = useState(false)
   const [aiSection, setAiSection] = useState(null)
   const [showComparison, setShowComparison] = useState(false)
   const [aiError, setAiError] = useState('')
@@ -32,7 +36,7 @@ export default function App() {
   
   // Form state
   const [equipoDocente, setEquipoDocente] = useState([
-    { id: 1, nombre: '', categoria: 'TITULAR', correo: '' }
+    { id: 1, teacherId: null, nombre: '', categoria: 'TITULAR', correo: '' }
   ])
 
   const [editingProposalId, setEditingProposalId] = useState(null)
@@ -43,7 +47,7 @@ export default function App() {
   const autosaveTimerRef = useRef(null)
   const informacionGeneralRef = useRef(null)
   
-  const [formData, setFormData] = useState({
+  const emptyFormData = {
     carrera: '',
     asignatura: '',
     plan: '',
@@ -55,8 +59,8 @@ export default function App() {
     hsTeo: 0,
     hsPrac: 0,
     contenidosMin: '',
-    competenciasGen: '',
-    competenciasEsp: 'No Aplica',
+    competenciasGenItems: [],
+    competenciasEspItems: [],
     fundamentosP1: '',
     fundamentosP2: '',
     resultadosAprendizaje: [],
@@ -66,15 +70,146 @@ export default function App() {
     evaluacion: '',
     bibliografia: '',
     observaciones: ''
-  })
+  }
+
+  const [formData, setFormData] = useState(emptyFormData)
   
   const [statusMsg, setStatusMsg] = useState('')
   const [statusType, setStatusType] = useState('')
   const [proposals, setProposals] = useState([])
+  const [careerCompetencies, setCareerCompetencies] = useState({ generic: [], specific: [] })
+  const [catalogCareer, setCatalogCareer] = useState('')
+  const [catalogType, setCatalogType] = useState('generic')
+  const [catalogItems, setCatalogItems] = useState([])
+  const [catalogFormGeneric, setCatalogFormGeneric] = useState({ code: '', description: '' })
+  const [catalogFormSpecific, setCatalogFormSpecific] = useState({ code: '', description: '' })
+  const [catalogEditId, setCatalogEditId] = useState(null)
+  const [catalogEditForm, setCatalogEditForm] = useState({ code: '', description: '' })
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogUsageInfo, setCatalogUsageInfo] = useState({
+    itemId: null,
+    type: '',
+    code: '',
+    ids: [],
+    items: [],
+    loading: false,
+    error: ''
+  })
+  const [catalogDeleteModal, setCatalogDeleteModal] = useState({
+    isOpen: false,
+    itemId: null,
+    code: '',
+    items: [],
+    loading: false,
+    error: ''
+  })
+  const [teacherCatalogItems, setTeacherCatalogItems] = useState([])
+  const [teacherCatalogLoading, setTeacherCatalogLoading] = useState(false)
+  const [teacherCatalogError, setTeacherCatalogError] = useState('')
+  const [teacherTotalCount, setTeacherTotalCount] = useState(0)
+  const [teacherForm, setTeacherForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+  const [teacherUsageInfo, setTeacherUsageInfo] = useState({
+    teacherId: null,
+    name: '',
+    ids: [],
+    items: [],
+    loading: false,
+    error: ''
+  })
+  const [teacherDeleteModal, setTeacherDeleteModal] = useState({
+    isOpen: false,
+    teacherId: null,
+    name: '',
+    items: [],
+    loading: false,
+    error: ''
+  })
+  const [teacherEditId, setTeacherEditId] = useState(null)
+  const [teacherEditForm, setTeacherEditForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+  const [docenteAutocompleteId, setDocenteAutocompleteId] = useState(null)
+  const [completeProposalFilters, setCompleteProposalFilters] = useState({
+    id: '',
+    subject: '',
+    academic_year: '',
+    year_of_career: '',
+    quarter: '',
+    status: ''
+  })
+  const [completeProposalSort, setCompleteProposalSort] = useState({ key: '', direction: 'asc' })
+  const [pendingProposalFilters, setPendingProposalFilters] = useState({
+    id: '',
+    subject: '',
+    academic_year: '',
+    year_of_career: '',
+    quarter: '',
+    status: ''
+  })
+  const [pendingProposalSort, setPendingProposalSort] = useState({ key: '', direction: 'asc' })
+  const [teacherTableFilters, setTeacherTableFilters] = useState({
+    name: '',
+    category: '',
+    dedication: '',
+    email: ''
+  })
+  const [teacherTableSort, setTeacherTableSort] = useState({ key: '', direction: 'asc' })
+  const [genericCompetencyFilters, setGenericCompetencyFilters] = useState({ code: '', description: '' })
+  const [genericCompetencySort, setGenericCompetencySort] = useState({ key: '', direction: 'asc' })
+  const [specificCompetencyFilters, setSpecificCompetencyFilters] = useState({ code: '', description: '' })
+  const [specificCompetencySort, setSpecificCompetencySort] = useState({ key: '', direction: 'asc' })
 
   useEffect(() => {
     fetchProposals()
+    fetchTeacherTotals()
   }, [])
+
+  useEffect(() => {
+    if (activeCareer) {
+      localStorage.setItem('activeCareer', activeCareer)
+    } else {
+      localStorage.removeItem('activeCareer')
+    }
+  }, [activeCareer])
+
+  useEffect(() => {
+    if (!activeCareer) {
+      return
+    }
+    setFormData(prev => (prev.carrera === activeCareer ? prev : { ...prev, carrera: activeCareer }))
+  }, [activeCareer])
+
+  useEffect(() => {
+    if (activeCareer) {
+      fetchCareerCompetencies(activeCareer)
+    }
+  }, [activeCareer])
+
+  useEffect(() => {
+    if (activeCareer) {
+      fetchTeachers(activeCareer)
+    } else {
+      setTeacherCatalogItems([])
+      setTeacherCatalogError('')
+    }
+  }, [activeCareer])
+
+  useEffect(() => {
+    if (activeMenu !== 'competencias') {
+      return
+    }
+    const career = activeCareer
+    if (career && catalogCareer !== career) {
+      setCatalogCareer(career)
+    }
+    if (career) {
+      fetchCareerCompetencies(career)
+    }
+  }, [activeMenu, catalogCareer, activeCareer])
+
+  useEffect(() => {
+    if (activeMenu === 'docentes' && activeCareer) {
+      fetchTeachers(activeCareer)
+    }
+  }, [activeMenu])
 
   // Auto-clear status messages after 3 seconds
   useEffect(() => {
@@ -105,8 +240,776 @@ export default function App() {
     }
   }
 
+  const fetchCareerCompetencies = async (career) => {
+    if (!career) {
+      setCareerCompetencies({ generic: [], specific: [] })
+      return
+    }
+    try {
+      const [genRes, specRes] = await Promise.all([
+        fetch(`http://localhost:8001/competencies?career=${encodeURIComponent(career)}&competency_type=generic`),
+        fetch(`http://localhost:8001/competencies?career=${encodeURIComponent(career)}&competency_type=specific`)
+      ])
+      const genData = genRes.ok ? await genRes.json() : []
+      const specData = specRes.ok ? await specRes.json() : []
+      setCareerCompetencies({ generic: genData, specific: specData })
+    } catch (err) {
+      console.error('Error fetching competencies catalog:', err)
+      setCareerCompetencies({ generic: [], specific: [] })
+    }
+  }
+
+  const fetchCatalogItems = async (career, type) => {
+    if (!career) {
+      setCatalogItems([])
+      return
+    }
+    try {
+      setCatalogLoading(true)
+      const res = await fetch(`http://localhost:8001/competencies?career=${encodeURIComponent(career)}&competency_type=${type}`)
+      const data = res.ok ? await res.json() : []
+      setCatalogItems(data)
+    } catch (err) {
+      console.error('Error fetching catalog items:', err)
+      setCatalogItems([])
+    } finally {
+      setCatalogLoading(false)
+    }
+  }
+
+  const addCatalogItem = async (type, form, setForm) => {
+    const careerValue = activeCareer || catalogCareer
+    if (!careerValue || !form.code || !form.description) {
+      setStatusMsg('Completa carrera activa, código y descripción')
+      setStatusType('error')
+      return
+    }
+    const existing = catalogItems.find(item =>
+      item.code?.trim().toLowerCase() === form.code.trim().toLowerCase() &&
+      item.competency_type === type
+    )
+    if (existing) {
+      setStatusMsg('Ese código ya existe en el catálogo')
+      setStatusType('error')
+      return
+    }
+    try {
+      const res = await fetch('http://localhost:8001/competencies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          career: careerValue,
+          competency_type: type,
+          code: form.code,
+          description: form.description
+        })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      setForm({ code: '', description: '' })
+      await fetchCareerCompetencies(careerValue)
+      setStatusMsg('Competencia agregada')
+      setStatusType('success')
+    } catch (err) {
+      const message = err.message === 'Competency code already exists'
+        ? 'Ese código ya existe en el catálogo'
+        : err.message
+      setStatusMsg('Error al agregar competencia: ' + message)
+      setStatusType('error')
+    }
+  }
+
+  const startCatalogEdit = (item) => {
+    setCatalogEditId(item.id)
+    setCatalogEditForm({
+      code: item.code || '',
+      description: item.description || ''
+    })
+  }
+
+  const cancelCatalogEdit = () => {
+    setCatalogEditId(null)
+    setCatalogEditForm({ code: '', description: '' })
+  }
+
+  const saveCatalogEdit = async (item) => {
+    if (!catalogEditForm.code || !catalogEditForm.description) {
+      setStatusMsg('Completa código y descripción')
+      setStatusType('error')
+      return
+    }
+    try {
+      const res = await fetch(`http://localhost:8001/competencies/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: catalogEditForm.code,
+          description: catalogEditForm.description
+        })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const careerValue = activeCareer || catalogCareer
+      await fetchCareerCompetencies(careerValue)
+      setStatusMsg('Competencia actualizada')
+      setStatusType('success')
+      cancelCatalogEdit()
+    } catch (err) {
+      setStatusMsg('Error al actualizar competencia: ' + err.message)
+      setStatusType('error')
+    }
+  }
+
+  const loadCatalogUsage = async (item, type) => {
+    if (!item?.id) {
+      return
+    }
+    setCatalogUsageInfo({
+      itemId: item.id,
+      type,
+      code: item.code || '',
+      ids: [],
+      items: [],
+      loading: true,
+      error: ''
+    })
+    try {
+      const usageRes = await fetch(`http://localhost:8001/competencies/${item.id}/usage`)
+      if (!usageRes.ok) {
+        const errorData = await usageRes.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${usageRes.status}`)
+      }
+      const usageData = await usageRes.json()
+      const infoItems = Array.isArray(usageData.affected_proposals_info)
+        ? usageData.affected_proposals_info
+        : []
+      setCatalogUsageInfo(prev => ({
+        ...prev,
+        ids: Array.isArray(usageData.affected_proposal_ids) ? usageData.affected_proposal_ids : [],
+        items: infoItems,
+        loading: false,
+        error: ''
+      }))
+    } catch (err) {
+      setCatalogUsageInfo(prev => ({
+        ...prev,
+        ids: [],
+        items: [],
+        loading: false,
+        error: err.message || 'Error al consultar propuestas'
+      }))
+    }
+  }
+
+  const clearCatalogUsage = () => {
+    setCatalogUsageInfo({ itemId: null, type: '', code: '', ids: [], items: [], loading: false, error: '' })
+  }
+
+  const formatAffectedProposals = (ids = []) => {
+    if (!ids.length) {
+      return 'No hay propuestas afectadas.'
+    }
+    const total = ids.length
+    const previewLimit = 10
+    const preview = ids.slice(0, previewLimit)
+    const extraLine = total > previewLimit ? `\nSe muestran ${previewLimit} de ${total}.` : ''
+    return `Propuestas afectadas (${total}): ${preview.join(', ')}${extraLine}`
+  }
+
+  const openDeleteCatalogModal = async (item) => {
+    if (!item?.id) {
+      return
+    }
+    setCatalogDeleteModal({
+      isOpen: true,
+      itemId: item.id,
+      code: item.code || '',
+      items: [],
+      loading: true,
+      error: ''
+    })
+    try {
+      const usageRes = await fetch(`http://localhost:8001/competencies/${item.id}/usage`)
+      if (!usageRes.ok) {
+        const errorData = await usageRes.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${usageRes.status}`)
+      }
+      const usageData = await usageRes.json()
+      const infoItems = Array.isArray(usageData.affected_proposals_info)
+        ? usageData.affected_proposals_info
+        : []
+      setCatalogDeleteModal(prev => ({
+        ...prev,
+        items: infoItems,
+        loading: false,
+        error: ''
+      }))
+    } catch (err) {
+      setCatalogDeleteModal(prev => ({
+        ...prev,
+        items: [],
+        loading: false,
+        error: err.message || 'Error al consultar propuestas'
+      }))
+    }
+  }
+
+  const closeDeleteCatalogModal = () => {
+    setCatalogDeleteModal({ isOpen: false, itemId: null, code: '', items: [], loading: false, error: '' })
+  }
+
+  const confirmDeleteCatalogItem = async () => {
+    if (!catalogDeleteModal.itemId) {
+      return
+    }
+    try {
+      clearCatalogUsage()
+      const res = await fetch(`http://localhost:8001/competencies/${catalogDeleteModal.itemId}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const result = await res.json().catch(() => ({}))
+      const careerValue = activeCareer || catalogCareer
+      await fetchCareerCompetencies(careerValue)
+      if (Array.isArray(result.affected_proposal_ids) && result.affected_proposal_ids.length > 0) {
+        setStatusMsg(`Competencia eliminada. Propuestas afectadas: ${result.affected_proposal_ids.join(', ')}`)
+      } else {
+        setStatusMsg('Competencia eliminada')
+      }
+      setStatusType('success')
+      closeDeleteCatalogModal()
+    } catch (err) {
+      setStatusMsg('Error al eliminar competencia: ' + err.message)
+      setStatusType('error')
+    }
+  }
+
+  const fetchTeachers = async (career) => {
+    if (!career) {
+      setTeacherCatalogItems([])
+      return
+    }
+    try {
+      setTeacherCatalogLoading(true)
+      setTeacherCatalogError('')
+      const res = await fetch(`http://localhost:8001/teachers?career=${encodeURIComponent(career)}`)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      const sorted = Array.isArray(data)
+        ? [...data].sort((a, b) => (a.name || '').localeCompare((b.name || ''), 'es', { sensitivity: 'base' }))
+        : []
+      setTeacherCatalogItems(sorted)
+    } catch (err) {
+      setTeacherCatalogItems([])
+      setTeacherCatalogError(err.message || 'Error al cargar docentes')
+    } finally {
+      setTeacherCatalogLoading(false)
+    }
+  }
+
+  const fetchTeacherTotals = async () => {
+    try {
+      const res = await fetch('http://localhost:8001/teachers')
+      if (!res.ok) {
+        throw new Error(`Error ${res.status}`)
+      }
+      const data = await res.json()
+      setTeacherTotalCount(Array.isArray(data) ? data.length : 0)
+    } catch (err) {
+      setTeacherTotalCount(0)
+    }
+  }
+
+  const normalizeSearchText = (value) => {
+    if (!value) {
+      return ''
+    }
+    return value
+      .toString()
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase()
+  }
+
+  const getSortIndicator = (sortState, key) => {
+    if (sortState.key !== key) {
+      return ''
+    }
+    return sortState.direction === 'asc' ? ' ▲' : ' ▼'
+  }
+
+  const toggleSort = (setSortState, key) => {
+    setSortState((prev) => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+      }
+      return { key, direction: 'asc' }
+    })
+  }
+
+  const applyTableFilters = (rows, filters, getters) => {
+    return rows.filter((row) => {
+      return Object.keys(filters).every((key) => {
+        const term = normalizeSearchText(filters[key])
+        if (!term) {
+          return true
+        }
+        const value = getters[key] ? getters[key](row) : ''
+        return normalizeSearchText(value).includes(term)
+      })
+    })
+  }
+
+  const applyTableSort = (rows, sortState, getters) => {
+    if (!sortState.key || !getters[sortState.key]) {
+      return rows
+    }
+    const direction = sortState.direction === 'desc' ? -1 : 1
+    return [...rows].sort((a, b) => {
+      const aValue = getters[sortState.key](a)
+      const bValue = getters[sortState.key](b)
+      const aNum = Number(aValue)
+      const bNum = Number(bValue)
+      if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
+        return (aNum - bNum) * direction
+      }
+      return String(aValue ?? '').localeCompare(String(bValue ?? ''), 'es', { sensitivity: 'base' }) * direction
+    })
+  }
+
+  const normalizeTeacherKey = (value) => {
+    const cleaned = normalizeSearchText(value)
+      .replace(/[,]/g, ' ')
+      .replace(/[^a-z0-9\s]/g, ' ')
+    const tokens = cleaned.split(/\s+/).filter(Boolean).sort()
+    return tokens.join(' ')
+  }
+
+  const getTeacherTokenSet = (value) => {
+    const key = normalizeTeacherKey(value)
+    return new Set(key ? key.split(' ') : [])
+  }
+
+  const isTeacherNameDuplicate = (name) => {
+    const incomingTokens = Array.from(getTeacherTokenSet(name))
+    if (incomingTokens.length < 2) {
+      return false
+    }
+    return teacherCatalogItems.some((teacher) => {
+      const existingTokens = Array.from(getTeacherTokenSet(teacher.name))
+      if (existingTokens.length < 2) {
+        return false
+      }
+      if (Math.abs(existingTokens.length - incomingTokens.length) > 1) {
+        return false
+      }
+      const incomingSet = new Set(incomingTokens)
+      const existingSet = new Set(existingTokens)
+      const incomingInExisting = incomingTokens.every(token => existingSet.has(token))
+      const existingInIncoming = existingTokens.every(token => incomingSet.has(token))
+      return incomingInExisting || existingInIncoming
+    })
+  }
+
+  const getTeacherSuggestions = (query) => {
+    const term = normalizeSearchText(query)
+    if (!term) {
+      return []
+    }
+    return teacherCatalogItems.filter((teacher) => {
+      const name = normalizeSearchText(teacher.name)
+      const email = normalizeSearchText(teacher.email)
+      return name.includes(term) || email.includes(term)
+    }).slice(0, 6)
+  }
+
+  const addTeacher = async () => {
+    if (!teacherForm.name.trim()) {
+      setStatusMsg('Completa el nombre del docente')
+      setStatusType('error')
+      return
+    }
+    if (!teacherForm.dedication || teacherForm.dedication === 'Sin Informar') {
+      setStatusMsg('Completa la dedicación del docente')
+      setStatusType('error')
+      return
+    }
+    const normalizedEmail = normalizeSearchText(teacherForm.email)
+    const duplicate = teacherCatalogItems.some((teacher) => {
+      const nameMatch = isTeacherNameDuplicate(teacherForm.name)
+      const emailMatch = normalizedEmail && normalizeSearchText(teacher.email) === normalizedEmail
+      return nameMatch || emailMatch
+    })
+    if (duplicate) {
+      setStatusMsg('Ese docente ya existe en el catálogo')
+      setStatusType('error')
+      return
+    }
+    try {
+      const res = await fetch('http://localhost:8001/teachers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: teacherForm.name.trim().toUpperCase(),
+          category: teacherForm.category,
+          dedication: teacherForm.dedication,
+          email: teacherForm.email,
+          career: activeCareer
+        })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      setTeacherForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+      await fetchTeachers(activeCareer)
+      await fetchTeacherTotals()
+      setStatusMsg('Docente agregado')
+      setStatusType('success')
+    } catch (err) {
+      const message = err.message === 'Teacher already exists'
+        ? 'Ese docente ya existe en el catálogo'
+        : err.message
+      setStatusMsg('Error al agregar docente: ' + message)
+      setStatusType('error')
+    }
+  }
+
+  const startTeacherEdit = (teacher) => {
+    if (!teacher?.id) {
+      return
+    }
+    setTeacherEditId(teacher.id)
+    setTeacherEditForm({
+      name: teacher.name || '',
+      category: teacher.category || 'AYUDANTE 1º',
+      dedication: teacher.dedication || 'Sin Informar',
+      email: teacher.email || ''
+    })
+  }
+
+  const cancelTeacherEdit = () => {
+    setTeacherEditId(null)
+    setTeacherEditForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+  }
+
+  const saveTeacherEdit = async (teacher) => {
+    if (!teacher?.id) {
+      return
+    }
+    if (!teacherEditForm.name.trim()) {
+      setStatusMsg('Completa el nombre del docente')
+      setStatusType('error')
+      return
+    }
+    if (!teacherEditForm.dedication || teacherEditForm.dedication === 'Sin Informar') {
+      setStatusMsg('Completa la dedicación del docente')
+      setStatusType('error')
+      return
+    }
+    try {
+      const res = await fetch(`http://localhost:8001/teachers/${teacher.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: teacherEditForm.name.trim().toUpperCase(),
+          category: teacherEditForm.category,
+          dedication: teacherEditForm.dedication,
+          email: teacherEditForm.email
+        })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      await fetchTeachers(activeCareer)
+      await fetchTeacherTotals()
+      setStatusMsg('Docente actualizado')
+      setStatusType('success')
+      cancelTeacherEdit()
+    } catch (err) {
+      const message = err.message === 'Teacher already exists'
+        ? 'Ese docente ya existe en el catálogo'
+        : err.message
+      setStatusMsg('Error al actualizar docente: ' + message)
+      setStatusType('error')
+    }
+  }
+
+  const loadTeacherUsage = async (teacher) => {
+    if (!teacher?.id) {
+      return
+    }
+    setTeacherUsageInfo({
+      teacherId: teacher.id,
+      name: teacher.name || '',
+      ids: [],
+      items: [],
+      loading: true,
+      error: ''
+    })
+    try {
+      const careerValue = activeCareer || ''
+      const usageRes = await fetch(`http://localhost:8001/teachers/${teacher.id}/usage?career=${encodeURIComponent(careerValue)}`)
+      if (!usageRes.ok) {
+        const errorData = await usageRes.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${usageRes.status}`)
+      }
+      const usageData = await usageRes.json()
+      const infoItems = Array.isArray(usageData.affected_proposals_info)
+        ? usageData.affected_proposals_info
+        : []
+      setTeacherUsageInfo(prev => ({
+        ...prev,
+        ids: Array.isArray(usageData.affected_proposal_ids) ? usageData.affected_proposal_ids : [],
+        items: infoItems,
+        loading: false,
+        error: ''
+      }))
+    } catch (err) {
+      setTeacherUsageInfo(prev => ({
+        ...prev,
+        ids: [],
+        items: [],
+        loading: false,
+        error: err.message || 'Error al consultar propuestas'
+      }))
+    }
+  }
+
+  const clearTeacherUsage = () => {
+    setTeacherUsageInfo({ teacherId: null, name: '', ids: [], items: [], loading: false, error: '' })
+  }
+
+  const openDeleteTeacherModal = async (teacher) => {
+    if (!teacher?.id) {
+      return
+    }
+    setTeacherDeleteModal({
+      isOpen: true,
+      teacherId: teacher.id,
+      name: teacher.name || '',
+      items: [],
+      loading: true,
+      error: ''
+    })
+    try {
+      const careerValue = activeCareer || ''
+      const usageRes = await fetch(`http://localhost:8001/teachers/${teacher.id}/usage?career=${encodeURIComponent(careerValue)}`)
+      if (!usageRes.ok) {
+        const errorData = await usageRes.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${usageRes.status}`)
+      }
+      const usageData = await usageRes.json()
+      const infoItems = Array.isArray(usageData.affected_proposals_info)
+        ? usageData.affected_proposals_info
+        : []
+      setTeacherDeleteModal(prev => ({
+        ...prev,
+        items: infoItems,
+        loading: false,
+        error: ''
+      }))
+    } catch (err) {
+      setTeacherDeleteModal(prev => ({
+        ...prev,
+        items: [],
+        loading: false,
+        error: err.message || 'Error al consultar propuestas'
+      }))
+    }
+  }
+
+  const closeDeleteTeacherModal = () => {
+    setTeacherDeleteModal({ isOpen: false, teacherId: null, name: '', items: [], loading: false, error: '' })
+  }
+
+  const confirmDeleteTeacher = async () => {
+    if (!teacherDeleteModal.teacherId) {
+      return
+    }
+    try {
+      clearTeacherUsage()
+      const careerValue = activeCareer || ''
+      const res = await fetch(`http://localhost:8001/teachers/${teacherDeleteModal.teacherId}?career=${encodeURIComponent(careerValue)}`, {
+        method: 'DELETE'
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const result = await res.json().catch(() => ({}))
+      if (Array.isArray(result.affected_proposal_ids) && result.affected_proposal_ids.length > 0) {
+        setStatusMsg(`Docente eliminado. Propuestas afectadas: ${result.affected_proposal_ids.join(', ')}`)
+      } else {
+        setStatusMsg('Docente eliminado')
+      }
+      setStatusType('success')
+      closeDeleteTeacherModal()
+      if (activeCareer) {
+        await fetchTeachers(activeCareer)
+      }
+      await fetchTeacherTotals()
+    } catch (err) {
+      setStatusMsg('Error al eliminar docente: ' + err.message)
+      setStatusType('error')
+    }
+  }
+
+  const getTeacherMatches = (query) => {
+    const text = (query || '').trim().toLowerCase()
+    if (!text || !Array.isArray(teacherCatalogItems) || teacherCatalogItems.length === 0) {
+      return []
+    }
+    return teacherCatalogItems
+      .filter((teacher) => {
+        const name = (teacher.name || '').toLowerCase()
+        const email = (teacher.email || '').toLowerCase()
+        return name.includes(text) || email.includes(text)
+      })
+      .slice(0, 6)
+  }
+
+  const applyTeacherToDocente = (docId, teacher) => {
+    const updated = equipoDocente.map(d =>
+      d.id === docId
+        ? {
+          ...d,
+          nombre: (teacher?.name || '').toUpperCase(),
+          categoria: teacher?.category || 'AYUDANTE 1º',
+          correo: teacher?.email || ''
+        }
+        : d
+    )
+    setEquipoDocente(updated)
+    sortDocentes(updated)
+    setIsDirty(true)
+  }
+
   const updateFormData = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
+    setIsDirty(true)
+  }
+
+  const normalizeCareer = (value) => {
+    if (!value) return ''
+    const normalized = String(value).toLowerCase().trim()
+    const found = careerOptions.find(opt => opt.toLowerCase().trim() === normalized)
+    return found || String(value).trim()
+  }
+
+  const levelOptions = [
+    { value: 0, label: 'Nulo' },
+    { value: 1, label: 'Bajo' },
+    { value: 2, label: 'Medio' },
+    { value: 3, label: 'Alto' }
+  ]
+
+  const getLevelLabel = (value) => {
+    const option = levelOptions.find((opt) => opt.value === Number(value))
+    return option ? option.label : 'Nulo'
+  }
+
+  const normalizeLevelValue = (value) => {
+    if (value === null || value === undefined || value === '') return 0
+    if (typeof value === 'number') return Math.max(0, Math.min(3, value))
+    const text = String(value).trim().toLowerCase()
+    const match = levelOptions.find((opt) => opt.label.toLowerCase() === text)
+    if (match) return match.value
+    const numeric = Number(text)
+    if (!Number.isNaN(numeric)) return Math.max(0, Math.min(3, numeric))
+    return 0
+  }
+
+  const buildCompetencyText = (items = []) => {
+    if (!Array.isArray(items) || items.length === 0) return ''
+    return items
+      .filter((item) => item && (item.code || item.description))
+      .map((item) => {
+        const code = (item.code || '').trim()
+        const description = (item.description || '').trim()
+        const levelLabel = getLevelLabel(item.level)
+        if (code && description) return `${code} - ${description} - ${levelLabel}`
+        if (description) return `${description} - ${levelLabel}`
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  const parseCompetenciesFromText = (text = '') => {
+    if (!text || typeof text !== 'string') return []
+    return text
+      .split(/\r?\n/)
+      .map((line, idx) => {
+        const parts = line.split(' - ').map((part) => part.trim()).filter(Boolean)
+        const code = parts[0] && /^[A-Za-z]+\d+/.test(parts[0]) ? parts[0] : ''
+        const description = parts.length > 1 ? parts[1] : (code ? '' : parts[0] || '')
+        const levelLabel = parts.length > 2 ? parts[2] : ''
+        return {
+          id: Date.now() + idx,
+          code,
+          description,
+          level: normalizeLevelValue(levelLabel)
+        }
+      })
+      .filter((item) => item.code || item.description)
+  }
+
+  const normalizeCompetencyItems = (items, fallbackText = '') => {
+    if (Array.isArray(items) && items.length > 0) {
+      return items.map((item, idx) => ({
+        id: item.id ?? Date.now() + idx,
+        code: item.code || '',
+        description: item.description || '',
+        level: normalizeLevelValue(item.level ?? item.level_label)
+      }))
+    }
+    return parseCompetenciesFromText(fallbackText)
+  }
+
+  const addCompetencyItem = (type) => {
+    setFormData(prev => ({
+      ...prev,
+      [type]: [...prev[type], { id: Date.now(), code: '', description: '', level: 0 }]
+    }))
+    setIsDirty(true)
+  }
+
+  const updateCompetencyItem = (type, id, field, value) => {
+    setFormData(prev => {
+      const updated = prev[type].map(item => {
+        if (item.id !== id) return item
+        const next = { ...item, [field]: field === 'level' ? Number(value) : value }
+        if (field === 'code' && value) {
+          const catalogList = type === 'competenciasGenItems'
+            ? careerCompetencies.generic
+            : careerCompetencies.specific
+          const match = catalogList.find((entry) => entry.code?.toLowerCase() === String(value).toLowerCase())
+          if (match) {
+            next.description = match.description || ''
+          }
+        }
+        return next
+      })
+      return { ...prev, [type]: updated }
+    })
+    setIsDirty(true)
+  }
+
+  const deleteCompetencyItem = (type, id) => {
+    setFormData(prev => ({
+      ...prev,
+      [type]: prev[type].filter(item => item.id !== id)
+    }))
     setIsDirty(true)
   }
 
@@ -123,10 +1026,31 @@ export default function App() {
     return formData.carrera && formData.asignatura && formData.plan &&
            formData.ciclo && formData.cuatrimestre && formData.caracter &&
            formData.regimen && formData.contenidosMin && 
-           formData.competenciasGen
+           (formData.competenciasGenItems && formData.competenciasGenItems.length > 0)
   }
 
   const isNonEmptyText = (value) => typeof value === 'string' && value.trim().length > 0
+
+  const resetProposalForm = () => {
+    setFormData({ ...emptyFormData, carrera: activeCareer || '' })
+    setEquipoDocente([{ id: 1, teacherId: null, nombre: '', categoria: 'TITULAR', correo: '' }])
+    setEditingProposalId(null)
+    setEditingProposalStatus(null)
+    setViewProposal(null)
+    setIsDirty(false)
+    setAiSection(null)
+    setAiError('')
+    setShowComparison(false)
+    setComparisonData({ original: '', reformulated: '' })
+    setComparisonTarget(null)
+    setUnitDebug(null)
+    setUnitBibliografiaRef({ basica: '', complementaria: '', preferencia: '' })
+    setUnitBibliografiaDraft({ basica: '', complementaria: '', preferencia: '' })
+    setShowUnitBibliografiaModal(false)
+    setTpCommentRef('')
+    setTpCommentDraft('')
+    setShowTpCommentModal(false)
+  }
   const hasNumberValue = (value) => value !== '' && value !== null && value !== undefined
   const getValidationErrors = () => {
     const errors = []
@@ -143,9 +1067,32 @@ export default function App() {
     
     // Sección Contenidos
     if (!isNonEmptyText(formData.contenidosMin)) errors.push('Contenidos Mínimos')
-    if (!isNonEmptyText(formData.competenciasGen)) errors.push('Competencias Genéricas')
-    // Competencias Específicas es opcional
-    // if (!isNonEmptyText(formData.competenciasEsp)) errors.push('Competencias Específicas')
+    if (!Array.isArray(formData.competenciasGenItems) || formData.competenciasGenItems.length === 0) {
+      errors.push('Competencias Genéricas')
+    } else {
+      const incompletas = formData.competenciasGenItems.filter((comp) =>
+        !isNonEmptyText(comp.code) || !isNonEmptyText(comp.description)
+      )
+      if (incompletas.length > 0) {
+        errors.push(`Competencias Genéricas incompletas: ${incompletas.length}`)
+      }
+      const sinNivel = formData.competenciasGenItems.filter((comp) => normalizeLevelValue(comp.level) === 0)
+      if (sinNivel.length > 0) {
+        errors.push(`Competencias Genéricas sin nivel: ${sinNivel.length}`)
+      }
+    }
+    if (Array.isArray(formData.competenciasEspItems) && formData.competenciasEspItems.length > 0) {
+      const incompletas = formData.competenciasEspItems.filter((comp) =>
+        !isNonEmptyText(comp.code) || !isNonEmptyText(comp.description)
+      )
+      if (incompletas.length > 0) {
+        errors.push(`Competencias Específicas incompletas: ${incompletas.length}`)
+      }
+      const sinNivel = formData.competenciasEspItems.filter((comp) => normalizeLevelValue(comp.level) === 0)
+      if (sinNivel.length > 0) {
+        errors.push(`Competencias Específicas sin nivel: ${sinNivel.length}`)
+      }
+    }
     
     // Sección Fundamentación
     if (!isNonEmptyText(formData.fundamentosP1)) errors.push('Fundamentación P1')
@@ -246,16 +1193,34 @@ export default function App() {
   // Docent management
   const addDocente = () => {
     const newId = Math.max(...equipoDocente.map(d => d.id), 0) + 1
-    setEquipoDocente([...equipoDocente, { id: newId, nombre: '', categoria: 'AYUDANTE 1º', correo: '' }])
+    setEquipoDocente([...equipoDocente, { id: newId, teacherId: null, nombre: '', categoria: 'AYUDANTE 1º', correo: '' }])
     setIsDirty(true)
   }
 
   const updateDocente = (id, field, value) => {
     const updated = equipoDocente.map(d => 
-      d.id === id ? { ...d, [field]: field === 'nombre' ? value.toUpperCase() : value } : d
+      d.id === id ? { ...d, [field]: field === 'nombre' ? value.toUpperCase() : value, ...(field === 'nombre' ? { teacherId: null } : {}) } : d
     )
     setEquipoDocente(updated)
     sortDocentes(updated)
+    setIsDirty(true)
+  }
+
+  const selectDocenteSuggestion = (docenteId, teacher) => {
+    const updated = equipoDocente.map(d =>
+      d.id === docenteId
+        ? {
+            ...d,
+            teacherId: teacher.id,
+            nombre: teacher.name || '',
+            categoria: teacher.category || d.categoria || 'AYUDANTE 1º',
+            correo: teacher.email || ''
+          }
+        : d
+    )
+    setEquipoDocente(updated)
+    sortDocentes(updated)
+    setDocenteAutocompleteId(null)
     setIsDirty(true)
   }
 
@@ -792,11 +1757,11 @@ export default function App() {
     setAiSection('propuesta_completa')
     try {
       const prompt = `Crea una propuesta de cátedra académica:
-Carrera: ${formData.carrera}
-Asignatura: ${formData.asignatura}
-Fundamentación: ${formData.fundamentosP1}
-Contenidos mínimos: ${formData.contenidosMin}
-Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
+    Carrera: ${formData.carrera}
+    Asignatura: ${formData.asignatura}
+    Fundamentación: ${formData.fundamentosP1}
+    Contenidos mínimos: ${formData.contenidosMin}
+    Competencias: ${buildCompetencyText(formData.competenciasGenItems)}, ${buildCompetencyText(formData.competenciasEspItems)}`
 
       const res = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
@@ -833,7 +1798,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       setStatusType('info')
       return
     }
-    if (!isNonEmptyText(formData.competenciasGen)) {
+    if (!Array.isArray(formData.competenciasGenItems) || formData.competenciasGenItems.length === 0) {
       setStatusMsg('Completa Competencias Genéricas antes de generar RA')
       setStatusType('info')
       return
@@ -843,7 +1808,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     setAiLoading(true)
     setAiSection('Resultados de Aprendizaje')
     try {
-      const prompt = `Genera ${remainingCount} resultados de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${formData.competenciasGen}\nCompetencias especificas: ${formData.competenciasEsp}\n\nReglas de RA:\n- Centrado en el estudiante.\n- Verbo observable y evaluable.\n- Presente del indicativo.\n- Desempeno demostrable y medible.\n- No mezclar demasiadas capacidades en un solo RA.\n- Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada RA.\n- Sin titulos ni encabezados.`
+      const prompt = `Genera ${remainingCount} resultados de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${buildCompetencyText(formData.competenciasGenItems)}\nCompetencias especificas: ${buildCompetencyText(formData.competenciasEspItems)}\n\nReglas de RA:\n- Centrado en el estudiante.\n- Verbo observable y evaluable.\n- Presente del indicativo.\n- Desempeno demostrable y medible.\n- No mezclar demasiadas capacidades en un solo RA.\n- Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada RA.\n- Sin titulos ni encabezados.`
       const res = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1013,18 +1978,21 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       ].join('\n')
       const isMethodologyField = target?.field === 'metodologia'
       const isEvaluationField = target?.field === 'evaluacion'
+      const isBibliographyField = target?.field === 'bibliografia'
       const prompt = hasContent
-        ? (target?.type === 'ra'
-          ? `${raRules}\n\nReformula el siguiente RA manteniendo el sentido.\nDevuelve solo el RA reformulado, sin encabezados ni explicaciones:\n${currentValue}`
-          : (target?.type === 'unidad'
-            ? `Reformula los contenidos de la unidad "${unitContext.unitName}" manteniendo el sentido y coherencia con las unidades anteriores.\n\nContexto:\nCarrera: ${formData.carrera}\nAsignatura: ${formData.asignatura}\nContenidos minimos: ${formData.contenidosMin}\n${unitContext.previousUnitsText ? `\nUnidades anteriores:\n${unitContext.previousUnitsText}` : ''}\n\nRequisitos:\n- Devuelve solo los contenidos reformulados.\n- Sin titulos ni bibliografia.`
-            : (isMethodologyField
-              ? buildMethodologyPrompt({ baseContext, raText: getRaContextText(), mode: 'reformulate', currentValue })
-              : (isEvaluationField
-                ? buildEvaluationPrompt({ baseContext, mode: 'reformulate', currentValue })
-                : currentValue))))
+        ? (isBibliographyField
+          ? `Formatea la bibliografia al estilo APA 7.\n\nTexto a reformular:\n${currentValue}\n\nRequisitos:\n- Una referencia por linea.\n- Conservar el contenido original sin inventar datos.\n- Si falta anio, usar "s.f.".\n- Mantener el idioma original.\n- No incluir encabezados ni explicaciones.`
+          : (target?.type === 'ra'
+            ? `${raRules}\n\nReformula el siguiente RA manteniendo el sentido.\nDevuelve solo el RA reformulado, sin encabezados ni explicaciones:\n${currentValue}`
+            : (target?.type === 'unidad'
+              ? `Reformula los contenidos de la unidad "${unitContext.unitName}" manteniendo el sentido y coherencia con las unidades anteriores.\n\nContexto:\nCarrera: ${formData.carrera}\nAsignatura: ${formData.asignatura}\nContenidos minimos: ${formData.contenidosMin}\n${unitContext.previousUnitsText ? `\nUnidades anteriores:\n${unitContext.previousUnitsText}` : ''}\n\nRequisitos:\n- Devuelve solo los contenidos reformulados.\n- Sin titulos ni bibliografia.`
+              : (isMethodologyField
+                ? buildMethodologyPrompt({ baseContext, raText: getRaContextText(), mode: 'reformulate', currentValue })
+                : (isEvaluationField
+                  ? buildEvaluationPrompt({ baseContext, mode: 'reformulate', currentValue })
+                  : currentValue)))))
         : (target?.type === 'ra'
-          ? `Genera un resultado de aprendizaje para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${formData.competenciasGen}\nCompetencias especificas: ${formData.competenciasEsp}\n\n${raRules}\n\nRequisitos:\n- Un solo RA.\n- Solo el texto del RA.\n- Sin titulos ni encabezados.`
+          ? `Genera un resultado de aprendizaje para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${buildCompetencyText(formData.competenciasGenItems)}\nCompetencias especificas: ${buildCompetencyText(formData.competenciasEspItems)}\n\n${raRules}\n\nRequisitos:\n- Un solo RA.\n- Solo el texto del RA.\n- Sin titulos ni encabezados.`
           : (target?.type === 'unidad'
             ? `Escribe los contenidos de la unidad "${unitContext.unitName}" en funcion de los contenidos minimos y manteniendo coherencia con las unidades anteriores.\n\nContexto:\nCarrera: ${formData.carrera}\nAsignatura: ${formData.asignatura}\nContenidos minimos: ${formData.contenidosMin}\n${unitContext.previousUnitsText ? `\nUnidades anteriores:\n${unitContext.previousUnitsText}` : ''}\n\nRequisitos:\n- Devuelve solo los contenidos.\n- Sin titulos ni bibliografia.`
             : buildAiPrompt(label || target.field || 'contenido', target)))
@@ -1550,8 +2518,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
   const saveProposal = async ({ silent = false } = {}) => {
     const isEditing = !!editingProposalId
+    const careerValue = formData.carrera || activeCareer
     // Validate required fields: carrera and asignatura only
-    if (!formData.carrera || !formData.asignatura) {
+    if (!careerValue || !formData.asignatura) {
       if (!silent) {
         setStatusMsg('Requiere al menos: Carrera y Asignatura')
         setStatusType('error')
@@ -1572,7 +2541,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
     const payload = {
       title: formData.asignatura,
-      career: formData.carrera,
+      career: careerValue,
       subject: formData.asignatura,
       study_plan: formData.plan,
       academic_year: formData.anio,
@@ -1585,8 +2554,18 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       total_hours: getCartTotal(),
       weekly_hours: getHsSemanales(),
       minimum_content: formData.contenidosMin,
-      generic_competencies: formData.competenciasGen,
-      specific_competencies: formData.competenciasEsp,
+      generic_competencies: buildCompetencyText(formData.competenciasGenItems),
+      specific_competencies: buildCompetencyText(formData.competenciasEspItems),
+      generic_competencies_items: (formData.competenciasGenItems || []).map((item) => ({
+        code: item.code || '',
+        description: item.description || '',
+        level: normalizeLevelValue(item.level)
+      })),
+      specific_competencies_items: (formData.competenciasEspItems || []).map((item) => ({
+        code: item.code || '',
+        description: item.description || '',
+        level: normalizeLevelValue(item.level)
+      })),
       fundamentals_part1: formData.fundamentosP1,
       fundamentals_part2: formData.fundamentosP2,
       learning_outcomes: (formData.resultadosAprendizaje || []).map(ra => ({
@@ -1616,7 +2595,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       observations: formData.observaciones,
       status: computedStatus,
       teaching_team: equipoDocente.map(doc => ({
-        id: doc.id,
+        id: doc.teacherId || null,
         name: doc.nombre || '',
         category: doc.categoria || '',
         email: doc.correo || ''
@@ -1654,6 +2633,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       }
       // Reload proposals list
       fetchProposals()
+      if (activeCareer) {
+        fetchTeachers(activeCareer)
+      }
       setIsDirty(false)
     } catch (err) {
       const msg = err.message === 'Failed to fetch' 
@@ -1733,6 +2715,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           .filter((ra) => ra.descripcion && text.includes(ra.descripcion.toLowerCase()))
           .map((ra) => ra.id)
       }
+      const specificFallback = data.specific_competencies && data.specific_competencies !== 'No Aplica'
+        ? data.specific_competencies
+        : ''
       setFormData({
         carrera: data.career || '',
         asignatura: data.subject || data.title || '',
@@ -1745,8 +2730,8 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         hsTeo: data.theoretical_hours ?? 0,
         hsPrac: data.practical_hours ?? 0,
         contenidosMin: data.minimum_content || '',
-        competenciasGen: data.generic_competencies || '',
-        competenciasEsp: data.specific_competencies || 'No Aplica',
+        competenciasGenItems: normalizeCompetencyItems(data.generic_competencies_items, data.generic_competencies),
+        competenciasEspItems: normalizeCompetencyItems(data.specific_competencies_items, specificFallback),
         fundamentosP1: data.fundamentals_part1 || '',
         fundamentosP2: data.fundamentals_part2 || '',
         resultadosAprendizaje: loadedRaList,
@@ -1776,17 +2761,21 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       })
       if (Array.isArray(data.teaching_team) && data.teaching_team.length > 0) {
         setEquipoDocente(data.teaching_team.map((doc, idx) => ({
-          id: doc.id ?? Date.now() + idx,
+          id: Date.now() + idx,
+          teacherId: doc.id ?? null,
           nombre: doc.name || '',
           categoria: doc.category || 'AYUDANTE 1º',
           correo: doc.email || ''
         })))
       } else {
-        setEquipoDocente([{ id: 1, nombre: '', categoria: 'TITULAR', correo: '' }])
+        setEquipoDocente([{ id: 1, teacherId: null, nombre: '', categoria: 'TITULAR', correo: '' }])
       }
       setEditingProposalId(proposalId)
       setEditingProposalStatus(data.status || null)
       setIsDirty(false)
+      if (data.career) {
+        setActiveCareer(normalizeCareer(data.career))
+      }
       setActiveMenu('propuestas')
       setProposalsMode('create')
       setStatusMsg(`Editando propuesta #${proposalId}`)
@@ -1806,6 +2795,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       }
       const data = await res.json()
       setViewProposal(data)
+      if (data.career) {
+        setActiveCareer(normalizeCareer(data.career))
+      }
     } catch (err) {
       setStatusMsg('Error al cargar propuesta: ' + err.message)
       setStatusType('error')
@@ -1927,35 +2919,8 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     
     const data = importPreview.data
     
-    // Opciones disponibles de carrera (las mismas del formulario)
-    const carreraOptions = [
-      'Ingeniería en Sistemas',
-      'Ingeniería Mecatrónica',
-      'Licenciatura en Sistemas',
-      'Tecnicatura Universitaria en Desarrollo Web',
-      'Tecnicatura Universitaria en Ciencia de Datos'
-    ]
-
-    // Helper para normalizar carrera importada a opción disponible
-    const normalizeCarrera = (importedCarrera) => {
-      if (!importedCarrera) return ''
-      const normalized = String(importedCarrera).toLowerCase().trim()
-      const found = carreraOptions.find(opt => 
-        opt.toLowerCase().trim() === normalized
-      )
-      return found || importedCarrera
-    }
+    const normalizedCareer = normalizeCareer(data.career)
     
-    // Helper para convertir array de competencias a string
-    const competenciasListToString = (compArray) => {
-      if (!Array.isArray(compArray) || compArray.length === 0) return 'No Aplica'
-      return compArray.map(comp => {
-        if (typeof comp === 'string') return comp
-        const level = comp.level ? ` - ${comp.level}` : ''
-        return `${comp.code} - ${comp.description}${level}`
-      }).join('\n')
-    }
-
     const buildBibliografiaGlobal = (data) => {
       if (data.bibliography) {
         return data.bibliography
@@ -2007,9 +2972,21 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
     const raList = raListToArray(data.learning_outcomes) || []
     
+    const genericItems = normalizeCompetencyItems(
+      data.generic_competencies_items || data.generic_competencies,
+      typeof data.generic_competencies === 'string' ? data.generic_competencies : ''
+    )
+    const specificFallback = typeof data.specific_competencies === 'string' && data.specific_competencies !== 'No Aplica'
+      ? data.specific_competencies
+      : ''
+    const specificItems = normalizeCompetencyItems(
+      data.specific_competencies_items || data.specific_competencies,
+      specificFallback
+    )
+
     // Mapear datos extraídos al formulario
     setFormData({
-      carrera: normalizeCarrera(data.career),
+      carrera: normalizedCareer,
       asignatura: data.subject || '',
       plan: data.study_plan || data.plan || '',
       anio: data.academic_year || '',
@@ -2022,10 +2999,8 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       hsPrac: parseInt(data.practical_hours) || 0,
       hsSemanal: parseInt(data.weekly_hours) || 0,
       contenidosMin: data.minimum_content || '',
-      // Competencias genéricas: convertir de array de objetos a string
-      competenciasGen: competenciasListToString(data.generic_competencies),
-      // Competencias específicas: convertir de array de objetos a string
-      competenciasEsp: competenciasListToString(data.specific_competencies),
+      competenciasGenItems: genericItems,
+      competenciasEspItems: specificItems,
       // Fundamentos: usar la sección de importancia correctamente
       fundamentosP1: data.importance || data.fundamentals || '',
       fundamentosP2: data.professional_profile || '',
@@ -2057,6 +3032,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     if (data.teaching_team && Array.isArray(data.teaching_team)) {
       setEquipoDocente(data.teaching_team.map((docente, idx) => ({
         id: idx + 1,
+        teacherId: docente.id ?? null,
         nombre: docente.name || '',
         categoria: docente.category || '',
         correo: docente.email || ''
@@ -2065,12 +3041,16 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       // Fallback para compatibilidad con formato antiguo
       setEquipoDocente([{
         id: 1,
+        teacherId: null,
         nombre: data.teachers,
         categoria: 'TITULAR',
         correo: ''
       }])
     }
     
+    if (normalizedCareer) {
+      setActiveCareer(normalizedCareer)
+    }
     setProposalsMode('create')
     setImportPreview(null)
     setImportFile(null)
@@ -2137,8 +3117,142 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
   }
 
   const canCreateProposal = isProposalReadyToCreate()
-  const canSaveDraft = !!formData.carrera && !!formData.asignatura
-  const canSaveEdits = !!formData.carrera && !!formData.asignatura
+  const canSaveDraft = !!(formData.carrera || activeCareer) && !!formData.asignatura
+  const canSaveEdits = !!(formData.carrera || activeCareer) && !!formData.asignatura
+  const normalizedActiveCareer = normalizeCareer(activeCareer)
+  const filteredProposals = normalizedActiveCareer
+    ? proposals.filter((proposal) => normalizeCareer(proposal.career) === normalizedActiveCareer)
+    : []
+  const completeProposals = filteredProposals.filter(isProposalComplete)
+  const inProcessProposals = filteredProposals.filter(isProposalInProcess)
+  const proposalTableGetters = {
+    id: (p) => p.id ?? '',
+    subject: (p) => p.subject ?? '',
+    academic_year: (p) => p.academic_year ?? '',
+    year_of_career: (p) => p.year_of_career ?? '',
+    quarter: (p) => p.quarter ?? '',
+    status: (p) => p.status ?? ''
+  }
+  const completeProposalsFiltered = applyTableSort(
+    applyTableFilters(completeProposals, completeProposalFilters, proposalTableGetters),
+    completeProposalSort,
+    proposalTableGetters
+  )
+  const inProcessProposalsFiltered = applyTableSort(
+    applyTableFilters(inProcessProposals, pendingProposalFilters, proposalTableGetters),
+    pendingProposalSort,
+    proposalTableGetters
+  )
+  const teacherTableGetters = {
+    name: (t) => t.name ?? '',
+    category: (t) => t.category ?? '',
+    dedication: (t) => t.dedication ?? '',
+    email: (t) => t.email ?? ''
+  }
+  const teacherCatalogFiltered = applyTableSort(
+    applyTableFilters(teacherCatalogItems, teacherTableFilters, teacherTableGetters),
+    teacherTableSort,
+    teacherTableGetters
+  )
+  const competencyTableGetters = {
+    code: (c) => c.code ?? '',
+    description: (c) => c.description ?? ''
+  }
+  const genericCompetenciesFiltered = applyTableSort(
+    applyTableFilters(careerCompetencies.generic, genericCompetencyFilters, competencyTableGetters),
+    genericCompetencySort,
+    competencyTableGetters
+  )
+  const specificCompetenciesFiltered = applyTableSort(
+    applyTableFilters(careerCompetencies.specific, specificCompetencyFilters, competencyTableGetters),
+    specificCompetencySort,
+    competencyTableGetters
+  )
+  const previewGenericCompetencies = importPreview?.data
+    ? normalizeCompetencyItems(
+        importPreview.data.generic_competencies_items || importPreview.data.generic_competencies,
+        typeof importPreview.data.generic_competencies === 'string' ? importPreview.data.generic_competencies : ''
+      )
+    : []
+  const previewSpecificCompetencies = importPreview?.data
+    ? normalizeCompetencyItems(
+        importPreview.data.specific_competencies_items || importPreview.data.specific_competencies,
+        typeof importPreview.data.specific_competencies === 'string' && importPreview.data.specific_competencies !== 'No Aplica'
+          ? importPreview.data.specific_competencies
+          : ''
+      )
+    : []
+
+  const renderCompetencySection = ({ title, type, required }) => {
+    const items = Array.isArray(formData[type]) ? formData[type] : []
+    const isGeneric = type === 'competenciasGenItems'
+    const catalogList = isGeneric ? careerCompetencies.generic : careerCompetencies.specific
+    const datalistId = `${type}-catalog`
+    return (
+      <div style={styles.section}>
+        <h3>{title}{required ? ' *' : ''}</h3>
+        <div style={{ display: 'grid', gap: '10px' }}>
+          {items.length === 0 ? (
+            <div style={{ color: '#777', fontStyle: 'italic' }}>No hay competencias cargadas.</div>
+          ) : (
+            items.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 3fr 1fr auto',
+                  gap: '10px',
+                  alignItems: 'center'
+                }}
+              >
+                <input
+                  style={styles.input}
+                  placeholder="Codigo"
+                  value={item.code || ''}
+                  onChange={(e) => updateCompetencyItem(type, item.id, 'code', e.target.value)}
+                  list={datalistId}
+                />
+                <datalist id={datalistId}>
+                  {catalogList.map((entry) => (
+                    <option key={entry.id ?? entry.code} value={entry.code}>
+                      {entry.description}
+                    </option>
+                  ))}
+                </datalist>
+                <input
+                  style={styles.input}
+                  placeholder="Descripcion"
+                  value={item.description || ''}
+                  onChange={(e) => updateCompetencyItem(type, item.id, 'description', e.target.value)}
+                />
+                <select
+                  style={styles.input}
+                  value={normalizeLevelValue(item.level) || ''}
+                  onChange={(e) => updateCompetencyItem(type, item.id, 'level', e.target.value)}
+                >
+                  <option value="">Seleccionar nivel</option>
+                  {levelOptions.filter((opt) => opt.value > 0).map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <button
+                  style={{ ...styles.button, marginRight: 0 }}
+                  onClick={() => deleteCompetencyItem(type, item.id)}
+                >
+                  X
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+          <button style={styles.button} onClick={() => addCompetencyItem(type)}>
+            + Agregar competencia
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={styles.container}>
@@ -2146,7 +3260,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       <div style={styles.sidebar}>
         <div style={{ textAlign: 'center', marginBottom: '20px', paddingBottom: '15px', borderBottom: '1px solid #ddd' }}>
           <img src={logoMacau} alt="MACAU" style={{ maxWidth: '140px', height: 'auto' }} />
-          <h3 style={{ color: '#1a3d5c', fontSize: '16px', marginTop: '10px' }}>MACAU</h3>
+          <div style={{ color: '#1a3d5c', fontSize: '12px', marginTop: '10px', fontWeight: 600, lineHeight: 1.3 }}>
+            Multiagente para la Acreditacion ante CONEAU
+          </div>
         </div>
         <MenuButton label="Home" onClick={() => setActiveMenu('home')} active={activeMenu === 'home'} />
         <MenuButton
@@ -2157,8 +3273,35 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           }}
           active={activeMenu === 'propuestas'}
         />
+        <MenuButton
+          label="Competencias"
+          onClick={() => {
+            setActiveMenu('competencias')
+            setProposalsMode(null)
+          }}
+          active={activeMenu === 'competencias'}
+        />
         <MenuButton label="Docentes" onClick={() => setActiveMenu('docentes')} active={activeMenu === 'docentes'} />
         <MenuButton label="Resoluciones" onClick={() => setActiveMenu('resoluciones')} active={activeMenu === 'resoluciones'} />
+
+        <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
+          <label style={{ ...styles.label, marginTop: 0 }}>Carrera activa</label>
+          <select
+            style={{ ...styles.input, marginBottom: 0 }}
+            value={activeCareer}
+            onChange={(e) => setActiveCareer(e.target.value)}
+          >
+            <option value="">Seleccionar carrera...</option>
+            {careerOptions.map((career) => (
+              <option key={career} value={career}>{career}</option>
+            ))}
+          </select>
+          {!activeCareer && (
+            <div style={{ color: '#b00020', fontWeight: 600, marginTop: '8px', fontSize: '12px' }}>
+              Selecciona una carrera para filtrar y crear contenido.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Content */}
@@ -2173,8 +3316,35 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         {activeMenu === 'home' && (
           <div style={styles.section}>
             <h1>Bienvenido a MACAU</h1>
-            <p>Sistema de gestión académica para propuestas de cátedra con IA integrada</p>
-            <p>Selecciona "Propuestas" para comenzar a crear una nueva propuesta académica</p>
+            <p>MACAU centraliza la creacion, edicion e importacion de propuestas academicas y organiza todo el proceso de acreditacion en un flujo unico.</p>
+            <p>Integra catalogos de docentes y competencias, valida duplicados, y asiste con IA para redactar, reformular y estructurar contenidos clave con criterios consistentes.</p>
+            <p>El resultado es un repositorio ordenado, auditable y listo para exportar, que facilita el trabajo coordinado de las catedras y mejora la trazabilidad ante CONEAU.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginTop: '20px' }}>
+              <div style={{ border: '1px solid #d0d0d0', borderRadius: '10px', padding: '16px', background: '#f8f9fb' }}>
+                <div style={{ fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
+                  <span style={{ fontSize: '24px' }}>📘</span> Propuestas creadas
+                </div>
+                <div style={{ fontSize: '40px', fontWeight: 800 }}>{completeProposals.length}</div>
+              </div>
+              <div style={{ border: '1px solid #ffd59e', borderRadius: '10px', padding: '16px', background: '#fff7ea' }}>
+                <div style={{ fontSize: '16px', color: '#7a4b00', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
+                  <span style={{ fontSize: '24px' }}>⏳</span> Propuestas en proceso
+                </div>
+                <div style={{ fontSize: '40px', fontWeight: 800, color: '#b35b00' }}>{inProcessProposals.length}</div>
+              </div>
+              <div style={{ border: '1px solid #cde7d6', borderRadius: '10px', padding: '16px', background: '#f1fbf4' }}>
+                <div style={{ fontSize: '16px', color: '#2b6a3b', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
+                  <span style={{ fontSize: '24px' }}>👩‍🏫</span> Docentes
+                </div>
+                <div style={{ fontSize: '40px', fontWeight: 800, color: '#2b6a3b' }}>{teacherCatalogItems.length}</div>
+              </div>
+              <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', padding: '16px', background: '#fafafa' }}>
+                <div style={{ fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
+                  <span style={{ fontSize: '24px' }}>📄</span> Resoluciones
+                </div>
+                <div style={{ fontSize: '40px', fontWeight: 800 }}>0</div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -2199,13 +3369,12 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(0, 102, 204, 0.2)'; e.target.style.backgroundColor = '#e6f2ff'; }}
               onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f0f8ff'; }}
               onClick={() => {
-                setEditingProposalId(null)
-                setEditingProposalStatus(null)
+                resetProposalForm()
                 setProposalsMode('create')
               }}>
                 <div style={{ fontSize: '32px', marginBottom: '10px' }}>📝</div>
                 <h3 style={{ color: '#0066cc', margin: '0 0 10px 0' }}>Crear Propuesta</h3>
-                <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Crear una nueva propuesta desde cero</p>
+                <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Crear una propuesta desde cero, con asistencia de IA 🤖</p>
               </div>
 
               {/* Card 2: En Proceso */}
@@ -2247,41 +3416,140 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
             {/* PROPOSALS TABLE */}
             <div style={{ ...styles.section, marginTop: '30px', borderTop: '2px solid #ddd', paddingTop: '20px' }}>
-              <h3>Propuestas Cargadas ({proposals.filter(isProposalComplete).length})</h3>
-              {proposals.filter(isProposalComplete).length > 0 ? (
+              <h3>Propuestas Cargadas ({completeProposals.length})</h3>
+              {completeProposals.length > 0 ? (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ backgroundColor: '#0066cc', color: 'white' }}>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>ID</th>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Carrera</th>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Asignatura</th>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Año Académico</th>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Año Carrera</th>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Cuatrimestre</th>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Estado</th>
+                        <th
+                          style={{ width: '70px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'id')}
+                        >
+                          ID{getSortIndicator(completeProposalSort, 'id')}
+                        </th>
+                        <th
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'subject')}
+                        >
+                          Asignatura{getSortIndicator(completeProposalSort, 'subject')}
+                        </th>
+                        <th
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'academic_year')}
+                        >
+                          Año Académico{getSortIndicator(completeProposalSort, 'academic_year')}
+                        </th>
+                        <th
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'year_of_career')}
+                        >
+                          Año Carrera{getSortIndicator(completeProposalSort, 'year_of_career')}
+                        </th>
+                        <th
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'quarter')}
+                        >
+                          Cuatrimestre{getSortIndicator(completeProposalSort, 'quarter')}
+                        </th>
+                        <th
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'status')}
+                        >
+                          Estado{getSortIndicator(completeProposalSort, 'status')}
+                        </th>
                         <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>Acciones</th>
+                      </tr>
+                      <tr style={{ backgroundColor: '#f4f8ff' }}>
+                        <th style={{ width: '70px', padding: '6px' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.id}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, id: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.subject}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, subject: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.academic_year}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, academic_year: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.year_of_career}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, year_of_career: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.quarter}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, quarter: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.status}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, status: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }} />
                       </tr>
                     </thead>
                     <tbody>
-                      {proposals.filter(isProposalComplete).map((prop, idx) => (
+                      {completeProposalsFiltered.map((prop, idx) => (
                         <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
-                          <td style={{ padding: '10px' }}>#{prop.id}</td>
-                          <td style={{ padding: '10px' }}>{prop.career || '-'}</td>
+                          <td style={{ width: '70px', padding: '10px' }}>#{prop.id}</td>
                           <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.status || '-'}</td>
                           <td style={{ padding: '10px', textAlign: 'center' }}>
-                            <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
-                              onClick={() => openProposalView(prop.id)}>Ver</button>
-                            <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px', background: '#ff9900', color: 'white' }} 
-                              onClick={() => loadProposalForEdit(prop.id)}>Editar</button>
-                            <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }}
-                              onClick={() => downloadProposalDocx(prop.id)}>Descargar</button>
-                            <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', color: 'white' }} 
-                              onClick={() => deleteProposal(prop.id)}>Eliminar</button>
+                            <button
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                              title="Ver propuesta"
+                              onClick={() => openProposalView(prop.id)}
+                            >
+                              👁️
+                            </button>
+                            <button
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                              title="Editar propuesta"
+                              onClick={() => loadProposalForEdit(prop.id)}
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                              title="Descargar propuesta"
+                              onClick={() => downloadProposalDocx(prop.id)}
+                            >
+                              ⬇️
+                            </button>
+                            <button
+                              style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                              title="Eliminar propuesta"
+                              onClick={() => deleteProposal(prop.id)}
+                            >
+                              🗑️
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -2308,13 +3576,15 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                   <div>
                     <label style={styles.label}>Carrera *</label>
-                    <select style={styles.input} value={formData.carrera} onChange={(e) => updateFormData('carrera', e.target.value)}>
+                    <select
+                      style={styles.input}
+                      value={activeCareer}
+                      onChange={(e) => setActiveCareer(e.target.value)}
+                    >
                       <option value="">Seleccionar carrera...</option>
-                      <option>Ingeniería en Sistemas</option>
-                      <option>Ingeniería Mecatrónica</option>
-                      <option>Licenciatura en Sistemas</option>
-                      <option>Tecnicatura Universitaria en Desarrollo Web</option>
-                      <option>Tecnicatura Universitaria en Ciencia de Datos</option>
+                      {careerOptions.map((career) => (
+                        <option key={career} value={career}>{career}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -2396,21 +3666,54 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               {/* DOCENT TEAM */}
               <div style={styles.section}>
                 <h3>Equipo Docente</h3>
-                {equipoDocente.map(doc => (
-                  <div key={doc.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
-                    <input style={styles.input} placeholder="Nombre" value={doc.nombre} onChange={(e) => updateDocente(doc.id, 'nombre', e.target.value)} />
-                    <select style={styles.input} value={doc.categoria} onChange={(e) => updateDocente(doc.id, 'categoria', e.target.value)}>
-                      <option>TITULAR</option>
-                      <option>ASOCIADO</option>
-                      <option>ADJUNTO</option>
-                      <option>JTP</option>
-                      <option>AYUDANTE 1º</option>
-                    </select>
-                    <input style={styles.input} placeholder="Correo" value={doc.correo} onChange={(e) => updateDocente(doc.id, 'correo', e.target.value)} />
-                    <button style={{ ...styles.button, marginRight: 0 }} onClick={() => deleteDocente(doc.id)} disabled={equipoDocente.length === 1}>X</button>
-                  </div>
-                ))}
-                <button style={styles.button} onClick={addDocente}>+ Agregar Docente</button>
+                {equipoDocente.map(doc => {
+                  const suggestions = docenteAutocompleteId === doc.id
+                    ? getTeacherSuggestions(doc.nombre)
+                    : []
+                  return (
+                    <div key={doc.id} style={{ position: 'relative', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          style={styles.input}
+                          placeholder="Nombre"
+                          value={doc.nombre}
+                          onChange={(e) => {
+                            updateDocente(doc.id, 'nombre', e.target.value)
+                            setDocenteAutocompleteId(doc.id)
+                          }}
+                          onFocus={() => setDocenteAutocompleteId(doc.id)}
+                          onBlur={() => setTimeout(() => setDocenteAutocompleteId(null), 150)}
+                        />
+                        {suggestions.length > 0 && (
+                          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #ddd', borderRadius: '4px', zIndex: 5, maxHeight: '160px', overflowY: 'auto' }}>
+                            {suggestions.map((teacher) => (
+                              <div
+                                key={teacher.id}
+                                style={{ padding: '8px', cursor: 'pointer', borderBottom: '1px solid #eee' }}
+                                onMouseDown={() => selectDocenteSuggestion(doc.id, teacher)}
+                              >
+                                <div style={{ fontWeight: '600' }}>{teacher.name}</div>
+                                <div style={{ fontSize: '12px', color: '#666' }}>{teacher.category || '-'} {teacher.email ? `• ${teacher.email}` : ''}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <select style={styles.input} value={doc.categoria} onChange={(e) => updateDocente(doc.id, 'categoria', e.target.value)}>
+                        <option>TITULAR</option>
+                        <option>ASOCIADO</option>
+                        <option>ADJUNTO</option>
+                        <option>JTP</option>
+                        <option>AYUDANTE 1º</option>
+                      </select>
+                      <input style={styles.input} placeholder="Correo" value={doc.correo} onChange={(e) => updateDocente(doc.id, 'correo', e.target.value)} />
+                      <button style={{ ...styles.button, marginRight: 0 }} onClick={() => deleteDocente(doc.id)} disabled={equipoDocente.length === 1}>X</button>
+                    </div>
+                  )
+                })}
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+                  <button style={styles.button} onClick={addDocente}>+ Agregar Docente</button>
+                </div>
               </div>
 
               {/* CONTENT SECTIONS */}
@@ -2419,15 +3722,17 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                 <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.contenidosMin} onChange={(e) => updateFormData('contenidosMin', e.target.value)} />
               </div>
 
-              <div style={styles.section}>
-                <h3>Competencias Genéricas *</h3>
-                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.competenciasGen} onChange={(e) => updateFormData('competenciasGen', e.target.value)} />
-              </div>
+              {renderCompetencySection({
+                title: 'Competencias Genéricas',
+                type: 'competenciasGenItems',
+                required: true
+              })}
 
-              <div style={styles.section}>
-                <h3>Competencias Específicas</h3>
-                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.competenciasEsp} onChange={(e) => updateFormData('competenciasEsp', e.target.value)} />
-              </div>
+              {renderCompetencySection({
+                title: 'Competencias Específicas',
+                type: 'competenciasEspItems',
+                required: false
+              })}
 
               {/* FUNDAMENTALS */}
               <div style={styles.section}>
@@ -2503,7 +3808,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     </div>
                   </div>
                 ))}
-                <button style={styles.button} onClick={addRA}>+ Agregar RA</button>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+                  <button style={styles.button} onClick={addRA}>+ Agregar RA</button>
+                </div>
               </div>
 
               {/* UNITS */}
@@ -2588,7 +3895,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     <button style={{ ...styles.button, background: '#d32f2f' }} onClick={() => deleteUnidad(u.id)}>Eliminar Unidad</button>
                   </div>
                 ))}
-                <button style={styles.button} onClick={addUnidad}>+ Agregar Unidad</button>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+                  <button style={styles.button} onClick={addUnidad}>+ Agregar Unidad</button>
+                </div>
               </div>
 
               {/* PRACTICALS */}
@@ -2641,7 +3950,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                     <button style={{ ...styles.button, background: '#d32f2f' }} onClick={() => deleteTP(tp.id)}>Eliminar TP</button>
                   </div>
                 ))}
-                <button style={styles.button} onClick={addTP}>+ Agregar TP</button>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+                  <button style={styles.button} onClick={addTP}>+ Agregar TP</button>
+                </div>
               </div>
 
               {/* OTHER SECTIONS */}
@@ -2678,6 +3989,18 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
               <div style={styles.section}>
                 <h3>Bibliografía</h3>
                 <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.bibliografia} onChange={(e) => updateFormData('bibliografia', e.target.value)} />
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+                  <AIButton
+                    onClick={() => runAiForField({
+                      target: { type: 'form', field: 'bibliografia' },
+                      currentValue: formData.bibliografia,
+                      label: 'Bibliografia'
+                    })}
+                    hasContent={!!formData.bibliografia}
+                    disabled={!isNonEmptyText(formData.bibliografia)}
+                    tooltip="Carga bibliografia para formatear"
+                  />
+                </div>
               </div>
 
               <div style={styles.section}>
@@ -2923,7 +4246,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
             <h2>Propuestas Guardadas</h2>
-            {proposals.filter(isProposalComplete).length === 0 ? (
+            {completeProposals.length === 0 ? (
               <p>No hay propuestas guardadas</p>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -2938,7 +4261,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                   </tr>
                 </thead>
                 <tbody>
-                  {proposals.filter(isProposalComplete).map(p => (
+                  {completeProposals.map(p => (
                     <tr key={p.id} style={{ borderBottom: '1px solid #ddd' }}>
                       <td style={{ padding: '10px' }}>{p.id}</td>
                       <td style={{ padding: '10px' }}>{p.title || 'Sin título'}</td>
@@ -2966,40 +4289,141 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
             <h2>Propuestas en Proceso</h2>
-            {proposals.filter(isProposalInProcess).length === 0 ? (
+            {inProcessProposals.length === 0 ? (
               <p style={{ color: '#999', marginTop: '20px' }}>No hay propuestas en edición aún.</p>
             ) : (
               <div style={{ overflowX: 'auto', marginTop: '20px' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#ff9900', color: 'white' }}>
-                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>ID</th>
-                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Carrera</th>
-                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Asignatura</th>
-                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Año Académico</th>
-                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Año Carrera</th>
-                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Cuatrimestre</th>
-                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Estado</th>
+                      <th
+                        style={{ width: '70px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        onClick={() => toggleSort(setPendingProposalSort, 'id')}
+                      >
+                        ID{getSortIndicator(pendingProposalSort, 'id')}
+                      </th>
+                      <th
+                        style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        onClick={() => toggleSort(setPendingProposalSort, 'subject')}
+                      >
+                        Asignatura{getSortIndicator(pendingProposalSort, 'subject')}
+                      </th>
+                      <th
+                        style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        onClick={() => toggleSort(setPendingProposalSort, 'academic_year')}
+                      >
+                        Año Académico{getSortIndicator(pendingProposalSort, 'academic_year')}
+                      </th>
+                      <th
+                        style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        onClick={() => toggleSort(setPendingProposalSort, 'year_of_career')}
+                      >
+                        Año Carrera{getSortIndicator(pendingProposalSort, 'year_of_career')}
+                      </th>
+                      <th
+                        style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        onClick={() => toggleSort(setPendingProposalSort, 'quarter')}
+                      >
+                        Cuatrimestre{getSortIndicator(pendingProposalSort, 'quarter')}
+                      </th>
+                      <th
+                        style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        onClick={() => toggleSort(setPendingProposalSort, 'status')}
+                      >
+                        Estado{getSortIndicator(pendingProposalSort, 'status')}
+                      </th>
                       <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>Acciones</th>
+                    </tr>
+                    <tr style={{ backgroundColor: '#fff6e6' }}>
+                      <th style={{ width: '70px', padding: '6px' }}>
+                        <input
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.id}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, id: e.target.value }))}
+                          placeholder="Buscar"
+                        />
+                      </th>
+                      <th style={{ padding: '6px' }}>
+                        <input
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.subject}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, subject: e.target.value }))}
+                          placeholder="Buscar"
+                        />
+                      </th>
+                      <th style={{ padding: '6px' }}>
+                        <input
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.academic_year}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, academic_year: e.target.value }))}
+                          placeholder="Buscar"
+                        />
+                      </th>
+                      <th style={{ padding: '6px' }}>
+                        <input
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.year_of_career}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, year_of_career: e.target.value }))}
+                          placeholder="Buscar"
+                        />
+                      </th>
+                      <th style={{ padding: '6px' }}>
+                        <input
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.quarter}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, quarter: e.target.value }))}
+                          placeholder="Buscar"
+                        />
+                      </th>
+                      <th style={{ padding: '6px' }}>
+                        <input
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.status}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, status: e.target.value }))}
+                          placeholder="Buscar"
+                        />
+                      </th>
+                      <th style={{ padding: '6px' }} />
                     </tr>
                   </thead>
                   <tbody>
-                    {proposals.filter(isProposalInProcess).map((prop, idx) => (
+                    {inProcessProposalsFiltered.map((prop, idx) => (
                       <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
-                        <td style={{ padding: '10px' }}>#{prop.id}</td>
-                        <td style={{ padding: '10px' }}>{prop.career || '-'}</td>
+                        <td style={{ width: '70px', padding: '10px' }}>#{prop.id}</td>
                         <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.status || '-'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
-                          <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }} 
-                            onClick={() => loadProposalForEdit(prop.id)}>Continuar</button>
-                          <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', marginRight: '5px' }}
-                            onClick={() => downloadProposalDocx(prop.id)}>Descargar</button>
-                          <button style={{ ...styles.button, padding: '5px 10px', fontSize: '11px', background: '#d9534f', marginRight: '5px' }} 
-                            onClick={() => deleteProposal(prop.id)}>Eliminar</button>
+                          <button
+                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                            title="Ver propuesta"
+                            onClick={() => openProposalView(prop.id)}
+                          >
+                            👁︎
+                          </button>
+                          <button
+                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                            title="Editar propuesta"
+                            onClick={() => loadProposalForEdit(prop.id)}
+                          >
+                            ✏︎
+                          </button>
+                          <button
+                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                            title="Descargar propuesta"
+                            onClick={() => downloadProposalDocx(prop.id)}
+                          >
+                            ⬇︎
+                          </button>
+                          <button
+                            style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                            title="Eliminar propuesta"
+                            onClick={() => deleteProposal(prop.id)}
+                          >
+                            🗑︎
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -3084,13 +4508,13 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                   )}
 
                   {/* Competencias Genéricas */}
-                  {importPreview.data?.generic_competencies && importPreview.data.generic_competencies.length > 0 && (
+                  {previewGenericCompetencies.length > 0 && (
                     <div style={{ marginTop: '15px', marginBottom: '15px' }}>
-                      <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Genéricas ({importPreview.data.generic_competencies.length}):</strong>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Genéricas ({previewGenericCompetencies.length}):</strong>
                       <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
-                        {importPreview.data.generic_competencies.map((comp, idx) => (
+                        {previewGenericCompetencies.map((comp, idx) => (
                           <div key={idx} style={{ padding: '5px', marginBottom: '5px', background: '#f9f9f9', borderRadius: '3px', fontSize: '13px' }}>
-                            <strong>{comp.code || `CGT${idx + 1}`}</strong> - {comp.description || ''} {comp.level && <span style={{ color: '#d32f2f' }}>({comp.level})</span>}
+                            <strong>{comp.code || `CGT${idx + 1}`}</strong> - {comp.description || ''} {typeof comp.level !== 'undefined' && <span style={{ color: '#d32f2f' }}>({getLevelLabel(comp.level)})</span>}
                           </div>
                         ))}
                       </div>
@@ -3099,12 +4523,12 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
                   {/* Competencias Específicas */}
                   <div style={{ marginTop: '15px', marginBottom: '15px' }}>
-                    <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Específicas {importPreview.data?.specific_competencies && importPreview.data.specific_competencies.length > 0 ? `(${importPreview.data.specific_competencies.length})` : ''}:</strong>
-                    {importPreview.data?.specific_competencies && importPreview.data.specific_competencies.length > 0 ? (
+                    <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Específicas {previewSpecificCompetencies.length > 0 ? `(${previewSpecificCompetencies.length})` : ''}:</strong>
+                    {previewSpecificCompetencies.length > 0 ? (
                       <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
-                        {importPreview.data.specific_competencies.map((comp, idx) => (
+                        {previewSpecificCompetencies.map((comp, idx) => (
                           <div key={idx} style={{ padding: '5px', marginBottom: '5px', background: '#f9f9f9', borderRadius: '3px', fontSize: '13px' }}>
-                            <strong>{comp.code || `CE${idx + 1}`}</strong> - {comp.description || ''} {comp.level && <span style={{ color: '#d32f2f' }}>({comp.level})</span>}
+                            <strong>{comp.code || `CE${idx + 1}`}</strong> - {comp.description || ''} {typeof comp.level !== 'undefined' && <span style={{ color: '#d32f2f' }}>({getLevelLabel(comp.level)})</span>}
                           </div>
                         ))}
                       </div>
@@ -3263,11 +4687,752 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           </div>
         )}
 
-        {/* DOCENTES - Placeholder */}
+        {/* COMPETENCIAS CATALOG */}
+        {activeMenu === 'competencias' && (
+          <div style={styles.section}>
+            <h2>Catálogo de Competencias</h2>
+            <div style={{ display: 'grid', gap: '20px' }}>
+              <div style={{ background: '#f8f8f8', padding: '15px', borderRadius: '8px', border: '1px solid #ddd' }}>
+                <div>
+                  <h3>Nueva competencia genérica</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <input
+                      style={styles.input}
+                      placeholder="Código"
+                      value={catalogFormGeneric.code}
+                      onChange={(e) => setCatalogFormGeneric(prev => ({ ...prev, code: e.target.value }))}
+                    />
+                    <input
+                      style={styles.input}
+                      placeholder="Descripción"
+                      value={catalogFormGeneric.description}
+                      onChange={(e) => setCatalogFormGeneric(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                  </div>
+                  <button
+                    style={styles.button}
+                    onClick={() => addCatalogItem('generic', catalogFormGeneric, setCatalogFormGeneric)}
+                    disabled={!activeCareer}
+                  >
+                    Agregar competencia genérica
+                  </button>
+                </div>
+
+                <div style={{ marginTop: '16px' }}>
+                  <h3>Nueva competencia específica</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <input
+                      style={styles.input}
+                      placeholder="Código"
+                      value={catalogFormSpecific.code}
+                      onChange={(e) => setCatalogFormSpecific(prev => ({ ...prev, code: e.target.value }))}
+                    />
+                    <input
+                      style={styles.input}
+                      placeholder="Descripción"
+                      value={catalogFormSpecific.description}
+                      onChange={(e) => setCatalogFormSpecific(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                  </div>
+                  <button
+                    style={styles.button}
+                    onClick={() => addCatalogItem('specific', catalogFormSpecific, setCatalogFormSpecific)}
+                    disabled={!activeCareer}
+                  >
+                    Agregar competencia específica
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                <div style={{ background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd' }}>
+                  <h3>Listado genéricas</h3>
+                  {!activeCareer ? (
+                    <div style={{ color: '#777', fontStyle: 'italic' }}>Selecciona una carrera para ver el catálogo.</div>
+                  ) : careerCompetencies.generic.length === 0 ? (
+                    <div style={{ color: '#777', fontStyle: 'italic' }}>No hay competencias cargadas.</div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #ddd' }}>
+                      <thead>
+                        <tr style={{ background: '#0066cc', color: '#fff', borderBottom: '2px solid #ddd' }}>
+                          <th
+                            style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                            onClick={() => toggleSort(setGenericCompetencySort, 'code')}
+                          >
+                            Código{getSortIndicator(genericCompetencySort, 'code')}
+                          </th>
+                          <th
+                            style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                            onClick={() => toggleSort(setGenericCompetencySort, 'description')}
+                          >
+                            Descripción{getSortIndicator(genericCompetencySort, 'description')}
+                          </th>
+                          <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold' }}>Acciones</th>
+                        </tr>
+                        <tr style={{ background: '#eaf3ff' }}>
+                          <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                            <input
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                              value={genericCompetencyFilters.code}
+                              onChange={(e) => setGenericCompetencyFilters(prev => ({ ...prev, code: e.target.value }))}
+                              placeholder="Buscar"
+                            />
+                          </th>
+                          <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                            <input
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                              value={genericCompetencyFilters.description}
+                              onChange={(e) => setGenericCompetencyFilters(prev => ({ ...prev, description: e.target.value }))}
+                              placeholder="Buscar"
+                            />
+                          </th>
+                          <th style={{ padding: '6px' }} />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {genericCompetenciesFiltered.map((item, idx) => (
+                          <tr key={item.id ?? idx} style={{ borderBottom: '1px solid #eee', background: idx % 2 === 0 ? '#fff' : '#f9f9f9' }}>
+                            <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                              {catalogEditId === item.id ? (
+                                <input
+                                  style={styles.input}
+                                  value={catalogEditForm.code}
+                                  onChange={(e) => setCatalogEditForm(prev => ({ ...prev, code: e.target.value }))}
+                                />
+                              ) : (item.code || '-')}
+                            </td>
+                            <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                              {catalogEditId === item.id ? (
+                                <input
+                                  style={styles.input}
+                                  value={catalogEditForm.description}
+                                  onChange={(e) => setCatalogEditForm(prev => ({ ...prev, description: e.target.value }))}
+                                />
+                              ) : (item.description || '-')}
+                            </td>
+                            <td style={{ padding: '8px' }}>
+                              {catalogEditId === item.id ? (
+                                <>
+                                  <button
+                                    style={{ ...styles.button, padding: '6px 10px' }}
+                                    onClick={() => saveCatalogEdit(item)}
+                                  >
+                                    Guardar
+                                  </button>
+                                  <button
+                                    style={{ ...styles.button, background: '#999', padding: '6px 10px', marginRight: 0 }}
+                                    onClick={cancelCatalogEdit}
+                                  >
+                                    Cancelar
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                    <button
+                                      style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                      onClick={() => startCatalogEdit(item)}
+                                      disabled={catalogEditId !== null && catalogEditId !== item.id}
+                                      title="Editar competencia"
+                                    >
+                                      ✏️
+                                    </button>
+                                    <button
+                                      style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px' }}
+                                      onClick={() => loadCatalogUsage(item, 'generic')}
+                                      disabled={catalogEditId !== null}
+                                      title="Ver propuestas afectadas"
+                                    >
+                                      👁️
+                                    </button>
+                                    <button
+                                      style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px', marginRight: 0 }}
+                                      onClick={() => openDeleteCatalogModal(item)}
+                                      disabled={catalogEditId !== null}
+                                      title="Eliminar competencia"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                      {catalogUsageInfo.itemId && catalogUsageInfo.type === 'generic' && (
+                        <div style={{ marginTop: '12px', background: '#f7f7f7', border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                            <strong>
+                              Propuestas afectadas {catalogUsageInfo.code ? `(${catalogUsageInfo.code})` : ''}
+                            </strong>
+                            <button
+                              style={{ ...styles.button, background: '#999', padding: '4px 10px', marginRight: 0 }}
+                              onClick={clearCatalogUsage}
+                            >
+                              Limpiar
+                            </button>
+                          </div>
+                          {catalogUsageInfo.loading ? (
+                            <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
+                          ) : catalogUsageInfo.error ? (
+                            <div style={{ marginTop: '8px', color: '#b00020' }}>{catalogUsageInfo.error}</div>
+                          ) : (catalogUsageInfo.items.length === 0 && catalogUsageInfo.ids.length === 0) ? (
+                            <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
+                          ) : (
+                            <div style={{ marginTop: '8px', maxHeight: '120px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px', padding: '8px' }}>
+                              <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
+                                Total: {catalogUsageInfo.items.length || catalogUsageInfo.ids.length}
+                              </div>
+                              <div style={{ display: 'grid', gap: '4px' }}>
+                                {(catalogUsageInfo.items.length ? catalogUsageInfo.items : catalogUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
+                                  <div key={`${row.id}-${idx}`}>
+                                    #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                </div>
+
+                <div style={{ background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd' }}>
+                  <h3>Listado específicas</h3>
+                  {!activeCareer ? (
+                    <div style={{ color: '#777', fontStyle: 'italic' }}>Selecciona una carrera para ver el catálogo.</div>
+                  ) : careerCompetencies.specific.length === 0 ? (
+                    <div style={{ color: '#777', fontStyle: 'italic' }}>No hay competencias cargadas.</div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #ddd' }}>
+                      <thead>
+                        <tr style={{ background: '#0066cc', color: '#fff', borderBottom: '2px solid #ddd' }}>
+                          <th
+                            style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                            onClick={() => toggleSort(setSpecificCompetencySort, 'code')}
+                          >
+                            Código{getSortIndicator(specificCompetencySort, 'code')}
+                          </th>
+                          <th
+                            style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                            onClick={() => toggleSort(setSpecificCompetencySort, 'description')}
+                          >
+                            Descripción{getSortIndicator(specificCompetencySort, 'description')}
+                          </th>
+                          <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold' }}>Acciones</th>
+                        </tr>
+                        <tr style={{ background: '#eaf3ff' }}>
+                          <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                            <input
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                              value={specificCompetencyFilters.code}
+                              onChange={(e) => setSpecificCompetencyFilters(prev => ({ ...prev, code: e.target.value }))}
+                              placeholder="Buscar"
+                            />
+                          </th>
+                          <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                            <input
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                              value={specificCompetencyFilters.description}
+                              onChange={(e) => setSpecificCompetencyFilters(prev => ({ ...prev, description: e.target.value }))}
+                              placeholder="Buscar"
+                            />
+                          </th>
+                          <th style={{ padding: '6px' }} />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {specificCompetenciesFiltered.map((item, idx) => (
+                          <tr key={item.id ?? idx} style={{ borderBottom: '1px solid #eee', background: idx % 2 === 0 ? '#fff' : '#f9f9f9' }}>
+                            <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                              {catalogEditId === item.id ? (
+                                <input
+                                  style={styles.input}
+                                  value={catalogEditForm.code}
+                                  onChange={(e) => setCatalogEditForm(prev => ({ ...prev, code: e.target.value }))}
+                                />
+                              ) : (item.code || '-')}
+                            </td>
+                            <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                              {catalogEditId === item.id ? (
+                                <input
+                                  style={styles.input}
+                                  value={catalogEditForm.description}
+                                  onChange={(e) => setCatalogEditForm(prev => ({ ...prev, description: e.target.value }))}
+                                />
+                              ) : (item.description || '-')}
+                            </td>
+                            <td style={{ padding: '8px' }}>
+                              {catalogEditId === item.id ? (
+                                <>
+                                  <button
+                                    style={{ ...styles.button, padding: '6px 10px' }}
+                                    onClick={() => saveCatalogEdit(item)}
+                                  >
+                                    Guardar
+                                  </button>
+                                  <button
+                                    style={{ ...styles.button, background: '#999', padding: '6px 10px', marginRight: 0 }}
+                                    onClick={cancelCatalogEdit}
+                                  >
+                                    Cancelar
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                    <button
+                                      style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                      onClick={() => startCatalogEdit(item)}
+                                      disabled={catalogEditId !== null && catalogEditId !== item.id}
+                                      title="Editar competencia"
+                                    >
+                                      ✏️
+                                    </button>
+                                    <button
+                                      style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px' }}
+                                      onClick={() => loadCatalogUsage(item, 'specific')}
+                                      disabled={catalogEditId !== null}
+                                      title="Ver propuestas afectadas"
+                                    >
+                                      👁️
+                                    </button>
+                                    <button
+                                      style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px', marginRight: 0 }}
+                                      onClick={() => openDeleteCatalogModal(item)}
+                                      disabled={catalogEditId !== null}
+                                      title="Eliminar competencia"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                      {catalogUsageInfo.itemId && catalogUsageInfo.type === 'specific' && (
+                        <div style={{ marginTop: '12px', background: '#f7f7f7', border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                            <strong>
+                              Propuestas afectadas {catalogUsageInfo.code ? `(${catalogUsageInfo.code})` : ''}
+                            </strong>
+                            <button
+                              style={{ ...styles.button, background: '#999', padding: '4px 10px', marginRight: 0 }}
+                              onClick={clearCatalogUsage}
+                            >
+                              Limpiar
+                            </button>
+                          </div>
+                          {catalogUsageInfo.loading ? (
+                            <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
+                          ) : catalogUsageInfo.error ? (
+                            <div style={{ marginTop: '8px', color: '#b00020' }}>{catalogUsageInfo.error}</div>
+                          ) : (catalogUsageInfo.items.length === 0 && catalogUsageInfo.ids.length === 0) ? (
+                            <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
+                          ) : (
+                            <div style={{ marginTop: '8px', maxHeight: '120px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px', padding: '8px' }}>
+                              <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
+                                Total: {catalogUsageInfo.items.length || catalogUsageInfo.ids.length}
+                              </div>
+                              <div style={{ display: 'grid', gap: '4px' }}>
+                                {(catalogUsageInfo.items.length ? catalogUsageInfo.items : catalogUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
+                                  <div key={`${row.id}-${idx}`}>
+                                    #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {catalogDeleteModal.isOpen && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+            <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', maxWidth: '520px', width: '90%', maxHeight: '80vh', overflowY: 'auto' }}>
+              <h3 style={{ marginTop: 0 }}>Confirmar eliminación</h3>
+              <p style={{ marginTop: '8px' }}>
+                Vas a eliminar la competencia {catalogDeleteModal.code ? `(${catalogDeleteModal.code})` : ''}.
+              </p>
+              <div style={{ marginTop: '12px', background: '#f7f7f7', border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
+                <strong>Propuestas donde se quitará</strong>
+                {catalogDeleteModal.loading ? (
+                  <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
+                ) : catalogDeleteModal.error ? (
+                  <div style={{ marginTop: '8px', color: '#b00020' }}>{catalogDeleteModal.error}</div>
+                ) : catalogDeleteModal.items.length === 0 ? (
+                  <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
+                ) : (
+                  <div style={{ marginTop: '8px', maxHeight: '200px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px', padding: '8px' }}>
+                    <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
+                      Total: {catalogDeleteModal.items.length}
+                    </div>
+                    <div style={{ display: 'grid', gap: '4px' }}>
+                      {catalogDeleteModal.items.map((row, idx) => (
+                        <div key={`${row.id}-${idx}`}>
+                          #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+                <button
+                  style={{ ...styles.button, background: '#999', marginRight: 0 }}
+                  onClick={closeDeleteCatalogModal}
+                >
+                  Cancelar
+                </button>
+                <button
+                  style={{ ...styles.button, background: '#d32f2f', marginRight: 0 }}
+                  onClick={confirmDeleteCatalogItem}
+                  disabled={catalogDeleteModal.loading}
+                >
+                  Confirmar eliminación
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {teacherDeleteModal.isOpen && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+            <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', maxWidth: '520px', width: '90%', maxHeight: '80vh', overflowY: 'auto' }}>
+              <h3 style={{ marginTop: 0 }}>Confirmar eliminación</h3>
+              <p style={{ marginTop: '8px' }}>
+                Vas a eliminar el docente {teacherDeleteModal.name ? `(${teacherDeleteModal.name})` : ''}.
+              </p>
+              <div style={{ marginTop: '12px', background: '#f7f7f7', border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
+                <strong>Propuestas donde se quitará</strong>
+                {teacherDeleteModal.loading ? (
+                  <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
+                ) : teacherDeleteModal.error ? (
+                  <div style={{ marginTop: '8px', color: '#b00020' }}>{teacherDeleteModal.error}</div>
+                ) : teacherDeleteModal.items.length === 0 ? (
+                  <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
+                ) : (
+                  <div style={{ marginTop: '8px', maxHeight: '200px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px', padding: '8px' }}>
+                    <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
+                      Total: {teacherDeleteModal.items.length}
+                    </div>
+                    <div style={{ display: 'grid', gap: '4px' }}>
+                      {teacherDeleteModal.items.map((row, idx) => (
+                        <div key={`${row.id}-${idx}`}>
+                          #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+                <button
+                  style={{ ...styles.button, background: '#999', marginRight: 0 }}
+                  onClick={closeDeleteTeacherModal}
+                >
+                  Cancelar
+                </button>
+                <button
+                  style={{ ...styles.button, background: '#d32f2f', marginRight: 0 }}
+                  onClick={confirmDeleteTeacher}
+                  disabled={teacherDeleteModal.loading}
+                >
+                  Confirmar eliminación
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DOCENTES */}
         {activeMenu === 'docentes' && (
           <div style={styles.section}>
             <h2>Gestión de Docentes</h2>
-            <p>Funcionalidad en desarrollo</p>
+            {!activeCareer ? (
+              <div style={{ color: '#777', fontStyle: 'italic' }}>Selecciona una carrera para ver el catálogo.</div>
+            ) : (
+              <>
+                <div style={{ background: '#f8f8f8', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '16px' }}>
+                  <h3>Nuevo docente</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.5fr 2fr', gap: '12px' }}>
+                    <input
+                      style={styles.input}
+                      placeholder="Nombre"
+                      value={teacherForm.name}
+                      onChange={(e) => setTeacherForm(prev => ({ ...prev, name: e.target.value.toUpperCase() }))}
+                    />
+                    <select
+                      style={styles.input}
+                      value={teacherForm.category}
+                      onChange={(e) => setTeacherForm(prev => ({ ...prev, category: e.target.value }))}
+                    >
+                      <option>TITULAR</option>
+                      <option>ASOCIADO</option>
+                      <option>ADJUNTO</option>
+                      <option>JTP</option>
+                      <option>AYUDANTE 1º</option>
+                    </select>
+                    <select
+                      style={{
+                        ...styles.input,
+                        borderColor: teacherForm.dedication === 'Sin Informar' ? '#d32f2f' : styles.input.borderColor
+                      }}
+                      value={teacherForm.dedication}
+                      onChange={(e) => setTeacherForm(prev => ({ ...prev, dedication: e.target.value }))}
+                    >
+                      <option>Sin Informar</option>
+                      <option>Simple</option>
+                      <option>Parcial</option>
+                      <option>Parcial + Simple</option>
+                      <option>Exclusivo</option>
+                    </select>
+                    <input
+                      style={styles.input}
+                      placeholder="Correo"
+                      value={teacherForm.email}
+                      onChange={(e) => setTeacherForm(prev => ({ ...prev, email: e.target.value }))}
+                    />
+                  </div>
+                  <button style={styles.button} onClick={addTeacher}>
+                    Agregar docente
+                  </button>
+                </div>
+                <div style={{ marginTop: '12px', marginBottom: '12px', color: '#555' }}>
+                  Docentes de la carrera {activeCareer}. Los que dicen "Sin Informar" deben completar dedicación.
+                </div>
+                {teacherCatalogLoading ? (
+                  <div style={{ color: '#555' }}>Cargando docentes...</div>
+                ) : teacherCatalogError ? (
+                  <div style={{ color: '#b00020' }}>{teacherCatalogError}</div>
+                ) : teacherCatalogItems.length === 0 ? (
+                  <div style={{ color: '#777', fontStyle: 'italic' }}>No hay docentes cargados.</div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #ddd' }}>
+                    <thead>
+                      <tr style={{ background: '#0066cc', color: '#fff', borderBottom: '2px solid #ddd' }}>
+                        <th
+                          style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setTeacherTableSort, 'name')}
+                        >
+                          Nombre{getSortIndicator(teacherTableSort, 'name')}
+                        </th>
+                        <th
+                          style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setTeacherTableSort, 'category')}
+                        >
+                          Categoría{getSortIndicator(teacherTableSort, 'category')}
+                        </th>
+                        <th
+                          style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setTeacherTableSort, 'dedication')}
+                        >
+                          Dedicación{getSortIndicator(teacherTableSort, 'dedication')}
+                        </th>
+                        <th
+                          style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setTeacherTableSort, 'email')}
+                        >
+                          Email{getSortIndicator(teacherTableSort, 'email')}
+                        </th>
+                        <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold' }}>Acciones</th>
+                      </tr>
+                      <tr style={{ background: '#eaf3ff' }}>
+                        <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                            value={teacherTableFilters.name}
+                            onChange={(e) => setTeacherTableFilters(prev => ({ ...prev, name: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                            value={teacherTableFilters.category}
+                            onChange={(e) => setTeacherTableFilters(prev => ({ ...prev, category: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                            value={teacherTableFilters.dedication}
+                            onChange={(e) => setTeacherTableFilters(prev => ({ ...prev, dedication: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                            value={teacherTableFilters.email}
+                            onChange={(e) => setTeacherTableFilters(prev => ({ ...prev, email: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {teacherCatalogFiltered.map((teacher, idx) => (
+                        <tr key={teacher.id ?? idx} style={{ borderBottom: '1px solid #eee', background: idx % 2 === 0 ? '#fff' : '#f9f9f9' }}>
+                          {teacherEditId === teacher.id ? (
+                            <>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                                <input
+                                  style={styles.input}
+                                  value={teacherEditForm.name}
+                                  onChange={(e) => setTeacherEditForm(prev => ({ ...prev, name: e.target.value.toUpperCase() }))}
+                                />
+                              </td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                                <select
+                                  style={styles.input}
+                                  value={teacherEditForm.category}
+                                  onChange={(e) => setTeacherEditForm(prev => ({ ...prev, category: e.target.value }))}
+                                >
+                                  <option>TITULAR</option>
+                                  <option>ASOCIADO</option>
+                                  <option>ADJUNTO</option>
+                                  <option>JTP</option>
+                                  <option>AYUDANTE 1º</option>
+                                </select>
+                              </td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                                <select
+                                  style={{
+                                    ...styles.input,
+                                    borderColor: teacherEditForm.dedication === 'Sin Informar' ? '#d32f2f' : styles.input.borderColor
+                                  }}
+                                  value={teacherEditForm.dedication}
+                                  onChange={(e) => setTeacherEditForm(prev => ({ ...prev, dedication: e.target.value }))}
+                                >
+                                  <option>Sin Informar</option>
+                                  <option>Simple</option>
+                                  <option>Parcial</option>
+                                  <option>Parcial + Simple</option>
+                                  <option>Exclusivo</option>
+                                </select>
+                              </td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                                <input
+                                  style={styles.input}
+                                  value={teacherEditForm.email}
+                                  onChange={(e) => setTeacherEditForm(prev => ({ ...prev, email: e.target.value }))}
+                                />
+                              </td>
+                              <td style={{ padding: '8px' }}>
+                                <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                  <button
+                                    style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px' }}
+                                    onClick={() => saveTeacherEdit(teacher)}
+                                    title="Guardar cambios"
+                                  >
+                                    💾
+                                  </button>
+                                  <button
+                                    style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px', marginRight: 0 }}
+                                    onClick={cancelTeacherEdit}
+                                    title="Cancelar"
+                                  >
+                                    ✖️
+                                  </button>
+                                </div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.name || '-'}</td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.category || '-'}</td>
+                              <td style={{
+                                padding: '8px',
+                                borderRight: '1px solid #ddd',
+                                color: (!teacher.dedication || teacher.dedication === 'Sin Informar') ? '#d32f2f' : undefined,
+                                fontWeight: (!teacher.dedication || teacher.dedication === 'Sin Informar') ? '600' : undefined
+                              }}>
+                                {teacher.dedication || 'Sin Informar'}
+                              </td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.email || '-'}</td>
+                              <td style={{ padding: '8px' }}>
+                                <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                  <button
+                                    style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px' }}
+                                    onClick={() => loadTeacherUsage(teacher)}
+                                    title="Ver propuestas afectadas"
+                                  >
+                                    👁️
+                                  </button>
+                                  <button
+                                    style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px' }}
+                                    onClick={() => startTeacherEdit(teacher)}
+                                    title="Editar docente"
+                                  >
+                                    ✏️
+                                  </button>
+                                  <button
+                                    style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px', marginRight: 0 }}
+                                    onClick={() => openDeleteTeacherModal(teacher)}
+                                    title="Eliminar docente"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                {teacherUsageInfo.teacherId && (
+                  <div style={{ marginTop: '12px', background: '#f7f7f7', border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                      <strong>
+                        Propuestas afectadas {teacherUsageInfo.name ? `(${teacherUsageInfo.name})` : ''}
+                      </strong>
+                      <button
+                        style={{ ...styles.button, background: '#999', padding: '4px 10px', marginRight: 0 }}
+                        onClick={clearTeacherUsage}
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                    {teacherUsageInfo.loading ? (
+                      <div style={{ marginTop: '8px', color: '#555' }}>Consultando...</div>
+                    ) : teacherUsageInfo.error ? (
+                      <div style={{ marginTop: '8px', color: '#b00020' }}>{teacherUsageInfo.error}</div>
+                    ) : (teacherUsageInfo.items.length === 0 && teacherUsageInfo.ids.length === 0) ? (
+                      <div style={{ marginTop: '8px', color: '#555' }}>No hay propuestas afectadas.</div>
+                    ) : (
+                      <div style={{ marginTop: '8px', maxHeight: '120px', overflowY: 'auto', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px', padding: '8px' }}>
+                        <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
+                          Total: {teacherUsageInfo.items.length || teacherUsageInfo.ids.length}
+                        </div>
+                        <div style={{ display: 'grid', gap: '4px' }}>
+                          {(teacherUsageInfo.items.length ? teacherUsageInfo.items : teacherUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
+                            <div key={`${row.id}-${idx}`}>
+                              #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 
@@ -3331,8 +5496,12 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
 
               <div style={{ marginTop: '15px' }}>
                 <h3>Competencias</h3>
-                <div style={{ whiteSpace: 'pre-wrap' }}><strong>Genericas:</strong> {viewProposal.generic_competencies || '-'}</div>
-                <div style={{ whiteSpace: 'pre-wrap' }}><strong>Especificas:</strong> {viewProposal.specific_competencies || 'No Aplica'}</div>
+                <div style={{ whiteSpace: 'pre-wrap' }}>
+                  <strong>Genericas:</strong> {buildCompetencyText(viewProposal.generic_competencies_items || []) || viewProposal.generic_competencies || '-'}
+                </div>
+                <div style={{ whiteSpace: 'pre-wrap' }}>
+                  <strong>Especificas:</strong> {buildCompetencyText(viewProposal.specific_competencies_items || []) || viewProposal.specific_competencies || 'No Aplica'}
+                </div>
               </div>
 
               <div style={{ marginTop: '15px' }}>
@@ -3382,3 +5551,5 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     </div>
   )
 }
+
+export default App
