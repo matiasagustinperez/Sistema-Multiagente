@@ -1705,6 +1705,23 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         id: ra.id ?? Date.now() + idx,
         descripcion: ra.description || ''
       }))
+      const mapRaCodesToIds = (raCodes, raList) => {
+        if (!Array.isArray(raCodes) || raCodes.length === 0) {
+          return []
+        }
+        const ids = []
+        raCodes.forEach((code) => {
+          const match = String(code).match(/RA\s*(\d+)/i)
+          if (!match) {
+            return
+          }
+          const idx = parseInt(match[1], 10) - 1
+          if (idx >= 0 && idx < raList.length) {
+            ids.push(raList[idx].id)
+          }
+        })
+        return ids
+      }
       const inferRaIdsFromObjectiveText = (objectiveText) => {
         if (!objectiveText || typeof objectiveText !== 'string') {
           return []
@@ -1742,7 +1759,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
           id: tp.id ?? Date.now() + idx,
           numero: tp.number || tp.numero || String(idx + 1),
           nombre: tp.name || '',
-          raIds: inferRaIdsFromObjectiveText(tp.objective || ''),
+          raIds: mapRaCodesToIds(tp.ra_codes, loadedRaList).length > 0
+            ? mapRaCodesToIds(tp.ra_codes, loadedRaList)
+            : inferRaIdsFromObjectiveText(tp.objective || ''),
           objetivo: tp.objective || '',
           actividades: tp.activities || '',
           materiales: tp.materials || '',
@@ -1906,6 +1925,25 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     
     const data = importPreview.data
     
+    // Opciones disponibles de carrera (las mismas del formulario)
+    const carreraOptions = [
+      'Ingeniería en Sistemas',
+      'Ingeniería Mecatrónica',
+      'Licenciatura en Sistemas',
+      'Tecnicatura Universitaria en Desarrollo Web',
+      'Tecnicatura Universitaria en Ciencia de Datos'
+    ]
+
+    // Helper para normalizar carrera importada a opción disponible
+    const normalizeCarrera = (importedCarrera) => {
+      if (!importedCarrera) return ''
+      const normalized = String(importedCarrera).toLowerCase().trim()
+      const found = carreraOptions.find(opt => 
+        opt.toLowerCase().trim() === normalized
+      )
+      return found || importedCarrera
+    }
+    
     // Helper para convertir array de competencias a string
     const competenciasListToString = (compArray) => {
       if (!Array.isArray(compArray)) return ''
@@ -1914,6 +1952,32 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         const level = comp.level ? ` - ${comp.level}` : ''
         return `${comp.code} - ${comp.description}${level}`
       }).join('\n')
+    }
+
+    const buildBibliografiaGlobal = (data) => {
+      if (data.bibliography) {
+        return data.bibliography
+      }
+      if (!data.bibliography_basic && !data.bibliography_complementary) {
+        return ''
+      }
+      let merged = ''
+      if (data.bibliography_basic) {
+        merged = data.bibliography_basic
+      }
+      if (data.bibliography_complementary) {
+        merged = (merged ? `${merged}\n\n` : '') + `Bibliografia complementaria:\n${data.bibliography_complementary}`
+      }
+      return merged
+    }
+
+    const normalizeQuarterSelection = (value) => {
+      const normalized = String(value || '').toLowerCase()
+      if (!normalized) return ''
+      if (normalized.includes('anual') || normalized.trim() === 'a') return 'Anual'
+      if (normalized.includes('1') || normalized.includes('primer')) return '1er Cuatrimestre'
+      if (normalized.includes('2') || normalized.includes('segundo')) return '2do Cuatrimestre'
+      return value
     }
     
     // Helper para convertir array de RAs a formato esperado
@@ -1925,15 +1989,30 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
         descripcion: typeof ra === 'string' ? ra : ra.description || ra
       }))
     }
+    const mapRaCodesToIds = (raCodes, raList) => {
+      if (!Array.isArray(raCodes) || raCodes.length === 0) return []
+      const ids = []
+      raCodes.forEach((code) => {
+        const match = String(code).match(/RA\s*(\d+)/i)
+        if (!match) return
+        const idx = parseInt(match[1], 10) - 1
+        if (idx >= 0 && idx < raList.length) {
+          ids.push(raList[idx].id)
+        }
+      })
+      return ids
+    }
+
+    const raList = raListToArray(data.learning_outcomes) || []
     
     // Mapear datos extraídos al formulario
     setFormData({
-      carrera: data.career || '',
+      carrera: normalizeCarrera(data.career),
       asignatura: data.subject || '',
       plan: data.study_plan || data.plan || '',
-      anio: data.year_of_career || '',
-      ciclo: '',
-      cuatrimestre: data.quarter || '',
+      anio: data.academic_year || '',
+      ciclo: data.year_of_career || '',
+      cuatrimestre: normalizeQuarterSelection(data.quarter),
       caracter: data.character || 'Obligatoria',
       regimen: data.regime || 'Cuatrimestral',
       hsTotal: parseInt(data.total_hours) || 0,
@@ -1949,7 +2028,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       fundamentosP1: data.importance || data.fundamentals || '',
       fundamentosP2: data.professional_profile || '',
       // Resultados de aprendizaje: convertir de array de objetos a array de items
-      resultadosAprendizaje: raListToArray(data.learning_outcomes) || [],
+      resultadosAprendizaje: raList,
       unidades: data.units?.map((unit, idx) => ({
         id: idx + 1,
         nombre: unit.name || '',
@@ -1960,7 +2039,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       trabajosPracticos: data.practicals?.map((tp, idx) => ({
         id: idx + 1,
         nombre: tp.name || '',
-        raIds: [],
+        raIds: mapRaCodesToIds(tp.ra_codes, raList),
         objetivo: tp.objective || '',
         actividades: tp.activities || '',
         materiales: tp.materials || '',
@@ -1968,7 +2047,7 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
       })) || [],
       metodologia: data.methodology || '',
       evaluacion: data.evaluation || '',
-      bibliografia: data.bibliography || '',
+      bibliografia: buildBibliografiaGlobal(data),
       observaciones: data.observations || ''
     })
     
@@ -3042,6 +3121,64 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
                           </p>
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* Metodologia */}
+                  {importPreview.data?.methodology && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Metodologia:</strong>
+                      <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '12px', lineHeight: '1.4' }}>
+                        {importPreview.data.methodology.substring(0, 300)}...
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Evaluacion */}
+                  {importPreview.data?.evaluation && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Evaluacion:</strong>
+                      <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '12px', lineHeight: '1.4' }}>
+                        {importPreview.data.evaluation.substring(0, 300)}...
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Bibliografia global */}
+                  {(importPreview.data?.bibliography_basic || importPreview.data?.bibliography_complementary || importPreview.data?.bibliography) && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Bibliografia:</strong>
+                      {importPreview.data?.bibliography_basic && (
+                        <div style={{ marginBottom: '8px' }}>
+                          <strong style={{ fontSize: '12px', color: '#0066cc' }}>Basica:</strong>
+                          <div style={{ background: '#fff', padding: '8px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '12px', lineHeight: '1.4' }}>
+                            {importPreview.data.bibliography_basic.substring(0, 240)}...
+                          </div>
+                        </div>
+                      )}
+                      {importPreview.data?.bibliography_complementary && (
+                        <div style={{ marginBottom: '8px' }}>
+                          <strong style={{ fontSize: '12px', color: '#0066cc' }}>Complementaria:</strong>
+                          <div style={{ background: '#fff', padding: '8px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '12px', lineHeight: '1.4' }}>
+                            {importPreview.data.bibliography_complementary.substring(0, 240)}...
+                          </div>
+                        </div>
+                      )}
+                      {!importPreview.data?.bibliography_basic && !importPreview.data?.bibliography_complementary && importPreview.data?.bibliography && (
+                        <div style={{ background: '#fff', padding: '8px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '12px', lineHeight: '1.4' }}>
+                          {importPreview.data.bibliography.substring(0, 240)}...
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Observaciones */}
+                  {importPreview.data?.observations && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Observaciones:</strong>
+                      <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '12px', lineHeight: '1.4' }}>
+                        {importPreview.data.observations.substring(0, 240)}...
+                      </div>
                     </div>
                   )}
                 </div>
