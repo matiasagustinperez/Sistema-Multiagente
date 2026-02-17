@@ -373,34 +373,57 @@ def extract_learning_outcomes_parsed(text: str) -> List[Dict[str, str]]:
     - "- RA1: Descripción"
     - "RA 1: Descripción" (sin guión, con espacio entre RA y número)
     - "RA1: Descripción" (sin guión, sin espacio)
+    - Múltiples líneas de descripción
     
     Retorna: [{'code': 'RA1', 'description': 'Descripción'}, ...]
     """
     outcomes = []
-    # Patrón flexible: guión opcional, RA con espacio opcional, separadores diversos
-    # Captura descripciones que pueden ocupar múltiples líneas hasta el siguiente RA
-    # (?:^|\n)\s* - Inicio de línea con espacios
-    # (?:[-•]\s*)?\s* - Opcionalmente: guión/bullet con espacios
-    # ([Rr][Aa]\s*\d+) - RA con espacio opcional entre RA y número (CAPTURA 1)
+    
+    # Patrón más flexible: busca RA en cualquier posición (inicio de línea o después de espacio)
+    # Ahora captura:
+    # (?:^|\n|-\s|) - Inicio de línea, salto, o después de guión
+    # \s*(?:[-•]\s*)? - Espacios opcionales y guión/bullet opcional
+    # ([Rr][Aa]\s*\d+) - RA con espacio opcional (CAPTURA 1)
     # \s*[-:.]?\s* - Espacios y separadores opcionales
-    # ([^\n]*(?:\n(?!\s*(?:[-•]\s*)?\s*[Rr][Aa]\s*\d+)[^\n]*)*) - Descripción multi-línea (CAPTURA 2)
-    #   [^\n]* - Caracteres hasta fin de línea
-    #   (?:\n(?!\s*(?:[-•]\s*)?\s*[Rr][Aa]\s*\d+)[^\n]*)* - Líneas adicionales que no empiezan con RA
-    pattern = r'(?:^|\n)\s*(?:[-•]\s*)?\s*([Rr][Aa]\s*\d+)\s*[-:.]?\s*([^\n]*(?:\n(?!\s*(?:[-•]\s*)?\s*[Rr][Aa]\s*\d+)[^\n]*)*)'
-    matches = re.finditer(pattern, text, re.MULTILINE)
+    # ((?:[^\n]|(?:\n(?!\s*[Rr][Aa]\s*\d+)))*?) - Descripción que puede incluir saltos de línea (CAPTURA 2)
+    
+    # Una alternativa: buscar cada RA y luego extraer su descripción hasta el siguiente
+    ra_pattern = r'(?:^|\n)\s*(?:[-•]\s*)?([Rr][Aa]\s*\d+)\s*[-:.]?\s*'
+    ra_matches = list(re.finditer(ra_pattern, text, re.MULTILINE))
+    
+    if not ra_matches:
+        # Si no hay match, intentar patrón más simple (sin línea nueva)
+        ra_pattern = r'(\bRA\s*\d+)\s*[-:.]?\s*'
+        ra_matches = list(re.finditer(ra_pattern, text))
     
     seen_codes = set()
-    for match in matches:
+    for idx, match in enumerate(ra_matches):
         code = match.group(1).upper().replace(' ', '')  # RA 1 -> RA1
-        description = match.group(2).strip()
+        
+        # Extraer descripción desde el final del código hasta:
+        # - El siguiente RA, o
+        # - El final del texto, o
+        # - Hasta 1000 caracteres (límite razonable)
+        start_desc = match.end()
+        
+        if idx + 1 < len(ra_matches):
+            end_desc = ra_matches[idx + 1].start()
+        else:
+            end_desc = len(text)
+        
+        description = text[start_desc:end_desc].strip()
         
         # Limpiar descripción: convertir saltos de línea en espacios y normalizar espacios
-        description = ' '.join(description.split())  # Convierte múltiples espacios/saltos en espacios simples
+        description = ' '.join(description.split())
         
         # Limpiar descripción de separadores leading
-        description = re.sub(r'^[-:.]\s*', '', description).strip()
+        description = re.sub(r'^[-:.\s]+', '', description).strip()
         
-        # Evitar duplicados y descripciones vacías
+        # Limitar a 1000 caracteres si es muy larga
+        if len(description) > 1000:
+            description = description[:1000].rsplit(' ', 1)[0] + '...'
+        
+        # Evitar duplicados y descripciones muy cortas
         if code not in seen_codes and description and len(description) > 2:
             seen_codes.add(code)
             outcomes.append({
