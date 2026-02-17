@@ -2074,6 +2074,9 @@ Competencias: ${formData.competenciasGen}, ${formData.competenciasEsp}`
     setImportFile(null)
     setStatusMsg('Propuesta cargada en el formulario')
     setStatusType('success')
+    
+    // Scroll al inicio de la página
+    window.scrollTo(0, 0)
   }
 
   const styles = {
