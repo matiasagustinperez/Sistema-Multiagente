@@ -304,16 +304,18 @@ def extract_section_tables(doc: Document, section_start_idx: int, section_end_id
 
 def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
     """
-    Extrae Competencias Genéricas (CG + letra: CGS, CGT, CGU, etc) del texto.
-    Soporta formato: "CGX - descripción (Nivel - CGY - descripción - Nivel - ..."
-    Retorna: [{'code': 'CGS1', 'description': 'Descripción', 'level': 'Medio'}, ...]
+    Extrae Competencias Genéricas del texto.
+    Soporta formatos:
+    - Línea separada: "- CGT1 - Descripción - Nivel"
+    - Línea única: "CGT1 - Descripción - Nivel - CGT2 - Descripción - Nivel - ..."
+    Retorna: [{'code': 'CGT1', 'description': 'Descripción', 'level': 'Nivel'}, ...]
     """
     competencies = []
     
-    # Patrón: CGX - descripción SEGUIDO de (Nivel o - Nivel o ) al final
-    # Descripción va hasta encontrar un nivel o el siguiente código
-    # Patrón: CG[letra][dígitos] - [desc no contiene (] - [nivel]
-    pattern = r'([Cc][Gg][A-Za-z]\d+)\s*-\s*([^-()]+?)(?:\s*[\(-]\s*([Aa]lto|[Mm]edio|[Bb]ajo))?(?=\s*[-\)])'
+    # Patrón para capturar: código - descripción - nivel
+    # Usa lookahead para encontrar el siguiente código CG o paréntesis de cierre
+    # El .+? es lazy pero se limita por el lookahead a capturar hasta "- [Nivel]"
+    pattern = r'([Cc][Gg][A-Za-z]\d+)\s*-\s*(.+?)\s*-\s*(Alto|Medio|Bajo)(?=\s*-\s*[Cc][Gg][A-Za-z]|\s*\))'
     
     for match in re.finditer(pattern, text):
         code = match.group(1).upper()
@@ -332,16 +334,18 @@ def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
 
 def extract_specific_competencies(text: str) -> List[Dict[str, str]]:
     """
-    Extrae Competencias Específicas (CEx) del texto.
-    Soporta formato: "CEX - descripción (Nivel - CEY - descripción - Nivel - ..."
-    Retorna: [{'code': 'CE1', 'description': 'Descripción', 'level': 'Medio'}, ...]
+    Extrae Competencias Específicas del texto.
+    Soporta formatos:
+    - Línea separada: "- CE1 - Descripción - Nivel"
+    - Línea única: "CE1 - Descripción - Nivel - CE2 - Descripción - Nivel - ..."
+    Retorna: [{'code': 'CE1', 'description': 'Descripción', 'level': 'Nivel'}, ...]
     """
     competencies = []
     
-    # Patrón: CEX - descripción SEGUIDO de (Nivel o - Nivel o ) al final
-    # Descripción va hasta encontrar un nivel o el siguiente código
-    # Patrón: CE[dígitos] - [desc no contiene (] - [nivel]
-    pattern = r'([Cc][Ee]\d+)\s*-\s*([^-()]+?)(?:\s*[\(-]\s*([Aa]lto|[Mm]edio|[Bb]ajo))?(?=\s*[-\)])'
+    # Patrón para capturar: código - descripción - nivel
+    # Usa lookahead para encontrar el siguiente código CE o paréntesis de cierre
+    # El .+? es lazy pero se limita por el lookahead a capturar hasta "- [Nivel]"
+    pattern = r'([Cc][Ee]\d+)\s*-\s*(.+?)\s*-\s*(Alto|Medio|Bajo)(?=\s*-\s*[Cc][Ee]\d+|\s*\))'
     
     for match in re.finditer(pattern, text):
         code = match.group(1).upper()
