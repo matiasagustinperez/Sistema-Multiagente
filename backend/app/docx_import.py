@@ -304,15 +304,17 @@ def extract_section_tables(doc: Document, section_start_idx: int, section_end_id
 
 def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
     """
-    Extrae Competencias Genéricas (CGTx) del texto.
-    Formato: "- CGT1 - Descripción" o "- CGT1. Descripción" o "- CGT1: Descripción"
-    Retorna: [{'code': 'CGT1', 'description': 'Descripción', 'level': ''}, ...]
+    Extrae Competencias Genéricas (CG + letra: CGS, CGT, CGU, etc) del texto.
+    Formato: "- CGS1 - Descripción" o "- CGT. Descripción" o "- CGU: Descripción" o "- CGS Descripción"
+    Retorna: [{'code': 'CGS1', 'description': 'Descripción', 'level': ''}, ...]
     Soporta múltiples competencias, cada una en su propia línea
+    El separador es OPCIONAL (-:.)
     """
     competencies = []
-    # Buscar líneas que comiencen con "- CGT" o "CGT"
-    # Patrón simple: captura código CGT# + todo lo demás hasta fin de línea
-    pattern = r'^\s*[-•]\s*([Cc][Gg][Tt]\d+)\s*[-:.]\s*(.+)$'
+    # Buscar líneas que comiencen con "- CG" + cualquier letra + número
+    # Patrón: CG seguido de una letra (S, T, U, etc) seguido de opcional número
+    # Separador es opcional para mayor flexibilidad
+    pattern = r'^\s*[-•]\s*([Cc][Gg][A-Za-z]\d*)\s*[-:.]?\s*(.+)$'
     matches = re.finditer(pattern, text, re.MULTILINE)
     
     for match in matches:
@@ -335,14 +337,16 @@ def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
 def extract_specific_competencies(text: str) -> List[Dict[str, str]]:
     """
     Extrae Competencias Específicas (CEx) del texto.
-    Formato: "- CE1 - Descripción" o "- CE1. Descripción" o "- CE1: Descripción"
+    Formato: "- CE1 - Descripción" o "- CE2. Descripción" o "- CE3: Descripción" o "- CE4 Descripción"
     Retorna: [{'code': 'CE1', 'description': 'Descripción', 'level': ''}, ...]
     Soporta múltiples competencias, cada una en su propia línea
+    El separador es OPCIONAL (-:.)
     """
     competencies = []
-    # Buscar líneas que comiencen con "- CE" o "CE"
-    # Patrón simple: captura código CE# + todo lo demás hasta fin de línea
-    pattern = r'^\s*[-•]\s*([Cc][Ee]\d+)\s*[-:.]\s*(.+)$'
+    # Buscar líneas que comiencen con "- CE" + números
+    # Patrón: CE seguido de dígitos
+    # Separador es opcional para mayor flexibilidad
+    pattern = r'^\s*[-•]\s*([Cc][Ee]\d+)\s*[-:.]?\s*(.+)$'
     matches = re.finditer(pattern, text, re.MULTILINE)
     
     for match in matches:
