@@ -1119,33 +1119,15 @@ def import_proposal_from_docx(file_path: str, filename: str = "") -> Dict[str, A
             for row in table.rows:
                 for cell in row.cells:
                     cell_text = cell.text
-                    if 'RA1' in cell_text or 'RA2' in cell_text or 'RA3' in cell_text:
-                        # Encontrada tabla con RAs
-                        # Soporta: "RA1 - desc", "RA1. desc", "RA1: desc"
-                        ra_pattern = r'(RA\d+)\s*[-:.]?\s*([^\n]+)'
-                        ra_matches = re.finditer(ra_pattern, cell_text, re.IGNORECASE)
-                        
-                        # Deduplicación con seen_codes
-                        seen_codes = set()
-                        temp_outcomes = []
-                        for match in ra_matches:
-                            code = match.group(1).upper()
-                            description = match.group(2).strip()
-                            
-                            # Limpiar descripción de separadores leading
-                            description = re.sub(r'^[-:.]\s*', '', description).strip()
-                            
-                            # Evitar duplicados y descripciones vacías o muy cortas
-                            if code not in seen_codes and description and len(description) > 2:
-                                seen_codes.add(code)
-                                temp_outcomes.append({
-                                    'code': code,
-                                    'description': description
-                                })
-                        
-                        # Normalizar RAs a consecutivos
-                        learning_outcomes = normalize_learning_outcomes(temp_outcomes)
-                        break
+                    if 'RA1' in cell_text or 'RA2' in cell_text or 'RA3' in cell_text or 'RA 1' in cell_text:
+                        # Encontrada tabla con RAs - usar función mejorada
+                        learning_outcomes = extract_learning_outcomes_parsed(cell_text)
+                        if learning_outcomes:
+                            break
+                if learning_outcomes:
+                    break
+            if learning_outcomes:
+                break
             
             # Si ya encontramos RAs, salir del bucle externo
             if learning_outcomes:
