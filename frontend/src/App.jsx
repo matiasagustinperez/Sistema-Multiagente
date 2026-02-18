@@ -3,7 +3,8 @@ import logoMacau from '../Logo MACAU.png'
 
 const careerOptions = [
   'Ingeniería en Sistemas',
-  'Ingeniería Mecatrónica'
+  'Ingeniería Mecatrónica',
+  'Licenciatura en Sistemas'
 ]
 
 const App = () => {
@@ -11,6 +12,9 @@ const App = () => {
   const [activeMenu, setActiveMenu] = useState('home')
   const [proposalsMode, setProposalsMode] = useState(null)
   const [activeCareer, setActiveCareer] = useState(() => localStorage.getItem('activeCareer') || '')
+  const [viewRole, setViewRole] = useState('director')
+  const [selectedTeacherId, setSelectedTeacherId] = useState(null)
+  const [selectedTeacherName, setSelectedTeacherName] = useState('')
 
   const [importFile, setImportFile] = useState(null)
   const [importLoading, setImportLoading] = useState(false)
@@ -134,6 +138,7 @@ const App = () => {
     academic_year: '',
     year_of_career: '',
     quarter: '',
+    updated_at: '',
     status: ''
   })
   const [completeProposalSort, setCompleteProposalSort] = useState({ key: '', direction: 'asc' })
@@ -143,6 +148,7 @@ const App = () => {
     academic_year: '',
     year_of_career: '',
     quarter: '',
+    updated_at: '',
     status: ''
   })
   const [pendingProposalSort, setPendingProposalSort] = useState({ key: '', direction: 'asc' })
@@ -170,6 +176,34 @@ const App = () => {
       localStorage.removeItem('activeCareer')
     }
   }, [activeCareer])
+
+  useEffect(() => {
+    setSelectedTeacherId(null)
+    setSelectedTeacherName('')
+  }, [activeCareer])
+
+  useEffect(() => {
+    if (viewRole !== 'docente') {
+      setSelectedTeacherId(null)
+      setSelectedTeacherName('')
+    }
+  }, [viewRole])
+
+  useEffect(() => {
+    if (viewRole !== 'docente') {
+      return
+    }
+    const allowedMenus = ['propuestas', 'resoluciones']
+    if (!allowedMenus.includes(activeMenu)) {
+      setActiveMenu('propuestas')
+    }
+    if (proposalsMode === 'import') {
+      setProposalsMode(null)
+    }
+    if (!editingProposalId && proposalsMode === 'create') {
+      setProposalsMode(null)
+    }
+  }, [viewRole, activeMenu, proposalsMode, editingProposalId])
 
   useEffect(() => {
     if (!activeCareer) {
@@ -419,6 +453,28 @@ const App = () => {
     const preview = ids.slice(0, previewLimit)
     const extraLine = total > previewLimit ? `\nSe muestran ${previewLimit} de ${total}.` : ''
     return `Propuestas afectadas (${total}): ${preview.join(', ')}${extraLine}`
+  }
+
+  const formatDateTime = (value) => {
+    if (!value) {
+      return '-'
+    }
+    const raw = typeof value === 'string' ? value.trim() : value
+    const hasTimeZone = typeof raw === 'string' && /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw)
+    const date = new Date(hasTimeZone ? raw : `${raw}Z`)
+    if (Number.isNaN(date.getTime())) {
+      return '-'
+    }
+    const formatter = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
+    return formatter.format(date).replace('T', ' ')
   }
 
   const openDeleteCatalogModal = async (item) => {
@@ -2520,6 +2576,13 @@ const App = () => {
   const saveProposal = async ({ silent = false } = {}) => {
     const isEditing = !!editingProposalId
     const careerValue = formData.carrera || activeCareer
+    if (isDocenteView && !isEditing) {
+      if (!silent) {
+        setStatusMsg('La vista Docente no puede crear propuestas nuevas')
+        setStatusType('error')
+      }
+      return
+    }
     // Validate required fields: carrera and asignatura only
     if (!careerValue || !formData.asignatura) {
       if (!silent) {
@@ -2686,6 +2749,11 @@ const App = () => {
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
       const data = await res.json()
+      if (isDocenteView && hasSelectedTeacher && !proposalHasTeacher(data, selectedTeacherId, selectedTeacherName)) {
+        setStatusMsg('La vista Docente solo puede editar propuestas propias')
+        setStatusType('error')
+        return
+      }
       const loadedRaList = (data.learning_outcomes || []).map((ra, idx) => ({
         id: ra.id ?? Date.now() + idx,
         descripcion: ra.description || ''
@@ -2795,6 +2863,11 @@ const App = () => {
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
       const data = await res.json()
+      if (isDocenteView && hasSelectedTeacher && !proposalHasTeacher(data, selectedTeacherId, selectedTeacherName)) {
+        setStatusMsg('La vista Docente solo puede ver propuestas propias')
+        setStatusType('error')
+        return
+      }
       setViewProposal(data)
       if (data.career) {
         setActiveCareer(normalizeCareer(data.career))
@@ -2806,6 +2879,11 @@ const App = () => {
   }
 
   const deleteProposal = async (proposalId) => {
+    if (isDocenteView) {
+      setStatusMsg('La vista Docente no puede eliminar propuestas')
+      setStatusType('error')
+      return
+    }
     if (!window.confirm(`Eliminar propuesta #${proposalId}? Esta accion no se puede deshacer.`)) {
       return
     }
@@ -3120,13 +3198,37 @@ const App = () => {
     )
   }
 
-  const canCreateProposal = isProposalReadyToCreate()
-  const canSaveDraft = !!(formData.carrera || activeCareer) && !!formData.asignatura
-  const canSaveEdits = !!(formData.carrera || activeCareer) && !!formData.asignatura
+  const isDocenteView = viewRole === 'docente'
+  const normalizeText = (value) => String(value || '').trim().toLowerCase()
+  const hasSelectedTeacher = !!(selectedTeacherId || selectedTeacherName)
+  const proposalHasTeacher = (proposal, teacherId, teacherName) => {
+    if (!proposal || !Array.isArray(proposal.teaching_team)) {
+      return false
+    }
+    const normalizedName = normalizeText(teacherName)
+    return proposal.teaching_team.some((doc) => {
+      if (teacherId && doc.id != null && String(doc.id) === String(teacherId)) {
+        return true
+      }
+      if (normalizedName && normalizeText(doc.name) === normalizedName) {
+        return true
+      }
+      return false
+    })
+  }
+
+  const canCreateProposal = !isDocenteView && isProposalReadyToCreate()
+  const canSaveDraft = !!(formData.carrera || activeCareer) && !!formData.asignatura && (!isDocenteView || !!editingProposalId)
+  const canSaveEdits = !!(formData.carrera || activeCareer) && !!formData.asignatura && (!isDocenteView || !!editingProposalId)
   const normalizedActiveCareer = normalizeCareer(activeCareer)
-  const filteredProposals = normalizedActiveCareer
+  const filteredByCareer = normalizedActiveCareer
     ? proposals.filter((proposal) => normalizeCareer(proposal.career) === normalizedActiveCareer)
     : []
+  const filteredProposals = isDocenteView
+    ? (hasSelectedTeacher
+        ? filteredByCareer.filter((proposal) => proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName))
+        : [])
+    : filteredByCareer
   const completeProposals = filteredProposals.filter(isProposalComplete)
   const inProcessProposals = filteredProposals.filter(isProposalInProcess)
   const proposalTableGetters = {
@@ -3135,6 +3237,7 @@ const App = () => {
     academic_year: (p) => p.academic_year ?? '',
     year_of_career: (p) => p.year_of_career ?? '',
     quarter: (p) => p.quarter ?? '',
+    updated_at: (p) => formatDateTime(p.updated_at || p.created_at),
     status: (p) => p.status ?? ''
   }
   const completeProposalsFiltered = applyTableSort(
@@ -3190,6 +3293,7 @@ const App = () => {
   const renderCompetencySection = ({ title, type, required }) => {
     const items = Array.isArray(formData[type]) ? formData[type] : []
     const isGeneric = type === 'competenciasGenItems'
+    const canEditCompetencies = !isDocenteView
     const catalogList = isGeneric ? careerCompetencies.generic : careerCompetencies.specific
     const datalistId = `${type}-catalog`
     return (
@@ -3215,6 +3319,7 @@ const App = () => {
                   value={item.code || ''}
                   onChange={(e) => updateCompetencyItem(type, item.id, 'code', e.target.value)}
                   list={datalistId}
+                  disabled={!canEditCompetencies}
                 />
                 <datalist id={datalistId}>
                   {catalogList.map((entry) => (
@@ -3228,11 +3333,13 @@ const App = () => {
                   placeholder="Descripcion"
                   value={item.description || ''}
                   onChange={(e) => updateCompetencyItem(type, item.id, 'description', e.target.value)}
+                  disabled={!canEditCompetencies}
                 />
                 <select
                   style={styles.input}
                   value={normalizeLevelValue(item.level) || ''}
                   onChange={(e) => updateCompetencyItem(type, item.id, 'level', e.target.value)}
+                  disabled={!canEditCompetencies}
                 >
                   <option value="">Seleccionar nivel</option>
                   {levelOptions.filter((opt) => opt.value > 0).map((opt) => (
@@ -3242,6 +3349,7 @@ const App = () => {
                 <button
                   style={{ ...styles.button, marginRight: 0 }}
                   onClick={() => deleteCompetencyItem(type, item.id)}
+                  disabled={!canEditCompetencies}
                 >
                   X
                 </button>
@@ -3250,7 +3358,7 @@ const App = () => {
           )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
-          <button style={styles.button} onClick={() => addCompetencyItem(type)}>
+          <button style={styles.button} onClick={() => addCompetencyItem(type)} disabled={!canEditCompetencies}>
             + Agregar competencia
           </button>
         </div>
@@ -3268,7 +3376,9 @@ const App = () => {
             Multiagente para la Acreditacion ante CONEAU
           </div>
         </div>
-        <MenuButton label="Home" onClick={() => setActiveMenu('home')} active={activeMenu === 'home'} />
+        {!isDocenteView && (
+          <MenuButton label="Home" onClick={() => setActiveMenu('home')} active={activeMenu === 'home'} />
+        )}
         <MenuButton
           label="Propuestas"
           onClick={() => {
@@ -3277,15 +3387,19 @@ const App = () => {
           }}
           active={activeMenu === 'propuestas'}
         />
-        <MenuButton
-          label="Competencias"
-          onClick={() => {
-            setActiveMenu('competencias')
-            setProposalsMode(null)
-          }}
-          active={activeMenu === 'competencias'}
-        />
-        <MenuButton label="Docentes" onClick={() => setActiveMenu('docentes')} active={activeMenu === 'docentes'} />
+        {!isDocenteView && (
+          <MenuButton
+            label="Competencias"
+            onClick={() => {
+              setActiveMenu('competencias')
+              setProposalsMode(null)
+            }}
+            active={activeMenu === 'competencias'}
+          />
+        )}
+        {!isDocenteView && (
+          <MenuButton label="Docentes" onClick={() => setActiveMenu('docentes')} active={activeMenu === 'docentes'} />
+        )}
         <MenuButton label="Resoluciones" onClick={() => setActiveMenu('resoluciones')} active={activeMenu === 'resoluciones'} />
 
         <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
@@ -3304,6 +3418,43 @@ const App = () => {
             <div style={{ color: '#b00020', fontWeight: 600, marginTop: '8px', fontSize: '12px' }}>
               Selecciona una carrera para filtrar y crear contenido.
             </div>
+          )}
+          <label style={{ ...styles.label, marginTop: '12px' }}>Vista</label>
+          <select
+            style={{ ...styles.input, marginBottom: 0 }}
+            value={viewRole}
+            onChange={(e) => setViewRole(e.target.value)}
+          >
+            <option value="director">Director</option>
+            <option value="docente">Docente</option>
+          </select>
+          {viewRole === 'docente' && (
+            <>
+              <label style={{ ...styles.label, marginTop: '12px' }}>Docente</label>
+              <select
+                style={{ ...styles.input, marginBottom: 0 }}
+                value={selectedTeacherId || ''}
+                onChange={(e) => {
+                  const nextId = e.target.value || null
+                  const teacher = teacherCatalogItems.find((item) => String(item.id) === String(nextId))
+                  setSelectedTeacherId(nextId)
+                  setSelectedTeacherName(teacher?.name || '')
+                }}
+                disabled={!activeCareer}
+              >
+                <option value="">Seleccionar docente...</option>
+                {teacherCatalogItems.map((teacher) => (
+                  <option key={teacher.id ?? teacher.name} value={teacher.id ?? ''}>
+                    {teacher.name}
+                  </option>
+                ))}
+              </select>
+              {!activeCareer && (
+                <div style={{ color: '#b00020', fontWeight: 600, marginTop: '8px', fontSize: '12px' }}>
+                  Selecciona una carrera para elegir docente.
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -3356,30 +3507,37 @@ const App = () => {
         {activeMenu === 'propuestas' && !proposalsMode && (
           <div style={styles.section}>
             <h2>Propuestas Académicas</h2>
+            {isDocenteView && !hasSelectedTeacher && (
+              <div style={{ marginTop: '10px', background: '#fff6e6', border: '1px solid #ffcc80', padding: '10px 12px', borderRadius: '6px', color: '#7a4b00' }}>
+                Selecciona un docente para ver solo sus propuestas en la carrera activa.
+              </div>
+            )}
             
             {/* CARDS SECTION */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px', marginBottom: '30px', marginTop: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isDocenteView ? '1fr' : '1fr 1fr 1fr', gap: '20px', marginBottom: '30px', marginTop: '20px' }}>
               {/* Card 1: Crear Propuesta */}
-              <div style={{ 
-                border: '2px solid #0066cc', 
-                borderRadius: '8px', 
-                padding: '20px', 
-                textAlign: 'center', 
-                cursor: 'pointer', 
-                transition: 'all 0.3s ease',
-                backgroundColor: '#f0f8ff',
-                ':hover': { backgroundColor: '#e6f2ff', boxShadow: '0 4px 12px rgba(0, 102, 204, 0.2)' }
-              }}
-              onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(0, 102, 204, 0.2)'; e.target.style.backgroundColor = '#e6f2ff'; }}
-              onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f0f8ff'; }}
-              onClick={() => {
-                resetProposalForm()
-                setProposalsMode('create')
-              }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>📝</div>
-                <h3 style={{ color: '#0066cc', margin: '0 0 10px 0' }}>Crear Propuesta</h3>
-                <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Crear una propuesta desde cero, con asistencia de IA 🤖</p>
-              </div>
+              {!isDocenteView && (
+                <div style={{ 
+                  border: '2px solid #0066cc', 
+                  borderRadius: '8px', 
+                  padding: '20px', 
+                  textAlign: 'center', 
+                  cursor: 'pointer', 
+                  transition: 'all 0.3s ease',
+                  backgroundColor: '#f0f8ff',
+                  ':hover': { backgroundColor: '#e6f2ff', boxShadow: '0 4px 12px rgba(0, 102, 204, 0.2)' }
+                }}
+                onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(0, 102, 204, 0.2)'; e.target.style.backgroundColor = '#e6f2ff'; }}
+                onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f0f8ff'; }}
+                onClick={() => {
+                  resetProposalForm()
+                  setProposalsMode('create')
+                }}>
+                  <div style={{ fontSize: '32px', marginBottom: '10px' }}>📝</div>
+                  <h3 style={{ color: '#0066cc', margin: '0 0 10px 0' }}>Crear Propuesta</h3>
+                  <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Crear una propuesta desde cero, con asistencia de IA 🤖</p>
+                </div>
+              )}
 
               {/* Card 2: En Proceso */}
               <div style={{ 
@@ -3400,22 +3558,24 @@ const App = () => {
               </div>
 
               {/* Card 3: Importar */}
-              <div style={{ 
-                border: '2px solid #00a854', 
-                borderRadius: '8px', 
-                padding: '20px', 
-                textAlign: 'center', 
-                cursor: 'pointer', 
-                transition: 'all 0.3s ease',
-                backgroundColor: '#f6ffed'
-              }}
-              onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(0, 168, 84, 0.2)'; e.target.style.backgroundColor = '#f0fdf4'; }}
-              onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f6ffed'; }}
-              onClick={() => setProposalsMode('import')}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>📂</div>
-                <h3 style={{ color: '#00a854', margin: '0 0 10px 0' }}>Importar Propuesta</h3>
-                <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Importar desde PDF o DOC</p>
-              </div>
+              {!isDocenteView && (
+                <div style={{ 
+                  border: '2px solid #00a854', 
+                  borderRadius: '8px', 
+                  padding: '20px', 
+                  textAlign: 'center', 
+                  cursor: 'pointer', 
+                  transition: 'all 0.3s ease',
+                  backgroundColor: '#f6ffed'
+                }}
+                onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(0, 168, 84, 0.2)'; e.target.style.backgroundColor = '#f0fdf4'; }}
+                onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f6ffed'; }}
+                onClick={() => setProposalsMode('import')}>
+                  <div style={{ fontSize: '32px', marginBottom: '10px' }}>📂</div>
+                  <h3 style={{ color: '#00a854', margin: '0 0 10px 0' }}>Importar Propuesta</h3>
+                  <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Importar desde PDF o DOC</p>
+                </div>
+              )}
             </div>
 
             {/* PROPOSALS TABLE */}
@@ -3457,7 +3617,13 @@ const App = () => {
                           Cuatrimestre{getSortIndicator(completeProposalSort, 'quarter')}
                         </th>
                         <th
-                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          style={{ width: '150px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'updated_at')}
+                        >
+                          Ultima edición{getSortIndicator(completeProposalSort, 'updated_at')}
+                        </th>
+                        <th
+                          style={{ width: '90px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
                           onClick={() => toggleSort(setCompleteProposalSort, 'status')}
                         >
                           Estado{getSortIndicator(completeProposalSort, 'status')}
@@ -3508,6 +3674,14 @@ const App = () => {
                         <th style={{ padding: '6px' }}>
                           <input
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.updated_at}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, updated_at: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
                             value={completeProposalFilters.status}
                             onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, status: e.target.value }))}
                             placeholder="Buscar"
@@ -3524,7 +3698,8 @@ const App = () => {
                           <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
-                          <td style={{ padding: '10px' }}>{prop.status || '-'}</td>
+                          <td style={{ padding: '10px' }}>{formatDateTime(prop.updated_at || prop.created_at)}</td>
+                          <td style={{ padding: '10px', width: '90px' }}>{prop.status || '-'}</td>
                           <td style={{ padding: '10px', textAlign: 'center' }}>
                             <button
                               style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
@@ -3547,13 +3722,15 @@ const App = () => {
                             >
                               ⬇️
                             </button>
-                            <button
-                              style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
-                              title="Eliminar propuesta"
-                              onClick={() => deleteProposal(prop.id)}
-                            >
-                              🗑️
-                            </button>
+                            {!isDocenteView && (
+                              <button
+                                style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                title="Eliminar propuesta"
+                                onClick={() => deleteProposal(prop.id)}
+                              >
+                                🗑️
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -3584,6 +3761,7 @@ const App = () => {
                       style={styles.input}
                       value={activeCareer}
                       onChange={(e) => setActiveCareer(e.target.value)}
+                      disabled={isDocenteView}
                     >
                       <option value="">Seleccionar carrera...</option>
                       {careerOptions.map((career) => (
@@ -3593,26 +3771,26 @@ const App = () => {
                   </div>
                   <div>
                     <label style={styles.label}>Asignatura</label>
-                    <input style={styles.input} value={formData.asignatura} onChange={(e) => updateFormData('asignatura', e.target.value)} />
+                    <input style={styles.input} value={formData.asignatura} onChange={(e) => updateFormData('asignatura', e.target.value)} disabled={isDocenteView} />
                   </div>
 
                   {/* ROW 1: Plan, Año, Ciclo, Cuatrimestre */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '30px', padding: '0 10px', gridColumn: '1 / -1' }}>
                     <div>
                       <label style={styles.label}>Plan de Estudios</label>
-                      <input style={styles.input} value={formData.plan} onChange={(e) => updateFormData('plan', e.target.value)} placeholder="Ej: Plan 2023" />
+                      <input style={styles.input} value={formData.plan} onChange={(e) => updateFormData('plan', e.target.value)} placeholder="Ej: Plan 2023" disabled={isDocenteView} />
                     </div>
                     <div>
                       <label style={styles.label}>Año Académico</label>
-                      <input style={styles.input} value={formData.anio} onChange={(e) => updateFormData('anio', e.target.value)} placeholder="Ej: 2024" />
+                      <input style={styles.input} value={formData.anio} onChange={(e) => updateFormData('anio', e.target.value)} placeholder="Ej: 2024" disabled={isDocenteView} />
                     </div>
                     <div>
                       <label style={styles.label}>Ciclo (Año en carrera)</label>
-                      <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} placeholder="Ej: 1º, 2º, 3º" />
+                      <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} placeholder="Ej: 1º, 2º, 3º" disabled={isDocenteView} />
                     </div>
                     <div>
                       <label style={styles.label}>Cuatrimestre *</label>
-                      <select style={styles.input} value={formData.cuatrimestre} onChange={(e) => updateFormData('cuatrimestre', e.target.value)}>
+                      <select style={styles.input} value={formData.cuatrimestre} onChange={(e) => updateFormData('cuatrimestre', e.target.value)} disabled={isDocenteView}>
                         <option value="">Seleccionar...</option>
                         <option>1er Cuatrimestre</option>
                         <option>2do Cuatrimestre</option>
@@ -3625,25 +3803,25 @@ const App = () => {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '20px', padding: '0 10px', gridColumn: '1 / -1' }}>
                     <div>
                       <label style={styles.label}>Carácter</label>
-                      <select style={styles.input} value={formData.caracter} onChange={(e) => updateFormData('caracter', e.target.value)}>
+                      <select style={styles.input} value={formData.caracter} onChange={(e) => updateFormData('caracter', e.target.value)} disabled={isDocenteView}>
                         <option>Obligatoria</option>
                         <option>Optativa</option>
                       </select>
                     </div>
                     <div>
                       <label style={styles.label}>Régimen</label>
-                      <select style={styles.input} value={formData.regimen} onChange={(e) => updateFormData('regimen', e.target.value)}>
+                      <select style={styles.input} value={formData.regimen} onChange={(e) => updateFormData('regimen', e.target.value)} disabled={isDocenteView}>
                         <option>Cuatrimestral</option>
                         <option>Anual</option>
                       </select>
                     </div>
                     <div>
                       <label style={styles.label}>Hs Teóricas</label>
-                      <input style={styles.input} type="number" value={formData.hsTeo} onChange={(e) => updateFormData('hsTeo', e.target.value)} min="0" />
+                      <input style={styles.input} type="number" value={formData.hsTeo} onChange={(e) => updateFormData('hsTeo', e.target.value)} min="0" disabled={isDocenteView} />
                     </div>
                     <div>
                       <label style={styles.label}>Hs Prácticas</label>
-                      <input style={styles.input} type="number" value={formData.hsPrac} onChange={(e) => updateFormData('hsPrac', e.target.value)} min="0" />
+                      <input style={styles.input} type="number" value={formData.hsPrac} onChange={(e) => updateFormData('hsPrac', e.target.value)} min="0" disabled={isDocenteView} />
                     </div>
                     <div>
                       <label style={styles.label}>Total</label>
@@ -3671,7 +3849,7 @@ const App = () => {
               <div style={styles.section}>
                 <h3>Equipo Docente</h3>
                 {equipoDocente.map(doc => {
-                  const suggestions = docenteAutocompleteId === doc.id
+                  const suggestions = !isDocenteView && docenteAutocompleteId === doc.id
                     ? getTeacherSuggestions(doc.nombre)
                     : []
                   return (
@@ -3687,6 +3865,7 @@ const App = () => {
                           }}
                           onFocus={() => setDocenteAutocompleteId(doc.id)}
                           onBlur={() => setTimeout(() => setDocenteAutocompleteId(null), 150)}
+                          disabled={isDocenteView}
                         />
                         {suggestions.length > 0 && (
                           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #ddd', borderRadius: '4px', zIndex: 5, maxHeight: '160px', overflowY: 'auto' }}>
@@ -3703,27 +3882,27 @@ const App = () => {
                           </div>
                         )}
                       </div>
-                      <select style={styles.input} value={doc.categoria} onChange={(e) => updateDocente(doc.id, 'categoria', e.target.value)}>
+                      <select style={styles.input} value={doc.categoria} onChange={(e) => updateDocente(doc.id, 'categoria', e.target.value)} disabled={isDocenteView}>
                         <option>TITULAR</option>
                         <option>ASOCIADO</option>
                         <option>ADJUNTO</option>
                         <option>JTP</option>
                         <option>AYUDANTE 1º</option>
                       </select>
-                      <input style={styles.input} placeholder="Correo" value={doc.correo} onChange={(e) => updateDocente(doc.id, 'correo', e.target.value)} />
-                      <button style={{ ...styles.button, marginRight: 0 }} onClick={() => deleteDocente(doc.id)} disabled={equipoDocente.length === 1}>X</button>
+                      <input style={styles.input} placeholder="Correo" value={doc.correo} onChange={(e) => updateDocente(doc.id, 'correo', e.target.value)} disabled={isDocenteView} />
+                      <button style={{ ...styles.button, marginRight: 0 }} onClick={() => deleteDocente(doc.id)} disabled={equipoDocente.length === 1 || isDocenteView}>X</button>
                     </div>
                   )
                 })}
                 <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
-                  <button style={styles.button} onClick={addDocente}>+ Agregar Docente</button>
+                  <button style={styles.button} onClick={addDocente} disabled={isDocenteView}>+ Agregar Docente</button>
                 </div>
               </div>
 
               {/* CONTENT SECTIONS */}
               <div style={styles.section}>
                 <h3>Contenidos Mínimos *</h3>
-                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.contenidosMin} onChange={(e) => updateFormData('contenidosMin', e.target.value)} />
+                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.contenidosMin} onChange={(e) => updateFormData('contenidosMin', e.target.value)} readOnly={isDocenteView} />
               </div>
 
               {renderCompetencySection({
@@ -4260,6 +4439,7 @@ const App = () => {
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Asignatura</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Carrera</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Creada</th>
+                    <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Ultima edición</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Estado</th>
                     <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #006ba8' }}>Descargar</th>
                   </tr>
@@ -4271,6 +4451,7 @@ const App = () => {
                       <td style={{ padding: '10px' }}>{p.title || 'Sin título'}</td>
                       <td style={{ padding: '10px' }}>{p.career || '-'}</td>
                       <td style={{ padding: '10px' }}>{new Date(p.created_at).toLocaleDateString()}</td>
+                      <td style={{ padding: '10px' }}>{formatDateTime(p.updated_at || p.created_at)}</td>
                       <td style={{ padding: '10px' }}>{p.status || '-'}</td>
                       <td style={{ padding: '10px', textAlign: 'center' }}>
                         <button
@@ -4331,7 +4512,13 @@ const App = () => {
                         Cuatrimestre{getSortIndicator(pendingProposalSort, 'quarter')}
                       </th>
                       <th
-                        style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        style={{ width: '150px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        onClick={() => toggleSort(setPendingProposalSort, 'updated_at')}
+                      >
+                        Ultima edición{getSortIndicator(pendingProposalSort, 'updated_at')}
+                      </th>
+                      <th
+                        style={{ width: '90px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
                         onClick={() => toggleSort(setPendingProposalSort, 'status')}
                       >
                         Estado{getSortIndicator(pendingProposalSort, 'status')}
@@ -4382,6 +4569,14 @@ const App = () => {
                       <th style={{ padding: '6px' }}>
                         <input
                           style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.updated_at}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, updated_at: e.target.value }))}
+                          placeholder="Buscar"
+                        />
+                      </th>
+                      <th style={{ padding: '6px' }}>
+                        <input
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
                           value={pendingProposalFilters.status}
                           onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, status: e.target.value }))}
                           placeholder="Buscar"
@@ -4398,7 +4593,8 @@ const App = () => {
                         <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
-                        <td style={{ padding: '10px' }}>{prop.status || '-'}</td>
+                        <td style={{ padding: '10px' }}>{formatDateTime(prop.updated_at || prop.created_at)}</td>
+                        <td style={{ padding: '10px', width: '90px' }}>{prop.status || '-'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button
                             style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
@@ -4421,13 +4617,15 @@ const App = () => {
                           >
                             ⬇︎
                           </button>
-                          <button
-                            style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
-                            title="Eliminar propuesta"
-                            onClick={() => deleteProposal(prop.id)}
-                          >
-                            🗑︎
-                          </button>
+                          {!isDocenteView && (
+                            <button
+                              style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                              title="Eliminar propuesta"
+                              onClick={() => deleteProposal(prop.id)}
+                            >
+                              🗑︎
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -4439,7 +4637,7 @@ const App = () => {
         )}
 
         {/* IMPORT PROPOSAL */}
-        {activeMenu === 'propuestas' && proposalsMode === 'import' && (
+        {activeMenu === 'propuestas' && proposalsMode === 'import' && !isDocenteView && (
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => {
               setProposalsMode(null)

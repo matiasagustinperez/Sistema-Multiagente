@@ -179,9 +179,11 @@ class ProposalOut(BaseModel):
     minimum_content: Optional[str] = None
     generic_competencies: Optional[str] = None
     specific_competencies: Optional[str] = None
+    teaching_team: Optional[List[TeachingStaff]] = []
     source_type: Optional[str] = None
     status: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True

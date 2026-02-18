@@ -629,7 +629,7 @@ def delete_proposal(proposal_id: int, db: Session = Depends(get_db)):
 @app.get("/proposals", response_model=list[schemas.ProposalOut])
 def list_proposals(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     proposals = db.query(models.Proposal).offset(skip).limit(limit).all()
-    return proposals
+    return [build_proposal_response(db, proposal) for proposal in proposals]
 
 
 @app.get("/competencies", response_model=list[schemas.CompetencyCatalogOut])
