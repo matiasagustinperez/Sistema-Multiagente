@@ -20,6 +20,7 @@ const App = () => {
   const [importLoading, setImportLoading] = useState(false)
   const [importError, setImportError] = useState('')
   const [importPreview, setImportPreview] = useState(null)
+  const [importGdocUrl, setImportGdocUrl] = useState('')
 
   // AI state
   const [aiSection, setAiSection] = useState(null)
@@ -408,7 +409,13 @@ const App = () => {
     }
   }, [activeCareer])
 
-
+  // Reload matriz when competencies change and modal is open
+  useEffect(() => {
+    if (showMatrizModal && editingPlanId && activeCareer) {
+      const matriz = buildCompetencyMatrix(activeCareer, editingPlanId)
+      setMatrizData(matriz)
+    }
+  }, [careerCompetencies, showMatrizModal, editingPlanId, activeCareer])
 
   useEffect(() => {
     const stored = localStorage.getItem('driveSettingsByCareer')
@@ -6217,7 +6224,7 @@ const App = () => {
                         return;
                       }
                       // Validar formato básico de Google Docs
-                      const gdocRegex = /https:\/\/(docs|drive)\.google\.com\/(document\/d|open\?id=|file\/d)\/[\w-]+/;
+                      const gdocRegex = /https:\/\/(docs|drive)\.google\.com\/(document\/d\/[\w-]+|open\?id=[\w-]+|file\/d\/[\w-]+)/;
                       if (!gdocRegex.test(importGdocUrl.trim())) {
                         setImportError('El enlace no parece ser de un documento público de Google Docs');
                         setImportLoading(false);
@@ -6277,8 +6284,6 @@ const App = () => {
                 <p style={{ color: '#999', fontSize: '12px', marginTop: '15px' }}>El sistema extraerá automáticamente los campos de la propuesta de forma similar a la que se generan en el sistema.</p>
               </div>
             ) : (
-              // Estado para Google Docs URL import
-                const [importGdocUrl, setImportGdocUrl] = React.useState('');
               // Previsualización de datos importados
               <div style={{ marginTop: '20px' }}>
                 <div style={{ background: '#e8f5e9', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #4caf50' }}>

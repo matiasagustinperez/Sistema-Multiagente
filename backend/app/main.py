@@ -101,21 +101,7 @@ async def import_proposal_gdoc_url(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error importando desde Google Docs: {str(e)}")
 
-app = FastAPI(title="TesisMCD API")
-
-# Load environment variables from backend/.env
-backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-env_file = os.path.join(backend_dir, '.env')
-load_dotenv(dotenv_path=env_file, override=True)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
-)
+# Load environment variables from backend/.env (if not already loaded)
 
 UPLOAD_FOLDER = os.getenv("LOCAL_UPLOAD_PATH", "./data/uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
