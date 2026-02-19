@@ -108,6 +108,13 @@ const App = () => {
     loading: false,
     error: ''
   })
+  const [driveSettingsByCareer, setDriveSettingsByCareer] = useState({})
+  const [driveSettingsForm, setDriveSettingsForm] = useState({
+    rootFolderUrl: '',
+    pdfFolderUrl: ''
+  })
+  const [driveSettingsError, setDriveSettingsError] = useState('')
+  const [driveSettingsEditing, setDriveSettingsEditing] = useState(false)
   const [teacherCatalogItems, setTeacherCatalogItems] = useState([])
   const [teacherCatalogLoading, setTeacherCatalogLoading] = useState(false)
   const [teacherCatalogError, setTeacherCatalogError] = useState('')
@@ -400,6 +407,91 @@ const App = () => {
       fetchCareerCompetencies(activeCareer)
     }
   }, [activeCareer])
+
+
+
+  useEffect(() => {
+    const stored = localStorage.getItem('driveSettingsByCareer')
+    if (!stored) return
+    try {
+      const parsed = JSON.parse(stored)
+      if (!parsed || typeof parsed !== 'object') return
+      const parsedKeys = Object.keys(parsed)
+      const isLegacyFormat = parsedKeys.length > 0 && parsedKeys.every((key) => careerOptions.includes(key))
+      if (isLegacyFormat) {
+        const migrated = {}
+        parsedKeys.forEach((career) => {
+          const entry = parsed[career] || {}
+          migrated[`${career}::__career__`] = {
+            rootFolderUrl: entry.rootFolderUrl || '',
+            pdfFolderUrl: entry.pdfFolderUrl || ''
+          }
+        })
+        setDriveSettingsByCareer(migrated)
+        localStorage.setItem('driveSettingsByCareer', JSON.stringify(migrated))
+      } else {
+        setDriveSettingsByCareer(parsed)
+      }
+    } catch (err) {
+      console.warn('No se pudieron leer las configuraciones de Drive', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!activeCareer) {
+      return
+    }
+    const planName = getDriveSettingsPlanName(activeCareer, selectedPlanFilterId)
+    const queryPlan = planName ? `&plan_name=${encodeURIComponent(planName)}` : ''
+    const loadDriveSettings = async () => {
+      try {
+        const res = await fetch(`http://localhost:8001/drive-settings?career=${encodeURIComponent(activeCareer)}${queryPlan}`)
+        if (!res.ok) {
+          if (res.status === 404) {
+            return
+          }
+          throw new Error(`Error ${res.status}`)
+        }
+        const data = await res.json()
+        if (!data) {
+          return
+        }
+        setDriveSettingsByCareer((prev) => {
+          const key = getDriveSettingsKey(activeCareer, planName)
+          const next = {
+            ...prev,
+            [key]: {
+              rootFolderUrl: data.root_folder_url || '',
+              pdfFolderUrl: data.pdf_folder_url || ''
+            }
+          }
+          localStorage.setItem('driveSettingsByCareer', JSON.stringify(next))
+          return next
+        })
+      } catch (err) {
+        console.warn('No se pudieron cargar las configuraciones de Drive', err)
+      }
+    }
+    loadDriveSettings()
+  }, [activeCareer, selectedPlanFilterId])
+
+  useEffect(() => {
+    if (!activeCareer) {
+      setDriveSettingsForm({ rootFolderUrl: '', pdfFolderUrl: '' })
+      setDriveSettingsEditing(false)
+      return
+    }
+    const planName = getDriveSettingsPlanName(activeCareer, selectedPlanFilterId)
+    const key = getDriveSettingsKey(activeCareer, planName)
+    const saved = driveSettingsByCareer[key] || {}
+    setDriveSettingsForm({
+      rootFolderUrl: saved.rootFolderUrl || '',
+      pdfFolderUrl: saved.pdfFolderUrl || ''
+    })
+    const hasSaved = !!(saved.rootFolderUrl || saved.pdfFolderUrl)
+    setDriveSettingsEditing(!hasSaved)
+    setDriveSettingsError('')
+  }, [activeCareer, selectedPlanFilterId, driveSettingsByCareer])
 
   useEffect(() => {
     if (!activeCareer) {
@@ -864,6 +956,100 @@ const App = () => {
       hour12: false
     })
     return formatter.format(date).replace('T', ' ')
+  }
+
+  const getDriveSettingsKey = (career, planName) => {
+    if (!career) return ''
+    const normalizedPlan = String(planName || '').trim()
+    return `${career}::${normalizedPlan || '__career__'}`
+  }
+
+  const getDriveSettingsPlanName = (career, planId) => {
+    if (!career) return ''
+    if (!planId) return ''
+    const plan = getPlanById(career, planId)
+    return plan?.name || ''
+  }
+
+  const normalizeDriveUrl = (value) => {
+    const raw = String(value || '').trim()
+    if (!raw) {
+      return ''
+    }
+    if (/^https?:\/\//i.test(raw)) {
+      return raw
+    }
+    if (/^drive\.google\.com/i.test(raw)) {
+      return `https://${raw}`
+    }
+    return raw
+  }
+
+  const openDriveUrl = (value) => {
+    const url = normalizeDriveUrl(value)
+    if (!url) {
+      return
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      setDriveSettingsError('Ingresa una URL valida de Drive')
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const saveDriveSettings = async () => {
+    if (!activeCareer) {
+      setDriveSettingsError('Selecciona una carrera para guardar la configuración')
+      return
+    }
+    const planName = getDriveSettingsPlanName(activeCareer, selectedPlanFilterId)
+    const rootFolderUrl = normalizeDriveUrl(driveSettingsForm.rootFolderUrl)
+    const pdfFolderUrl = normalizeDriveUrl(driveSettingsForm.pdfFolderUrl)
+    if (!rootFolderUrl && !pdfFolderUrl) {
+      setDriveSettingsError('Ingresa al menos una carpeta de Drive')
+      return
+    }
+    if (rootFolderUrl && !/^https?:\/\//i.test(rootFolderUrl)) {
+      setDriveSettingsError('Ingresa una URL valida de Drive')
+      return
+    }
+    if (pdfFolderUrl && !/^https?:\/\//i.test(pdfFolderUrl)) {
+      setDriveSettingsError('Ingresa una URL valida de Drive')
+      return
+    }
+    try {
+      const res = await fetch('http://localhost:8001/drive-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          career: activeCareer,
+          plan_name: planName || null,
+          root_folder_url: rootFolderUrl,
+          pdf_folder_url: pdfFolderUrl || null
+        })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      const key = getDriveSettingsKey(activeCareer, planName)
+      const next = {
+        ...driveSettingsByCareer,
+        [key]: {
+          rootFolderUrl: data.root_folder_url || rootFolderUrl,
+          pdfFolderUrl: data.pdf_folder_url || pdfFolderUrl
+        }
+      }
+      setDriveSettingsByCareer(next)
+      localStorage.setItem('driveSettingsByCareer', JSON.stringify(next))
+      setDriveSettingsError('')
+      setStatusMsg('Configuración de Drive guardada')
+      setStatusType('success')
+      setDriveSettingsEditing(false)
+    } catch (err) {
+      setDriveSettingsError(err.message || 'No se pudo guardar la configuración')
+    }
   }
 
   const openDeleteCatalogModal = async (item) => {
@@ -4344,6 +4530,11 @@ const App = () => {
   const planOptions = activeCareer ? (savedPlans[activeCareer] || []) : []
   const planOptionNames = new Set(planOptions.map((plan) => plan.name))
   const hasCustomPlanOption = isNonEmptyText(formData.plan) && !planOptionNames.has(formData.plan)
+  const drivePlan = activeCareer && selectedPlanFilterId ? getPlanById(activeCareer, selectedPlanFilterId) : null
+  const drivePlanName = drivePlan?.name || ''
+  const driveSettingsKey = activeCareer ? getDriveSettingsKey(activeCareer, drivePlanName) : ''
+  const savedDriveSettings = driveSettingsKey ? (driveSettingsByCareer[driveSettingsKey] || {}) : {}
+  const hasSavedDriveSettings = !!(savedDriveSettings.rootFolderUrl || savedDriveSettings.pdfFolderUrl)
 
   const renderCompetencySection = ({ title, type, required }) => {
     const items = Array.isArray(formData[type]) ? formData[type] : []
@@ -4599,7 +4790,7 @@ const App = () => {
             )}
             
             {/* CARDS SECTION */}
-            <div style={{ display: 'grid', gridTemplateColumns: isDocenteView ? '1fr' : '1fr 1fr 1fr', gap: '20px', marginBottom: '30px', marginTop: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isDocenteView ? '1fr' : 'repeat(4, 1fr)', gap: '20px', marginBottom: '30px', marginTop: '20px' }}>
               {/* Card 1: Crear Propuesta */}
               {!isDocenteView && (
                 <div style={{ 
@@ -4659,6 +4850,25 @@ const App = () => {
                   <div style={{ fontSize: '32px', marginBottom: '10px' }}>📂</div>
                   <h3 style={{ color: '#00a854', margin: '0 0 10px 0' }}>Importar Propuesta</h3>
                   <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Importar desde PDF o DOC</p>
+                </div>
+              )}
+
+              {!isDocenteView && (
+                <div style={{ 
+                  border: '2px solid #6b7280', 
+                  borderRadius: '8px', 
+                  padding: '20px', 
+                  textAlign: 'center', 
+                  cursor: 'pointer', 
+                  transition: 'all 0.3s ease',
+                  backgroundColor: '#f3f4f6'
+                }}
+                onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(107, 114, 128, 0.2)'; e.target.style.backgroundColor = '#eef2f7'; }}
+                onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f3f4f6'; }}
+                onClick={() => setActiveMenu('configuracion')}>
+                  <div style={{ fontSize: '32px', marginBottom: '10px' }}>⚙️</div>
+                  <h3 style={{ color: '#4b5563', margin: '0 0 10px 0' }}>Configuración Drive</h3>
+                  <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Definir carpetas por carrera</p>
                 </div>
               )}
             </div>
@@ -4839,6 +5049,119 @@ const App = () => {
                 </div>
               ) : (
                 <p style={{ color: '#999', fontStyle: 'italic' }}>No hay propuestas cargadas aún.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeMenu === 'configuracion' && !isDocenteView && (
+          <div style={styles.section}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ marginBottom: '4px' }}>Configuración de Drive</h2>
+                <div style={{ color: '#666' }}>Aplica a la carrera activa</div>
+              </div>
+              <button
+                style={{ ...styles.button, background: '#999' }}
+                onClick={() => setActiveMenu('propuestas')}
+              >
+                ← Volver
+              </button>
+            </div>
+
+            <div style={{ marginTop: '16px', background: '#f8f8f8', padding: '16px', borderRadius: '8px', border: '1px solid #ddd' }}>
+              <div style={{ marginBottom: '12px', color: '#1a3d5c', fontWeight: 600 }}>
+                Carrera: {activeCareer || 'Sin seleccionar'} {drivePlanName && `→ Plan: ${drivePlanName}`}
+              </div>
+              {(!hasSavedDriveSettings || driveSettingsEditing) ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                  <div>
+                    <label style={styles.label}>Carpeta Raíz (Drive)</label>
+                    <input
+                      style={styles.input}
+                      placeholder="https://drive.google.com/drive/folders/..."
+                      value={driveSettingsForm.rootFolderUrl}
+                      onChange={(e) => setDriveSettingsForm((prev) => ({ ...prev, rootFolderUrl: e.target.value }))}
+                    />
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                      <button
+                        style={{ ...styles.button, background: '#455a64' }}
+                        onClick={() => openDriveUrl(driveSettingsForm.rootFolderUrl)}
+                        disabled={!driveSettingsForm.rootFolderUrl}
+                        title={!driveSettingsForm.rootFolderUrl ? 'No configurado' : ''}
+                      >
+                        {driveSettingsForm.rootFolderUrl ? 'Abrir carpeta' : 'Abrir carpeta (no configurado)'}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label style={styles.label}>Carpeta PDF (Drive)</label>
+                    <input
+                      style={styles.input}
+                      placeholder="https://drive.google.com/drive/folders/..."
+                      value={driveSettingsForm.pdfFolderUrl}
+                      onChange={(e) => setDriveSettingsForm((prev) => ({ ...prev, pdfFolderUrl: e.target.value }))}
+                    />
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                      <button
+                        style={{ ...styles.button, background: '#455a64' }}
+                        onClick={() => openDriveUrl(driveSettingsForm.pdfFolderUrl)}
+                        disabled={!driveSettingsForm.pdfFolderUrl}
+                        title={!driveSettingsForm.pdfFolderUrl ? 'No configurado' : ''}
+                      >
+                        {driveSettingsForm.pdfFolderUrl ? 'Abrir carpeta PDF' : 'Abrir carpeta PDF (no configurado)'}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                    {hasSavedDriveSettings && (
+                      <button
+                        style={{ ...styles.button, background: '#999' }}
+                        onClick={() => {
+                          setDriveSettingsForm({
+                            rootFolderUrl: savedDriveSettings.rootFolderUrl || '',
+                            pdfFolderUrl: savedDriveSettings.pdfFolderUrl || ''
+                          })
+                          setDriveSettingsError('')
+                          setDriveSettingsEditing(false)
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                    <button style={{ ...styles.button, background: '#4caf50' }} onClick={saveDriveSettings}>
+                      Guardar configuración
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    style={{ ...styles.button, background: '#455a64' }}
+                    onClick={() => openDriveUrl(savedDriveSettings.rootFolderUrl)}
+                    disabled={!savedDriveSettings.rootFolderUrl}
+                    title={!savedDriveSettings.rootFolderUrl ? 'No configurado' : ''}
+                  >
+                    {savedDriveSettings.rootFolderUrl ? 'Abrir carpeta' : 'Abrir carpeta (no configurado)'}
+                  </button>
+                  <button
+                    style={{ ...styles.button, background: '#455a64' }}
+                    onClick={() => openDriveUrl(savedDriveSettings.pdfFolderUrl)}
+                    disabled={!savedDriveSettings.pdfFolderUrl}
+                    title={!savedDriveSettings.pdfFolderUrl ? 'No configurado' : ''}
+                  >
+                    {savedDriveSettings.pdfFolderUrl ? 'Abrir carpeta PDF' : 'Abrir carpeta PDF (no configurado)'}
+                  </button>
+                  <button
+                    style={{ ...styles.button, background: '#999' }}
+                    onClick={() => setDriveSettingsEditing(true)}
+                  >
+                    Editar
+                  </button>
+                </div>
+              )}
+              {driveSettingsError && (
+                <div style={{ color: '#b00020', marginTop: '10px' }}>{driveSettingsError}</div>
               )}
             </div>
           </div>

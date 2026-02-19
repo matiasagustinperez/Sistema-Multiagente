@@ -21,6 +21,7 @@ def init_db():
     ensure_teachers_columns()
     ensure_study_plans_columns()
     ensure_competencies_columns()
+    ensure_drive_settings_columns()
 
 
 def ensure_proposals_columns():
@@ -77,6 +78,53 @@ def ensure_competencies_columns():
         columns = {row[1] for row in result}
         if "plan_name" not in columns:
             conn.execute(text("ALTER TABLE competency_catalog ADD COLUMN plan_name VARCHAR(255)"))
+            conn.commit()
+
+
+def ensure_drive_settings_columns():
+    """Ensure drive_settings table has correct schema (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        # Check if table exists
+        result = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='drive_settings'"
+        ))
+        table_exists = result.fetchone() is not None
+        
+        if table_exists:
+            # Check if columns have correct nullable settings
+            result = conn.execute(text("PRAGMA table_info(drive_settings)"))
+            columns = {row[1]: (row[3], row[4]) for row in result}  # name: (notnull, default)
+            
+            # If root_folder_url or pdf_folder_url are NOT NULL, drop and recreate
+            needs_recreation = False
+            if "root_folder_url" in columns and columns["root_folder_url"][0]:  # 1 means NOT NULL
+                needs_recreation = True
+            if "pdf_folder_url" in columns and columns["pdf_folder_url"][0]:
+                needs_recreation = True
+            
+            if needs_recreation:
+                # Drop and recreate table
+                conn.execute(text("DROP TABLE IF EXISTS drive_settings"))
+                conn.commit()
+                table_exists = False
+        
+        if not table_exists:
+            # Create table with correct schema
+            conn.execute(text("""
+                CREATE TABLE drive_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    career VARCHAR(255) NOT NULL,
+                    plan_name VARCHAR(255),
+                    root_folder_url VARCHAR(1000),
+                    pdf_folder_url VARCHAR(1000),
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            conn.execute(text("CREATE INDEX idx_drive_settings_career ON drive_settings(career)"))
+            conn.execute(text("CREATE INDEX idx_drive_settings_plan ON drive_settings(plan_name)"))
             conn.commit()
 
 def get_db():

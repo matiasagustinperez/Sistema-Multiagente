@@ -237,3 +237,15 @@ class StudySubjectPrerequisite(Base):
     id = Column(Integer, primary_key=True, index=True)
     subject_id = Column(Integer, ForeignKey("study_subjects.id"), nullable=False, index=True)
     prerequisite_id = Column(Integer, ForeignKey("study_subjects.id"), nullable=False, index=True)
+
+
+class DriveSettings(Base):
+    __tablename__ = "drive_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career = Column(String(255), nullable=False, index=True)
+    plan_name = Column(String(255), nullable=True, index=True)
+    root_folder_url = Column(String(1000), nullable=True)
+    pdf_folder_url = Column(String(1000), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

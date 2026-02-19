@@ -307,3 +307,28 @@ class StudyPlanStorageOut(StudyPlanStorageIn):
 
     class Config:
         from_attributes = True
+
+
+class DriveSettingsBase(BaseModel):
+    career: str
+    plan_name: Optional[str] = None
+    root_folder_url: Optional[str] = None
+    pdf_folder_url: Optional[str] = None
+
+
+class DriveSettingsCreate(DriveSettingsBase):
+    pass
+
+
+class DriveSettingsUpdate(BaseModel):
+    root_folder_url: Optional[str] = None
+    pdf_folder_url: Optional[str] = None
+
+
+class DriveSettingsOut(DriveSettingsBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

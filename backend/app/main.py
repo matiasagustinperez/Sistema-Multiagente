@@ -416,6 +416,54 @@ def delete_study_plan_storage(plan_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": plan_id}
 
 
+@app.get("/drive-settings", response_model=schemas.DriveSettingsOut | None)
+def get_drive_settings(career: str, plan_name: str | None = None, db: Session = Depends(get_db)):
+    if not career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    query = db.query(models.DriveSettings).filter(models.DriveSettings.career == career)
+    if plan_name:
+        query = query.filter(models.DriveSettings.plan_name == plan_name)
+    else:
+        query = query.filter(models.DriveSettings.plan_name.is_(None))
+    settings = query.first()
+    if not settings:
+        return None
+    return settings
+
+
+@app.put("/drive-settings", response_model=schemas.DriveSettingsOut)
+def upsert_drive_settings(payload: schemas.DriveSettingsCreate, db: Session = Depends(get_db)):
+    career = (payload.career or "").strip()
+    plan_name = (payload.plan_name or "").strip() or None
+    root_folder_url = (payload.root_folder_url or "").strip() or None
+    pdf_folder_url = (payload.pdf_folder_url or "").strip() or None
+    if not career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not root_folder_url and not pdf_folder_url:
+        raise HTTPException(status_code=400, detail="At least one Drive URL is required")
+    query = db.query(models.DriveSettings).filter(models.DriveSettings.career == career)
+    if plan_name:
+        query = query.filter(models.DriveSettings.plan_name == plan_name)
+    else:
+        query = query.filter(models.DriveSettings.plan_name.is_(None))
+    settings = query.first()
+    if not settings:
+        settings = models.DriveSettings(
+            career=career,
+            plan_name=plan_name,
+            root_folder_url=root_folder_url,
+            pdf_folder_url=pdf_folder_url,
+        )
+    else:
+        settings.plan_name = plan_name
+        settings.root_folder_url = root_folder_url
+        settings.pdf_folder_url = pdf_folder_url
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
 @app.get("/study-plans/{plan_id}", response_model=schemas.StudyPlanDetail)
 def get_study_plan(plan_id: int, db: Session = Depends(get_db)):
     plan = db.query(models.StudyPlan).filter(models.StudyPlan.id == plan_id).first()
