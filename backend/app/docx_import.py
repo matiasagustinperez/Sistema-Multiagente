@@ -305,17 +305,21 @@ def extract_section_tables(doc: Document, section_start_idx: int, section_end_id
 def extract_generic_competencies(text: str) -> List[Dict[str, str]]:
     """
     Extrae Competencias Genéricas del texto usando un enfoque basado en bloques.
+    Captura TODAS las variantes de competencias genéricas:
+    - CGT (Competencias Genéricas Transversales)  
+    - CGS (Competencias Genéricas Específicas)
+    - Cualquier CG[LETRA][NÚMERO]
+    
     Soporta formatos:
     - Línea separada: "- CGT1 - Descripción - Nivel"
     - Línea única: "CGT1 - Descripción - Nivel - CGT2 - Descripción - Nivel - ..."
-    Retorna: [{'code': 'CGT1', 'description': 'Descripción', 'level': 'Nivel'}, ...]
     
-    ESTRATEGIA MEJORADA (similar a RAs): Buscar todos los códigos primero, 
-    luego extraer los datos entre ellos para evitar capturar a través de límites.
+    Retorna: [{'code': 'CGT1', 'description': 'Descripción', 'level': 'Nivel'}, ...]
     """
     competencies = []
     
     # Paso 1: Encontrar todos los códigos CG en el texto
+    # Patrón: CG + [cualquier letra: T, S, etc.] + [números]
     code_pattern = r'([Cc][Gg][A-Za-z]\d+)'
     codes = []
     for match in re.finditer(code_pattern, text):
@@ -512,6 +516,7 @@ def extract_competencies_from_table(doc: Document, table_idx: int) -> Tuple[List
     """
     Extrae competencias genéricas y específicas desde una tabla específica.
     La tabla generalmente está entre 'OBJETIVOS' y 'CONTENIDOS DE LA ASIGNATURA'.
+    Captura TODAS las variantes genéricas: CGT, CGS, etc.
     Usa enfoque basado en bloques (similar a RAs) para evitar capturar entre límites.
     """
     gen_comp = []
@@ -529,17 +534,17 @@ def extract_competencies_from_table(doc: Document, table_idx: int) -> Tuple[List
             if not text:
                 continue
             
-            # ===  COMPETENCIAS GENÉRICAS ===
-            # Paso 1: Encontrar todos los códigos CGT
-            cgt_codes = []
-            for match in re.finditer(r'([Cc][Gg][Tt]\d+)', text):
-                cgt_codes.append((match.group(1), match.start(), match.end()))
+            # ===  COMPETENCIAS GENÉRICAS (CGT, CGS, y cualquier CG[LETRA]) ===
+            # Paso 1: Encontrar todos los códigos CG (CGT, CGS, CGA, etc.)
+            cg_codes = []
+            for match in re.finditer(r'([Cc][Gg][A-Za-z]\d+)', text):
+                cg_codes.append((match.group(1), match.start(), match.end()))
             
             # Paso 2: Extraer para cada código
-            for idx, (code, code_start, code_end) in enumerate(cgt_codes):
+            for idx, (code, code_start, code_end) in enumerate(cg_codes):
                 # El bloque va desde después del código hasta antes del siguiente código
-                if idx < len(cgt_codes) - 1:
-                    next_code_start = cgt_codes[idx + 1][1]
+                if idx < len(cg_codes) - 1:
+                    next_code_start = cg_codes[idx + 1][1]
                     block_text = text[code_end:next_code_start]
                 else:
                     block_text = text[code_end:]
