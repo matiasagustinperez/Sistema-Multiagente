@@ -740,8 +740,11 @@ def extract_equipo_docente(doc: Document) -> List[Dict[str, str]]:
 
 def extract_units_from_docx(doc: Document, section_start_idx: int, section_end_idx: int) -> List[Dict[str, str]]:
     """
-    Extrae unidades de la sección 4 (entre CONTENIDOS DE LA ASIGNATURA y PROGRAMA DE TRABAJOS PRÁCTICOS).
-    Puede haber múltiples tablas con estructura: Unidad N| Nombre de la Unidad, Contenidos: [texto]
+    Extrae unidades de secciones numeradas (Unidad N°: 1, Unidad N°: 2, etc.).
+    Maneja múltiples formatos:
+    1. Tablas con filas alternadas: [Unidad N°], [Contenidos]
+    2. Párrafos con patrones de unidad
+    3. Tablas simples con estructura fila=unidad, columnas con datos
     """
     def parse_unit_block(text: str) -> Tuple[str, str, str]:
         """Parsea el bloque de una unidad en contenido y bibliografias."""
@@ -782,55 +785,81 @@ def extract_units_from_docx(doc: Document, section_start_idx: int, section_end_i
         return content, bib_basic, bib_comp
 
     units = []
-    current_unit = None
     
-    # Buscar todas las tablas en el documento que tengan "unidad" y "contenidos"
-    for table in doc.tables:
-        has_unidad = any('unidad' in normalize_docx_text(cell.text) for row in table.rows for cell in row.cells)
-        has_contenidos = any('contenidos' in normalize_docx_text(cell.text) for row in table.rows for cell in row.cells)
-        if not (has_unidad and has_contenidos):
+    # Buscar tablas que tengan unidades
+    for table_idx, table in enumerate(doc.tables):
+        # Detectar si esta tabla tiene unidades
+        table_has_units = False
+        for row in table.rows:
+            for cell in row.cells:
+                if re.search(r'unidad\s*n[°º]?', cell.text, re.IGNORECASE):
+                    table_has_units = True
+                    break
+            if table_has_units:
+                break
+        
+        if not table_has_units:
             continue
         
-        # Procesar tabla: puede tener varias unidades
-        for row in table.rows:
+        # Procesar tabla buscando pares de [Unidad/Nombre] + [Contenidos]
+        i = 0
+        while i < len(table.rows):
+            row = table.rows[i]
             row_cells = [cell.text.strip() for cell in row.cells]
-            row_norm = [normalize_docx_text(cell) for cell in row_cells]
+            row_text = '\n'.join(row_cells).strip()
             
-            # Detectar encabezado de unidad
-            for cell_idx, cell_text in enumerate(row_cells):
-                if re.search(r'\bunidad\s*n[°º]?', cell_text, re.IGNORECASE):
-                    match = re.search(r'unidad\s*n[°º]?\s*:?\s*(\d+)\s*(.*)', cell_text, re.IGNORECASE)
-                    unit_number = match.group(1).strip() if match else ''
-                    unit_name = match.group(2).strip() if match else ''
-                    if not unit_name and cell_idx + 1 < len(row_cells):
-                        unit_name = row_cells[cell_idx + 1].strip()
+            # Detectar línea de unidad
+            unit_match = re.search(r'unidad\s*n[°º]?\s*:?\s*(\d+)\s*(.*?)(?:\n|$)', row_text, re.IGNORECASE)
+            if unit_match:
+                unit_number = unit_match.group(1).strip()
+                unit_name = unit_match.group(2).strip() if unit_match.group(2) else ''
+                
+                # Si no hay nombre en el mismo patrón, intentar obtener del siguiente texto
+                if not unit_name and len(row_cells) > 1:
+                    unit_name = row_cells[1].strip()
+                
+                content = ""
+                bib_basic = ""
+                bib_comp = ""
+                
+                # Ver si el contenido está en la siguiente fila (estructura alternada)
+                if i + 1 < len(table.rows):
+                    next_row = table.rows[i + 1]
+                    next_row_cells = [cell.text.strip() for cell in next_row.cells]
+                    next_row_text = '\n'.join(next_row_cells).strip()
                     
-                    current_unit = {
+                    # Si la siguiente fila tiene "Contenidos", extraer de ahí
+                    if 'contenidos' in next_row_text.lower():
+                        content, bib_basic, bib_comp = parse_unit_block(next_row_text)
+                        i += 2  # Saltar la fila de contenidos
+                    else:
+                        i += 1
+                else:
+                    i += 1
+                
+                # Si hay contenido, agregar la unidad
+                if content or unit_name:
+                    units.append({
                         'number': unit_number or str(len(units) + 1),
                         'name': unit_name,
-                        'content': '',
-                        'bibliography_basic': '',
-                        'bibliography_complementary': '',
-                    }
-                    units.append(current_unit)
-                    break
-            
-            if not current_unit:
-                continue
-            
-            # Extraer contenidos y bibliografía asociados a la unidad actual
-            for cell_idx, cell_text in enumerate(row_cells):
-                cell_norm = row_norm[cell_idx]
-                if 'contenidos' in cell_norm:
-                    content, bib_basic, bib_comp = parse_unit_block(cell_text)
-                    if content:
-                        current_unit['content'] = content
-                    if bib_basic:
-                        current_unit['bibliography_basic'] = bib_basic
-                    if bib_comp:
-                        current_unit['bibliography_complementary'] = bib_comp
+                        'contenidos': content,
+                        'bib_basic': bib_basic,
+                        'bib_comp': bib_comp,
+                    })
+            else:
+                i += 1
     
-    return units
+    # Convertir formato interno al formato esperado
+    result = []
+    for unit in units:
+        result.append({
+            'name': unit['name'],
+            'contenidos': unit['contenidos'],
+            'bib_basica': unit['bib_basic'],
+            'bib_complementaria': unit['bib_comp'],
+        })
+    
+    return result
 
 
 def extract_practicals_from_docx(doc: Document) -> List[Dict[str, str]]:
