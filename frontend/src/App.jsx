@@ -6203,11 +6203,82 @@ const App = () => {
                     style={{ marginTop: '10px', padding: '5px' }}
                   />
                 </div>
+                <div style={{ marginTop: '30px', borderTop: '1px solid #d0e6d0', paddingTop: '20px' }}>
+                  <p style={{ color: '#00a854', fontWeight: 'bold', marginBottom: '8px' }}>O importa desde Google Docs (público)</p>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    setImportError('');
+                    setImportLoading(true);
+                    setImportPreview(null);
+                    try {
+                      if (!importGdocUrl.trim()) {
+                        setImportError('Pega el enlace público de Google Docs');
+                        setImportLoading(false);
+                        return;
+                      }
+                      // Validar formato básico de Google Docs
+                      const gdocRegex = /https:\/\/(docs|drive)\.google\.com\/(document\/d|open\?id=|file\/d)\/[\w-]+/;
+                      if (!gdocRegex.test(importGdocUrl.trim())) {
+                        setImportError('El enlace no parece ser de un documento público de Google Docs');
+                        setImportLoading(false);
+                        return;
+                      }
+                      const res = await fetch('http://localhost:8001/proposals/import-gdoc-url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: importGdocUrl.trim() })
+                      });
+                      if (!res.ok) {
+                        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }));
+                        throw new Error(errorData.detail || `Error ${res.status}`);
+                      }
+                      const result = await res.json();
+                      if (result.success) {
+                        setImportPreview(result);
+                        setStatusMsg('Documento importado exitosamente');
+                        setStatusType('success');
+                      } else {
+                        throw new Error(result.error || 'Error desconocido');
+                      }
+                    } catch (err) {
+                      const msg = err.message === 'Failed to fetch' 
+                        ? 'No hay conexión con el Backend (8001)' 
+                        : err.message;
+                      setImportError('Error al importar: ' + msg);
+                      setStatusMsg('Error al importar: ' + msg);
+                      setStatusType('error');
+                    } finally {
+                      setImportLoading(false);
+                    }
+                  }}>
+                    <input
+                      type="text"
+                      placeholder="Pega el enlace público de Google Docs"
+                      value={importGdocUrl || ''}
+                      onChange={e => setImportGdocUrl(e.target.value)}
+                      disabled={importLoading}
+                      style={{ width: '100%', padding: '8px', border: '1px solid #b2dfdb', borderRadius: '4px', marginBottom: '8px' }}
+                    />
+                    <button
+                      type="submit"
+                      style={{ ...styles.button, background: '#00a854', color: '#fff', marginRight: 0 }}
+                      disabled={importLoading}
+                    >
+                      Importar desde Google Docs
+                    </button>
+                  </form>
+                  <p style={{ color: '#999', fontSize: '12px', marginTop: '10px' }}>
+                    El documento debe ser público o tener permisos de "Cualquiera con el enlace".<br />
+                    Se descargará como DOCX y se procesará igual que un archivo subido.
+                  </p>
+                </div>
                 {importLoading && <p style={{ color: '#00a854', marginTop: '10px' }}>Procesando archivo...</p>}
                 {importError && <p style={{ color: '#d32f2f', marginTop: '10px' }}>{importError}</p>}
                 <p style={{ color: '#999', fontSize: '12px', marginTop: '15px' }}>El sistema extraerá automáticamente los campos de la propuesta de forma similar a la que se generan en el sistema.</p>
               </div>
             ) : (
+              // Estado para Google Docs URL import
+                const [importGdocUrl, setImportGdocUrl] = React.useState('');
               // Previsualización de datos importados
               <div style={{ marginTop: '20px' }}>
                 <div style={{ background: '#e8f5e9', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #4caf50' }}>

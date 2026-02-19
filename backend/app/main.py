@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Body
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,6 +16,90 @@ import tempfile
 import unicodedata
 import re
 from io import BytesIO
+import requests
+
+app = FastAPI(title="TesisMCD API")
+
+# Load environment variables from backend/.env
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_file = os.path.join(backend_dir, '.env')
+load_dotenv(dotenv_path=env_file, override=True)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Google Docs import logic and endpoint ---
+def get_docx_from_gdoc_url(gdoc_url: str) -> bytes:
+    """
+    Given a public Google Docs URL, convert to export DOCX and download the file content as bytes.
+    """
+    # Accept both https://docs.google.com/document/d/ID/edit and https://drive.google.com/open?id=ID
+    doc_id = None
+    # Try to extract from /d/{id}/
+    m = re.search(r"/d/([\w-]+)", gdoc_url)
+    if m:
+        doc_id = m.group(1)
+    else:
+        # Try to extract from ?id={id}
+        m = re.search(r"[?&]id=([\w-]+)", gdoc_url)
+        if m:
+            doc_id = m.group(1)
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="No se pudo extraer el ID del documento de Google Docs.")
+    export_url = f"https://docs.google.com/document/d/{doc_id}/export?format=docx"
+    resp = requests.get(export_url)
+    if resp.status_code != 200 or not resp.content or resp.headers.get('Content-Type','').find('application/vnd.openxmlformats-officedocument.wordprocessingml.document') == -1:
+        raise HTTPException(status_code=400, detail="No se pudo descargar el DOCX desde Google Docs. ¿El documento es público?")
+    return resp.content
+
+@app.post("/proposals/import-gdoc-url")
+async def import_proposal_gdoc_url(
+    url: str = Body(..., embed=True, description="URL pública de Google Docs")
+):
+    """
+    Importa una propuesta desde un Google Docs público (URL), descargando como DOCX y extrayendo los datos.
+    Retorna JSON para previsualización.
+    """
+    try:
+        docx_bytes = get_docx_from_gdoc_url(url)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            tmp.write(docx_bytes)
+            tmp_path = tmp.name
+        try:
+            extracted_data = import_proposal_from_docx(tmp_path, "imported_from_gdoc.docx")
+            return {
+                "success": True,
+                "data": extracted_data,
+                "preview": {
+                    "career": extracted_data.get('career', ''),
+                    "subject": extracted_data.get('subject', ''),
+                    "teachers": extracted_data.get('teachers', ''),
+                    "year": extracted_data.get('year_of_career', ''),
+                    "quarter": extracted_data.get('quarter', ''),
+                    "total_hours": extracted_data.get('total_hours', ''),
+                    "theoretical_hours": extracted_data.get('theoretical_hours', ''),
+                    "practical_hours": extracted_data.get('practical_hours', ''),
+                    "weekly_hours": extracted_data.get('weekly_hours', ''),
+                    "regime": extracted_data.get('regime', ''),
+                    "units_count": len(extracted_data.get('units', [])),
+                    "practicals_count": len(extracted_data.get('practicals', [])),
+                    "ra_count": len(extracted_data.get('learning_outcomes', [])),
+                    "generic_comp_count": len(extracted_data.get('generic_competencies', [])),
+                    "specific_comp_count": len(extracted_data.get('specific_competencies', [])),
+                }
+            }
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error importando desde Google Docs: {str(e)}")
 
 app = FastAPI(title="TesisMCD API")
 
