@@ -86,8 +86,8 @@ const App = () => {
   const [catalogCareer, setCatalogCareer] = useState('')
   const [catalogType, setCatalogType] = useState('generic')
   const [catalogItems, setCatalogItems] = useState([])
-  const [catalogFormGeneric, setCatalogFormGeneric] = useState({ code: '', description: '' })
-  const [catalogFormSpecific, setCatalogFormSpecific] = useState({ code: '', description: '' })
+  const [catalogFormGeneric, setCatalogFormGeneric] = useState({ code: '', description: '', plan_name: '' })
+  const [catalogFormSpecific, setCatalogFormSpecific] = useState({ code: '', description: '', plan_name: '' })
   const [catalogEditId, setCatalogEditId] = useState(null)
   const [catalogEditForm, setCatalogEditForm] = useState({ code: '', description: '' })
   const [catalogLoading, setCatalogLoading] = useState(false)
@@ -138,6 +138,7 @@ const App = () => {
     academic_year: '',
     year_of_career: '',
     quarter: '',
+    plan: '',
     updated_at: '',
     status: ''
   })
@@ -148,6 +149,7 @@ const App = () => {
     academic_year: '',
     year_of_career: '',
     quarter: '',
+    plan: '',
     updated_at: '',
     status: ''
   })
@@ -159,15 +161,183 @@ const App = () => {
     email: ''
   })
   const [teacherTableSort, setTeacherTableSort] = useState({ key: '', direction: 'asc' })
-  const [genericCompetencyFilters, setGenericCompetencyFilters] = useState({ code: '', description: '' })
+  const [genericCompetencyFilters, setGenericCompetencyFilters] = useState({ code: '', description: '', plan: '' })
   const [genericCompetencySort, setGenericCompetencySort] = useState({ key: '', direction: 'asc' })
-  const [specificCompetencyFilters, setSpecificCompetencyFilters] = useState({ code: '', description: '' })
+  const [specificCompetencyFilters, setSpecificCompetencyFilters] = useState({ code: '', description: '', plan: '' })
   const [specificCompetencySort, setSpecificCompetencySort] = useState({ key: '', direction: 'asc' })
+  const [competencyPlanMappedByCareer, setCompetencyPlanMappedByCareer] = useState({})
+  
+  // Study Plan state
+  const [planName, setPlanName] = useState('')
+  const [planYears, setPlanYears] = useState([])
+  const [planError, setPlanError] = useState('')
+  const [savedPlans, setSavedPlans] = useState({}) // {careerId: [{id, name, is_active, terms}]}
+  const [activePlanId, setActivePlanId] = useState(null)
+  const [selectedPlanFilterId, setSelectedPlanFilterId] = useState(null)
+  const [planMode, setPlanMode] = useState('list') // 'view', 'edit', 'new', 'list'
+  const [editingPlanId, setEditingPlanId] = useState(null)
+  const [correlativeMode, setCorrelativeMode] = useState(false)
+  const [selectedSubjectForCorrelatives, setSelectedSubjectForCorrelatives] = useState(null)
+  const [confirmActivePlanId, setConfirmActivePlanId] = useState(null)
+  const [showConfirmDelete, setShowConfirmDelete] = useState(null)
+  const [showDuplicatePlanModal, setShowDuplicatePlanModal] = useState(false)
+  const [duplicatePlanTarget, setDuplicatePlanTarget] = useState(null)
+  const [duplicatePlanName, setDuplicatePlanName] = useState('')
+  const [duplicatePlanError, setDuplicatePlanError] = useState('')
+  const [showPlanNameDuplicateModal, setShowPlanNameDuplicateModal] = useState(false)
+  const [planNameDuplicateValue, setPlanNameDuplicateValue] = useState('')
+  const [planNameDuplicateAcknowledged, setPlanNameDuplicateAcknowledged] = useState('')
+  const [isPlanNameDuplicate, setIsPlanNameDuplicate] = useState(false)
+  const [subjectAutocompleteQuery, setSubjectAutocompleteQuery] = useState('')
+  const [subjectAutocompleteFocus, setSubjectAutocompleteFocus] = useState(false)
+
+  // Matriz de Tributación state
+  const [showMatrizModal, setShowMatrizModal] = useState(false)
+  const [matrizData, setMatrizData] = useState(null)
+  const [matrixColumnFilters, setMatrixColumnFilters] = useState({})
+
+  const isPlanNameTaken = (career, name, excludeId = null) => {
+    const normalized = String(name || '').trim().toLowerCase()
+    if (!career || !normalized) return false
+    return (savedPlans[career] || []).some((plan) => {
+      if (excludeId != null && plan.id === excludeId) return false
+      return String(plan.name || '').trim().toLowerCase() === normalized
+    })
+  }
+
+  useEffect(() => {
+    const isDuplicate = isPlanNameTaken(activeCareer, planName, editingPlanId)
+    setIsPlanNameDuplicate(isDuplicate)
+    if (!isDuplicate) {
+      setPlanNameDuplicateAcknowledged('')
+      setPlanNameDuplicateValue('')
+    }
+  }, [activeCareer, planName, editingPlanId, savedPlans])
+
+  useEffect(() => {
+    const normalizedPlanName = String(planName || '').trim().toLowerCase()
+    if (!normalizedPlanName || !isPlanNameDuplicate) return
+    if (normalizedPlanName === planNameDuplicateAcknowledged) return
+    setPlanNameDuplicateValue(String(planName || '').trim())
+    setShowPlanNameDuplicateModal(true)
+  }, [isPlanNameDuplicate, planName, planNameDuplicateAcknowledged])
+
+  const toggleMatrixColumnFilter = (key, level) => {
+    setMatrixColumnFilters((prev) => {
+      const current = new Set(prev[key] || [])
+      if (current.has(level)) {
+        current.delete(level)
+      } else {
+        current.add(level)
+      }
+      return { ...prev, [key]: Array.from(current) }
+    })
+  }
+
+  const clearMatrixColumnFilter = (key) => {
+    setMatrixColumnFilters((prev) => {
+      if (!prev[key]) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }
+
+  const getMatrixColumnLevels = (type, compKey) => {
+    if (!matrizData) return []
+    const levels = new Set()
+    matrizData.subjects.forEach((subject) => {
+      const subjectMatrix = matrizData.matrix[subject.id]
+      if (!subjectMatrix) return
+      const level = type === 'generic'
+        ? subjectMatrix.generic[compKey]
+        : subjectMatrix.specific[compKey]
+      if (level !== undefined && level !== null) levels.add(level)
+    })
+    return Array.from(levels).sort((a, b) => a - b)
+  }
+
+  const getMatrixLevel = (subjectMatrix, type, compKey) => {
+    if (!subjectMatrix) return 0
+    if (type === 'generic') {
+      return subjectMatrix.generic[compKey] ?? 0
+    }
+    return subjectMatrix.specific[compKey] ?? 0
+  }
+
+  const matrixActiveFilters = matrizData
+    ? Object.entries(matrixColumnFilters).filter(([, levels]) => Array.isArray(levels) && levels.length > 0)
+    : []
+
+  const matrixFilteredSubjects = matrizData
+    ? (matrixActiveFilters.length === 0
+      ? matrizData.subjects
+      : matrizData.subjects.filter((subject) => {
+          const subjectMatrix = matrizData.matrix[subject.id]
+          return matrixActiveFilters.every(([filterKey, levels]) => {
+            const [prefix, compKey] = filterKey.split(':')
+            const type = prefix === 'gen' ? 'generic' : 'specific'
+            const level = getMatrixLevel(subjectMatrix, type, compKey)
+            return levels.includes(level)
+          })
+        }))
+    : []
 
   useEffect(() => {
     fetchProposals()
     fetchTeacherTotals()
   }, [])
+
+  // Cargar planes de estudios guardados (backend)
+  useEffect(() => {
+    if (!activeCareer) {
+      setSelectedPlanFilterId(null)
+      setPlanMode('list')
+      setPlanName('')
+      setPlanYears([])
+      setEditingPlanId(null)
+      setPlanError('')
+      return
+    }
+
+    fetchStudyPlans(activeCareer)
+    setPlanName('')
+    setPlanYears([])
+    setEditingPlanId(null)
+    setPlanError('')
+  }, [activeCareer])
+
+  // Reset all form data when changing menus
+  const handleMenuChange = (menu) => {
+    setActiveMenu(menu)
+    setFormData(emptyFormData)
+    setProposalsMode(null)
+    setSubjectAutocompleteQuery('')
+    setSubjectAutocompleteFocus(false)
+    // Reset Plan de Estudios state
+    setPlanName('')
+    setPlanYears([])
+    setPlanError('')
+    setPlanMode('list')
+    setSelectedSubjectForCorrelatives(null)
+    setCorrelativeMode(false)
+    setShowMatrizModal(false)
+    setMatrizData(null)
+    setMatrixColumnFilters({})
+    // Reset Competencias state
+    setCatalogCareer('')
+    setCatalogType('generic')
+    setCatalogItems([])
+    setCatalogFormGeneric({ code: '', description: '', plan_name: '' })
+    setCatalogFormSpecific({ code: '', description: '', plan_name: '' })
+    setCatalogEditId(null)
+    setCatalogEditForm({ code: '', description: '' })
+    // Reset Docentes state
+    setTeacherForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+    setTeacherEditId(null)
+    setTeacherEditForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+    setMatrixColumnFilters({})
+  }
 
   useEffect(() => {
     if (activeCareer) {
@@ -180,6 +350,8 @@ const App = () => {
   useEffect(() => {
     setSelectedTeacherId(null)
     setSelectedTeacherName('')
+    setSubjectAutocompleteQuery('')
+    setSubjectAutocompleteFocus(false)
   }, [activeCareer])
 
   useEffect(() => {
@@ -209,7 +381,18 @@ const App = () => {
     if (!activeCareer) {
       return
     }
-    setFormData(prev => (prev.carrera === activeCareer ? prev : { ...prev, carrera: activeCareer }))
+    if (editingProposalId) {
+      return
+    }
+    const plan = getActivePlan(activeCareer)
+    setFormData(prev => ({
+      ...prev,
+      carrera: activeCareer,
+      plan: plan ? plan.name : '',
+      asignatura: '', // Reset subject when career changes
+      ciclo: '',
+      cuatrimestre: ''
+    }))
   }, [activeCareer])
 
   useEffect(() => {
@@ -219,6 +402,17 @@ const App = () => {
   }, [activeCareer])
 
   useEffect(() => {
+    if (!activeCareer) {
+      return
+    }
+    const planName = getCatalogPlanName(activeCareer)
+    if (planName) {
+      setCatalogFormGeneric((prev) => ({ ...prev, plan_name: prev.plan_name || planName }))
+      setCatalogFormSpecific((prev) => ({ ...prev, plan_name: prev.plan_name || planName }))
+    }
+  }, [activeCareer, selectedPlanFilterId, savedPlans])
+
+  useEffect(() => {
     if (activeCareer) {
       fetchTeachers(activeCareer)
     } else {
@@ -226,6 +420,16 @@ const App = () => {
       setTeacherCatalogError('')
     }
   }, [activeCareer])
+
+  // Load plan when entering create proposal mode
+  useEffect(() => {
+    if (proposalsMode === 'create' && activeCareer && !editingProposalId) {
+      const plan = getActivePlan(activeCareer)
+      if (plan && !formData.plan) {
+        updateFormData('plan', plan.name)
+      }
+    }
+  }, [proposalsMode, activeCareer, editingProposalId, formData.plan])
 
   useEffect(() => {
     if (activeMenu !== 'competencias') {
@@ -265,6 +469,161 @@ const App = () => {
     })
   }, [formData, unitDebug, showComparison, showUnitBibliografiaModal, showTpCommentModal])
 
+  // Función auxiliar para renderizar tarjetas de términos
+  const renderTermCard = (term, year, layout) => (
+    <div
+      style={{
+        padding: '10px',
+        background: '#f9fafb',
+        borderRadius: '6px',
+        borderLeft: '3px solid #0066cc',
+        width: layout === 'full' ? '100%' : 'auto'
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        <strong>{term.name}</strong>
+        <button
+          style={{ ...styles.button, padding: '4px 8px', fontSize: '12px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+          title="Eliminar cuatrimestre"
+          onClick={() => {
+            const updatedYears = planYears.map((y) => {
+              if (y.id === year.id) {
+                return {
+                  ...y,
+                  terms: y.terms.filter((t) => t.id !== term.id)
+                }
+              }
+              return y
+            })
+            setPlanYears(updatedYears)
+            setPlanError('')
+          }}
+        >
+          🗑️
+        </button>
+      </div>
+
+      {term.subjects && term.subjects.length > 0 && (
+        <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', marginBottom: '8px' }}>
+          <thead>
+            <tr style={{ background: '#eaf3ff' }}>
+              <th style={{ padding: '4px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Asignatura</th>
+              <th style={{ padding: '4px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {term.subjects.map((subject) => (
+              <tr key={subject.id} style={{ borderBottom: '1px solid #eee' }}>
+                <td style={{ padding: '4px', fontSize: '11px' }}>{subject.name}</td>
+                <td style={{ padding: '4px' }}>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {!(year.year === 1 && term.name === '1er Cuatrimestre') && (
+                      <button
+                        style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                        title="Editar correlativas"
+                        onClick={() => {
+                          setSelectedSubjectForCorrelatives(subject)
+                          setCorrelativeMode(true)
+                        }}
+                      >
+                        🔗
+                      </button>
+                    )}
+                    <button
+                      style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                      title="Eliminar asignatura"
+                      onClick={() => {
+                        const updatedYears = planYears.map((y) => {
+                          if (y.id === year.id) {
+                            return {
+                              ...y,
+                              terms: y.terms.map((t) => {
+                                if (t.id === term.id) {
+                                  return {
+                                    ...t,
+                                    subjects: t.subjects.filter((s) => s.id !== subject.id)
+                                  }
+                                }
+                                return t
+                              })
+                            }
+                          }
+                          return y
+                        })
+                        setPlanYears(updatedYears)
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'end' }}>
+        <input
+          style={styles.input}
+          placeholder="Asignatura"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.target.value.trim()) {
+              const updatedYears = planYears.map((y) => {
+                if (y.id === year.id) {
+                  return {
+                    ...y,
+                    terms: y.terms.map((t) => {
+                      if (t.id === term.id) {
+                        return {
+                          ...t,
+                          subjects: [...(t.subjects || []), { id: Date.now(), name: e.target.value.trim() }]
+                        }
+                      }
+                      return t
+                    })
+                  }
+                }
+                return y
+              })
+              setPlanYears(updatedYears)
+              e.target.value = ''
+            }
+          }}
+        />
+        <button
+          style={{ ...styles.button, marginRight: 0, padding: '6px 12px', fontSize: '12px' }}
+          onClick={(e) => {
+            const input = e.target.previousElementSibling
+            if (input && input.value.trim()) {
+              const updatedYears = planYears.map((y) => {
+                if (y.id === year.id) {
+                  return {
+                    ...y,
+                    terms: y.terms.map((t) => {
+                      if (t.id === term.id) {
+                        return {
+                          ...t,
+                          subjects: [...(t.subjects || []), { id: Date.now(), name: input.value.trim() }]
+                        }
+                      }
+                      return t
+                    })
+                  }
+                }
+                return y
+              })
+              setPlanYears(updatedYears)
+              input.value = ''
+            }
+          }}
+        >
+          + Agregar
+        </button>
+      </div>
+    </div>
+  )
+
   const fetchProposals = async () => {
     try {
       const res = await fetch('http://localhost:8001/proposals')
@@ -275,12 +634,39 @@ const App = () => {
     }
   }
 
+  const mapCompetenciesToPlans = async (career) => {
+    if (!career || competencyPlanMappedByCareer[career]) {
+      return
+    }
+    try {
+      await fetch(`http://localhost:8001/competencies/map-plans?career=${encodeURIComponent(career)}`, {
+        method: 'POST'
+      })
+    } catch (err) {
+      console.error('Error mapping competencies to plans:', err)
+    } finally {
+      setCompetencyPlanMappedByCareer((prev) => ({ ...prev, [career]: true }))
+    }
+  }
+
+  const getCatalogPlanName = (career) => {
+    const selectedPlan = selectedPlanFilterId ? getPlanById(career, selectedPlanFilterId) : null
+    const activePlan = getActivePlan(career)
+    return selectedPlan?.name || activePlan?.name || ''
+  }
+
+  const filterCompetenciesByPlan = (items, planName, career) => {
+    if (!planName) return items
+    return items.filter((item) => planMatches(item.plan_name || '', planName, career))
+  }
+
   const fetchCareerCompetencies = async (career) => {
     if (!career) {
       setCareerCompetencies({ generic: [], specific: [] })
       return
     }
     try {
+      await mapCompetenciesToPlans(career)
       const [genRes, specRes] = await Promise.all([
         fetch(`http://localhost:8001/competencies?career=${encodeURIComponent(career)}&competency_type=generic`),
         fetch(`http://localhost:8001/competencies?career=${encodeURIComponent(career)}&competency_type=specific`)
@@ -314,14 +700,16 @@ const App = () => {
 
   const addCatalogItem = async (type, form, setForm) => {
     const careerValue = activeCareer || catalogCareer
-    if (!careerValue || !form.code || !form.description) {
-      setStatusMsg('Completa carrera activa, código y descripción')
+    const planName = String(form.plan_name || getCatalogPlanName(careerValue)).trim()
+    if (!careerValue || !form.code || !form.description || !planName) {
+      setStatusMsg('Completa carrera activa, plan, código y descripción')
       setStatusType('error')
       return
     }
     const existing = catalogItems.find(item =>
       item.code?.trim().toLowerCase() === form.code.trim().toLowerCase() &&
-      item.competency_type === type
+      item.competency_type === type &&
+      (item.plan_name || '').trim().toLowerCase() === planName.toLowerCase()
     )
     if (existing) {
       setStatusMsg('Ese código ya existe en el catálogo')
@@ -334,6 +722,7 @@ const App = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           career: careerValue,
+          plan_name: planName,
           competency_type: type,
           code: form.code,
           description: form.description
@@ -343,7 +732,7 @@ const App = () => {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
-      setForm({ code: '', description: '' })
+      setForm({ code: '', description: '', plan_name: planName })
       await fetchCareerCompetencies(careerValue)
       setStatusMsg('Competencia agregada')
       setStatusType('success')
@@ -956,11 +1345,579 @@ const App = () => {
     setIsDirty(true)
   }
 
+  function mapPlanFromStorage(plan) {
+    const payload = plan?.payload || {}
+    return {
+      id: plan.id,
+      name: plan.name || payload.name || 'Plan',
+      years: Array.isArray(payload.years) ? payload.years : (plan.years || []),
+      is_active: plan.is_active === true,
+      created_at: plan.created_at,
+      updated_at: plan.updated_at
+    }
+  }
+
+  async function fetchStudyPlans(career) {
+    if (!career) return
+    try {
+      const res = await fetch(`http://localhost:8001/study-plans-storage?career=${encodeURIComponent(career)}`)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      const plans = Array.isArray(data) ? data.map(mapPlanFromStorage) : []
+      setSavedPlans((prev) => ({
+        ...prev,
+        [career]: plans
+      }))
+      const activePlan = plans.find((p) => p.is_active === true) || plans[0] || null
+      setSelectedPlanFilterId(activePlan?.id || null)
+      setPlanMode('list')
+    } catch (err) {
+      console.error('Error loading study plans:', err)
+      setSavedPlans((prev) => ({
+        ...prev,
+        [career]: []
+      }))
+      setSelectedPlanFilterId(null)
+      setPlanMode('list')
+      setStatusMsg(`Error al cargar planes: ${err.message || 'desconocido'}`)
+      setStatusType('error')
+    }
+  }
+
+  async function saveStudyPlanToBackend(career, plan) {
+    if (!career || !plan) return null
+    const payload = {
+      career,
+      name: plan.name,
+      is_active: plan.is_active === true,
+      payload: {
+        name: plan.name,
+        years: plan.years || []
+      }
+    }
+    if (plan.id) payload.id = plan.id
+
+    const res = await fetch('http://localhost:8001/study-plans-storage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+      throw new Error(errorData.detail || `Error ${res.status}`)
+    }
+    const saved = await res.json()
+    await fetchStudyPlans(career)
+    return saved
+  }
+
+  async function activateStudyPlanBackend(planId) {
+    if (!planId) return
+    const res = await fetch(`http://localhost:8001/study-plans-storage/${planId}/activate`, {
+      method: 'POST'
+    })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+      throw new Error(errorData.detail || `Error ${res.status}`)
+    }
+    return res.json()
+  }
+
+  async function deleteStudyPlanBackend(planId) {
+    if (!planId) return
+    const res = await fetch(`http://localhost:8001/study-plans-storage/${planId}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+      throw new Error(errorData.detail || `Error ${res.status}`)
+    }
+    return res.json()
+  }
+
+
+  // Get active (vigente) study plan for a career
+  const getActivePlan = (career) => {
+    if (!career || !savedPlans[career]) return null
+    const plans = savedPlans[career]
+    return plans.find(p => p.is_active === true) || plans[0] || null
+  }
+
+  // Get a specific plan by ID and career
+  const getPlanById = (career, planId) => {
+    if (!career || !savedPlans[career]) return null
+    if (planId === null || planId === undefined || planId === '') return getActivePlan(career)
+    const planIdValue = String(planId)
+    return savedPlans[career].find(p => String(p.id) === planIdValue) || null
+  }
+
+  const getUniquePlanName = (career, baseName) => {
+    const plans = savedPlans[career] || []
+    const existing = new Set(plans.map((p) => String(p.name || '').trim().toLowerCase()))
+    let name = baseName
+    let counter = 2
+    while (existing.has(String(name).trim().toLowerCase())) {
+      name = `${baseName} ${counter}`
+      counter += 1
+    }
+    return name
+  }
+
+  const duplicatePlan = async (plan, newName) => {
+    if (!activeCareer || !plan) return
+    let counter = 0
+    const nextId = () => Date.now() + (counter += 1)
+    const finalName = newName || getUniquePlanName(activeCareer, `${plan.name} (copia)`)
+    const years = (plan.years || []).map((year) => ({
+      id: nextId(),
+      year: year.year,
+      terms: (year.terms || []).map((term) => ({
+        id: nextId(),
+        name: term.name,
+        subjects: (term.subjects || []).map((subject) => ({
+          id: nextId(),
+          name: subject.name,
+          correlatives_to_enroll: [...(subject.correlatives_to_enroll || [])],
+          correlatives_to_exam: [...(subject.correlatives_to_exam || [])]
+        }))
+      }))
+    }))
+    const newPlan = {
+      name: finalName,
+      years,
+      is_active: false
+    }
+
+    try {
+      await saveStudyPlanToBackend(activeCareer, newPlan)
+      setStatusMsg(`Plan duplicado como "${finalName}"`)
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(`Error al duplicar plan: ${err.message || 'desconocido'}`)
+      setStatusType('error')
+    }
+  }
+
+  const openDuplicatePlanModal = (plan) => {
+    if (!activeCareer || !plan) return
+    const baseName = `${plan.name} (copia)`
+    const defaultName = getUniquePlanName(activeCareer, baseName)
+    setDuplicatePlanTarget(plan)
+    setDuplicatePlanName(defaultName)
+    setDuplicatePlanError('')
+    setShowDuplicatePlanModal(true)
+  }
+
+  // Get all subjects from a specific plan (or active if planId not provided)
+  const getPlanSubjects = (career, planId = null) => {
+    const plan = planId ? getPlanById(career, planId) : getActivePlan(career)
+    if (!plan || !plan.years) return []
+    
+    const subjects = []
+    plan.years.forEach(year => {
+      if (year.terms) {
+        year.terms.forEach(term => {
+          if (term.subjects) {
+            term.subjects.forEach(subject => {
+              subjects.push({
+                id: subject.id,
+                name: subject.name,
+                year: year.year,
+                termName: term.name,
+                termId: term.id,
+                yearId: year.id,
+                ...subject
+              })
+            })
+          }
+        })
+      }
+    })
+    return subjects
+  }
+
+  // Find subject location in plan (year and term)
+  const findSubjectLocation = (career, subjectName) => {
+    const subjects = getPlanSubjects(career)
+    const subject = subjects.find(s => s.name.toLowerCase() === subjectName.toLowerCase())
+    if (subject) {
+      return {
+        found: true,
+        year: subject.year,
+        termName: subject.termName,
+        termId: subject.termId,
+        yearId: subject.yearId,
+        subjectId: subject.id
+      }
+    }
+    return { found: false }
+  }
+
+  // Find proposals for a subject (return latest modified)
+  const findProposalForSubject = (career, subjectName, planName = '') => {
+    const matching = proposals.filter(p => {
+      if (p.career !== career) return false
+      if (!p.subject || p.subject.toLowerCase() !== subjectName.toLowerCase()) return false
+      if (!planName) return true
+      const proposalPlan = p.study_plan || p.plan || ''
+      return planMatches(proposalPlan, planName, career)
+    })
+    if (matching.length === 0) return null
+    // Return the one with latest updated_at
+    return matching.reduce((latest, current) => {
+      const latestTime = new Date(latest.updated_at || latest.created_at).getTime()
+      const currentTime = new Date(current.updated_at || current.created_at).getTime()
+      return currentTime > latestTime ? current : latest
+    })
+  }
+
+  // Build competency matrix for Plan de Estudios
+  const buildCompetencyMatrix = (career, planId = null) => {
+    const plan = planId ? getPlanById(career, planId) : getActivePlan(career)
+    const planName = plan?.name || ''
+    const subjects = getPlanSubjects(career, planId)
+    const matrixData = {}
+
+    // Use all career competencies (already loaded in state)
+    const filteredGeneric = filterCompetenciesByPlan(careerCompetencies.generic || [], planName, career)
+    const filteredSpecific = filterCompetenciesByPlan(careerCompetencies.specific || [], planName, career)
+    let genericComps = filteredGeneric.sort((a, b) => 
+      (a.code || '').localeCompare(b.code || '')
+    )
+    let specificComps = filteredSpecific.sort((a, b) => 
+      (a.code || '').localeCompare(b.code || '')
+    )
+
+    // Debug: Log career competencies
+    console.log('Career Competencies:', { generic: genericComps.length, specific: specificComps.length })
+
+    // If no competencies from career, gather from proposals
+    if (genericComps.length === 0 || specificComps.length === 0) {
+      const genSet = new Map()
+      const specSet = new Map()
+
+      subjects.forEach((subject) => {
+        const proposal = findProposalForSubject(career, subject.name, planName)
+        if (proposal) {
+          if (Array.isArray(proposal.generic_competencies_items)) {
+            proposal.generic_competencies_items.forEach((comp) => {
+              if (comp.code) {
+                genSet.set(comp.code, { code: comp.code, description: comp.description || '', level: comp.level || 0 })
+              }
+            })
+          }
+          if (Array.isArray(proposal.specific_competencies_items)) {
+            proposal.specific_competencies_items.forEach((comp) => {
+              if (comp.code) {
+                specSet.set(comp.code, { code: comp.code, description: comp.description || '', level: comp.level || 0 })
+              }
+            })
+          }
+        }
+      })
+
+      if (genericComps.length === 0) {
+        genericComps = Array.from(genSet.values()).sort((a, b) => a.code.localeCompare(b.code))
+      }
+      if (specificComps.length === 0) {
+        specificComps = Array.from(specSet.values()).sort((a, b) => a.code.localeCompare(b.code))
+      }
+      console.log('Gathered Competencies from Proposals:', { generic: genericComps.length, specific: specificComps.length })
+    }
+
+    // Process ALL subjects, with or without proposals
+    subjects.forEach((subject) => {
+      const proposal = findProposalForSubject(career, subject.name, planName)
+
+      // Initialize row with zeros for all competencies
+      const subjectRow = {
+        name: subject.name,
+        year: subject.year,
+        termName: subject.termName,
+        generic: {},
+        specific: {}
+      }
+
+      // Initialize all generic competencies to 0
+      genericComps.forEach((comp) => {
+        const key = comp.code || comp.id
+        if (key) subjectRow.generic[key] = 0
+      })
+
+      // Initialize all specific competencies to 0
+      specificComps.forEach((comp) => {
+        const key = comp.code || comp.id
+        if (key) subjectRow.specific[key] = 0
+      })
+
+      // If proposal exists, fill in the actual levels
+      if (proposal) {
+        console.log(`Filling proposal for subject: ${subject.name}`, { 
+          hasGeneric: !!proposal.generic_competencies_items,
+          hasSpecific: !!proposal.specific_competencies_items,
+          genericCount: proposal.generic_competencies_items?.length || 0,
+          specificCount: proposal.specific_competencies_items?.length || 0
+        })
+
+        // Fill generic competencies from proposal
+        if (Array.isArray(proposal.generic_competencies_items)) {
+          proposal.generic_competencies_items.forEach((comp) => {
+            const code = comp.code?.trim() || null
+            const level = Number(comp.level) || 0
+            
+            if (code && code.length > 0) {
+              if (subjectRow.generic.hasOwnProperty(code)) {
+                subjectRow.generic[code] = level
+                console.log(`  ✓ Set ${code} = ${level}`)
+              } else {
+                console.log(`  ⚠ Code ${code} not found in initialized keys`)
+              }
+            } else {
+              console.log(`  ✗ Invalid code for competency:`, comp)
+            }
+          })
+        }
+
+        // Fill specific competencies from proposal
+        if (Array.isArray(proposal.specific_competencies_items)) {
+          proposal.specific_competencies_items.forEach((comp) => {
+            const code = comp.code?.trim() || null
+            const level = Number(comp.level) || 0
+            
+            if (code && code.length > 0) {
+              if (subjectRow.specific.hasOwnProperty(code)) {
+                subjectRow.specific[code] = level
+                console.log(`  ✓ Set ${code} = ${level}`)
+              } else {
+                console.log(`  ⚠ Code ${code} not found in initialized keys`)
+              }
+            } else {
+              console.log(`  ✗ Invalid code for competency:`, comp)
+            }
+          })
+        }
+      }
+
+      matrixData[subject.id] = subjectRow
+    })
+
+    // Sort subjects by year, then by term order
+    const termOrder = { 'Anual': 0, '1er Cuatrimestre': 1, '2do Cuatrimestre': 2 }
+    const sortedSubjects = subjects.sort((a, b) => {
+      if (a.year !== b.year) return a.year - b.year
+      return (termOrder[a.termName] || 99) - (termOrder[b.termName] || 99)
+    })
+
+    // Group subjects by year and term
+    const groupedByYear = {}
+    sortedSubjects.forEach((subject) => {
+      if (!groupedByYear[subject.year]) {
+        groupedByYear[subject.year] = {}
+      }
+      if (!groupedByYear[subject.year][subject.termName]) {
+        groupedByYear[subject.year][subject.termName] = []
+      }
+      groupedByYear[subject.year][subject.termName].push(subject)
+    })
+
+    return {
+      planName,
+      subjects: sortedSubjects,
+      competencies: {
+        generic: genericComps,
+        specific: specificComps
+      },
+      matrix: matrixData,
+      groupedByYear: groupedByYear
+    }
+  }
+
+  // Get level display text
+  const getLevelDisplay = (level) => {
+    const levelNum = level || 0
+    if (levelNum === 0 || level === null) return '-'
+    if (levelNum === 1) return 'Bajo (1)'
+    if (levelNum === 2) return 'Medio (2)'
+    if (levelNum === 3) return 'Alto (3)'
+    return '-'
+  }
+
+  // Get subject suggestions for autocomplete
+  const getSubjectSuggestions = (query, career) => {
+    if (!query || !career) return []
+    const term = normalizeSearchText(query)
+    const subjects = getPlanSubjects(career)
+    return subjects
+      .filter(s => normalizeSearchText(s.name).includes(term))
+      .slice(0, 8)
+  }
+
+  // Auto-populate year and cuatrimestre when subject is selected
+  const handleSubjectSelection = (subjectName) => {
+    updateFormData('asignatura', subjectName)
+    
+    if (!activeCareer) return
+    
+    const plan = getActivePlan(activeCareer)
+    if (!plan) return
+    
+    // Find the location of this subject in the plan
+    const location = findSubjectLocation(activeCareer, subjectName)
+    if (location.found) {
+      // Auto-fill year and quarter
+      updateFormData('ciclo', String(location.year))
+      updateFormData('cuatrimestre', location.termName)
+      // Auto-fill plan name
+      updateFormData('plan', plan.name)
+    }
+  }
+
+  // Create a new subject in the active plan if it doesn't exist
+  const ensureSubjectInPlan = async (career, subjectName, year, cuatrimestre) => {
+    if (!career || !subjectName) return false
+    
+    const plan = getActivePlan(career)
+    if (!plan) return false
+    
+    // Check if subject already exists
+    const location = findSubjectLocation(career, subjectName)
+    if (location.found) return true
+    
+    // Create year if it doesn't exist
+    let targetYear = plan.years?.find(y => y.year === parseInt(year))
+    if (!targetYear) {
+      targetYear = {
+        id: Date.now(),
+        year: parseInt(year),
+        terms: []
+      }
+      if (!plan.years) plan.years = []
+      plan.years.push(targetYear)
+      plan.years.sort((a, b) => a.year - b.year)
+    }
+    
+    // Create term if it doesn't exist
+    let targetTerm = targetYear.terms?.find(t => t.name === cuatrimestre)
+    if (!targetTerm) {
+      targetTerm = {
+        id: Date.now() + 1,
+        name: cuatrimestre,
+        subjects: []
+      }
+      if (!targetYear.terms) targetYear.terms = []
+      targetYear.terms.push(targetTerm)
+    }
+    
+    // Add subject
+    if (!targetTerm.subjects) targetTerm.subjects = []
+    targetTerm.subjects.push({
+      id: Date.now() + 2,
+      name: subjectName,
+      correlatives_to_enroll: [],
+      correlatives_to_exam: []
+    })
+    
+    // Save updated plan
+    const updatedPlans = savedPlans[career].map(p => 
+      p.is_active ? plan : p
+    )
+    setSavedPlans(prev => ({
+      ...prev,
+      [career]: updatedPlans
+    }))
+    try {
+      await saveStudyPlanToBackend(career, {
+        id: plan.id,
+        name: plan.name,
+        years: plan.years,
+        is_active: plan.is_active
+      })
+    } catch (err) {
+      setStatusMsg(`Error al guardar plan: ${err.message || 'desconocido'}`)
+      setStatusType('error')
+      return false
+    }
+
+    return true
+  }
+
+  // Precarga de propuesta desde Plan de Estudios
+  const preloadProposalFromPlan = (career, subjectName, year, cuatrimestre) => {
+    const plan = getActivePlan(career)
+    if (!plan) return
+    
+    // Precargar el formulario
+    setFormData(prev => ({
+      ...prev,
+      carrera: career,
+      asignatura: subjectName,
+      plan: plan.name,
+      anio: new Date().getFullYear().toString(), // Año actual
+      ciclo: String(year),
+      cuatrimestre: cuatrimestre,
+      caracter: 'Obligatoria',
+      regimen: 'Cuatrimestral'
+    }))
+    
+    // Cambiar a modo create
+    setProposalsMode('create')
+    
+    // Scroll al formulario
+    setTimeout(() => {
+      if (informacionGeneralRef.current) {
+        informacionGeneralRef.current.scrollIntoView({ behavior: 'smooth' })
+      }
+    }, 100)
+  }
+
   const normalizeCareer = (value) => {
     if (!value) return ''
     const normalized = String(value).toLowerCase().trim()
     const found = careerOptions.find(opt => opt.toLowerCase().trim() === normalized)
     return found || String(value).trim()
+  }
+
+  // Calculate subject statistics for home dashboard
+  const getSubjectStatistics = (planId = null) => {
+    if (!activeCareer) return { total: 0, withProposals: 0, withoutProposals: 0 }
+
+    let plansToUse = []
+    const hasPlanFilter = planId !== null && planId !== undefined && planId !== ''
+    if (hasPlanFilter) {
+      const selectedPlan = getPlanById(activeCareer, planId)
+      if (!selectedPlan || !selectedPlan.years) {
+        return { total: 0, withProposals: 0, withoutProposals: 0 }
+      }
+      plansToUse = [selectedPlan]
+    } else {
+      plansToUse = (savedPlans[activeCareer] || []).filter((plan) => plan.years)
+      if (!plansToUse.length) {
+        return { total: 0, withProposals: 0, withoutProposals: 0 }
+      }
+    }
+
+    const subjects = plansToUse.flatMap((plan) =>
+      getPlanSubjects(activeCareer, plan.id).map((subject) => ({
+        ...subject,
+        planName: plan.name || ''
+      }))
+    )
+    const total = subjects.length
+
+    const withProposals = subjects.filter((subject) => {
+      return proposals.some((p) =>
+        p.subject?.toLowerCase().trim() === subject.name.toLowerCase().trim() &&
+        p.career?.toLowerCase().trim() === activeCareer.toLowerCase().trim() &&
+        planMatches(p.study_plan || p.plan || '', subject.planName, activeCareer)
+      )
+    }).length
+
+    const withoutProposals = total - withProposals
+
+    return { total, withProposals, withoutProposals }
   }
 
   const levelOptions = [
@@ -996,6 +1953,7 @@ const App = () => {
         const levelLabel = getLevelLabel(item.level)
         if (code && description) return `${code} - ${description} - ${levelLabel}`
         if (description) return `${description} - ${levelLabel}`
+        if (code) return `${code} - ${levelLabel}`
         return ''
       })
       .filter(Boolean)
@@ -1292,6 +2250,18 @@ const App = () => {
     const order = { 'TITULAR': 0, 'ASOCIADO': 1, 'ADJUNTO': 2, 'JTP': 3, 'AYUDANTE 1º': 4 }
     const sorted = [...docentes].sort((a, b) => order[a.categoria] - order[b.categoria])
     setEquipoDocente(sorted)
+  }
+
+  const getTeachingTeamView = (team = []) => {
+    const order = { 'TITULAR': 0, 'ASOCIADO': 1, 'ADJUNTO': 2, 'JTP': 3, 'AYUDANTE 1º': 4 }
+    return [...team].sort((a, b) => {
+      const left = order[a?.category] ?? 99
+      const right = order[b?.category] ?? 99
+      if (left !== right) return left - right
+      const nameA = (a?.name || '').toLowerCase()
+      const nameB = (b?.name || '').toLowerCase()
+      return nameA.localeCompare(nameB)
+    })
   }
 
   // RA management
@@ -2583,16 +3553,37 @@ const App = () => {
       }
       return
     }
-    // Validate required fields: carrera and asignatura only
-    if (!careerValue || !formData.asignatura) {
+    
+    // Validate required fields: carrera, asignatura, plan, año académico, año en carrera, cuatrimestre, régimen, carácter
+    const requiredFields = [
+      { field: formData.carrera, name: 'Carrera' },
+      { field: formData.asignatura, name: 'Asignatura' },
+      { field: formData.plan, name: 'Plan de Estudios' },
+      { field: formData.anio, name: 'Año Académico' },
+      { field: formData.ciclo, name: 'Año en carrera' },
+      { field: formData.cuatrimestre, name: 'Cuatrimestre' },
+      { field: formData.regimen, name: 'Régimen' },
+      { field: formData.caracter, name: 'Carácter' }
+    ]
+    
+    const missingFields = requiredFields.filter(rf => !rf.field)
+    if (missingFields.length > 0) {
       if (!silent) {
-        setStatusMsg('Requiere al menos: Carrera y Asignatura')
+        setStatusMsg(`Campos requeridos: ${missingFields.map(f => f.name).join(', ')}`)
         setStatusType('error')
       }
       return
     }
 
     if (isSaving) {
+      return
+    }
+
+    // Ensure subject exists in the plan before saving
+    const subjectEnsured = await ensureSubjectInPlan(careerValue, formData.asignatura, formData.ciclo, formData.cuatrimestre)
+    if (!subjectEnsured && !silent) {
+      setStatusMsg('No se pudo crear la asignatura en el plan')
+      setStatusType('error')
       return
     }
 
@@ -3200,6 +4191,40 @@ const App = () => {
 
   const isDocenteView = viewRole === 'docente'
   const normalizeText = (value) => String(value || '').trim().toLowerCase()
+  const normalizePlanName = (value) => normalizeText(value).replace(/\s+/g, ' ')
+  const extractPlanCode = (value) => {
+    const text = normalizeText(value)
+    if (!text) return ''
+    const direct = text.match(/(\d{3})\s*[-\/]\s*(\d{2})/)
+    if (direct) return `${direct[1]}-${direct[2]}`
+    const compact = text.replace(/\s+/g, '')
+    const digits = compact.match(/(\d{3})(\d{2})/)
+    if (digits) return `${digits[1]}-${digits[2]}`
+    return ''
+  }
+  const isPlanCodeAmbiguous = (career, targetPlanName) => {
+    if (!career) return false
+    const targetCode = extractPlanCode(targetPlanName)
+    if (!targetCode) return false
+    const plans = savedPlans[career] || []
+    const matches = plans.filter((plan) => extractPlanCode(plan.name) === targetCode)
+    return matches.length > 1
+  }
+  const planMatches = (proposalPlanValue, targetPlanName, career = null) => {
+    if (!targetPlanName) return true
+    const proposalNameNormalized = normalizePlanName(proposalPlanValue || '')
+    const targetNameNormalized = normalizePlanName(targetPlanName || '')
+    if (!proposalNameNormalized || !targetNameNormalized) return false
+    if (proposalNameNormalized === targetNameNormalized) return true
+    const isAmbiguous = isPlanCodeAmbiguous(career, targetPlanName)
+    const proposalPlanCode = extractPlanCode(proposalPlanValue)
+    const targetPlanCode = extractPlanCode(targetPlanName)
+    if (!isAmbiguous && proposalPlanCode && targetPlanCode && proposalPlanCode === targetPlanCode) return true
+    if (isAmbiguous) return false
+    if (proposalNameNormalized.includes(targetNameNormalized)) return true
+    if (targetNameNormalized.includes(proposalNameNormalized)) return true
+    return false
+  }
   const hasSelectedTeacher = !!(selectedTeacherId || selectedTeacherName)
   const proposalHasTeacher = (proposal, teacherId, teacherName) => {
     if (!proposal || !Array.isArray(proposal.teaching_team)) {
@@ -3218,17 +4243,35 @@ const App = () => {
   }
 
   const canCreateProposal = !isDocenteView && isProposalReadyToCreate()
-  const canSaveDraft = !!(formData.carrera || activeCareer) && !!formData.asignatura && (!isDocenteView || !!editingProposalId)
+  const canSaveDraft = !!(
+    (formData.carrera || activeCareer) && 
+    formData.asignatura && 
+    formData.plan &&
+    formData.anio &&
+    formData.ciclo &&
+    formData.cuatrimestre &&
+    formData.regimen &&
+    formData.caracter &&
+    (!isDocenteView || !!editingProposalId)
+  )
   const canSaveEdits = !!(formData.carrera || activeCareer) && !!formData.asignatura && (!isDocenteView || !!editingProposalId)
   const normalizedActiveCareer = normalizeCareer(activeCareer)
   const filteredByCareer = normalizedActiveCareer
     ? proposals.filter((proposal) => normalizeCareer(proposal.career) === normalizedActiveCareer)
     : []
+  const selectedPlan = selectedPlanFilterId ? getPlanById(activeCareer, selectedPlanFilterId) : null
+  const selectedPlanName = selectedPlan?.name || ''
+  const filteredByPlan = selectedPlanName
+    ? filteredByCareer.filter((proposal) => {
+        const proposalPlan = proposal.study_plan || proposal.plan || ''
+        return planMatches(proposalPlan, selectedPlanName, activeCareer)
+      })
+    : filteredByCareer
   const filteredProposals = isDocenteView
     ? (hasSelectedTeacher
-        ? filteredByCareer.filter((proposal) => proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName))
+        ? filteredByPlan.filter((proposal) => proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName))
         : [])
-    : filteredByCareer
+    : filteredByPlan
   const completeProposals = filteredProposals.filter(isProposalComplete)
   const inProcessProposals = filteredProposals.filter(isProposalInProcess)
   const proposalTableGetters = {
@@ -3237,6 +4280,7 @@ const App = () => {
     academic_year: (p) => p.academic_year ?? '',
     year_of_career: (p) => p.year_of_career ?? '',
     quarter: (p) => p.quarter ?? '',
+    plan: (p) => p.study_plan || p.plan || '',
     updated_at: (p) => formatDateTime(p.updated_at || p.created_at),
     status: (p) => p.status ?? ''
   }
@@ -3263,15 +4307,23 @@ const App = () => {
   )
   const competencyTableGetters = {
     code: (c) => c.code ?? '',
-    description: (c) => c.description ?? ''
+    description: (c) => c.description ?? '',
+    plan: (c) => c.plan_name ?? ''
   }
+  const competenciesPlanName = selectedPlan?.name || ''
+  const genericCompetenciesByPlan = competenciesPlanName
+    ? filterCompetenciesByPlan(careerCompetencies.generic, competenciesPlanName, activeCareer)
+    : careerCompetencies.generic
+  const specificCompetenciesByPlan = competenciesPlanName
+    ? filterCompetenciesByPlan(careerCompetencies.specific, competenciesPlanName, activeCareer)
+    : careerCompetencies.specific
   const genericCompetenciesFiltered = applyTableSort(
-    applyTableFilters(careerCompetencies.generic, genericCompetencyFilters, competencyTableGetters),
+    applyTableFilters(genericCompetenciesByPlan, genericCompetencyFilters, competencyTableGetters),
     genericCompetencySort,
     competencyTableGetters
   )
   const specificCompetenciesFiltered = applyTableSort(
-    applyTableFilters(careerCompetencies.specific, specificCompetencyFilters, competencyTableGetters),
+    applyTableFilters(specificCompetenciesByPlan, specificCompetencyFilters, competencyTableGetters),
     specificCompetencySort,
     competencyTableGetters
   )
@@ -3289,12 +4341,17 @@ const App = () => {
           : ''
       )
     : []
+  const planOptions = activeCareer ? (savedPlans[activeCareer] || []) : []
+  const planOptionNames = new Set(planOptions.map((plan) => plan.name))
+  const hasCustomPlanOption = isNonEmptyText(formData.plan) && !planOptionNames.has(formData.plan)
 
   const renderCompetencySection = ({ title, type, required }) => {
     const items = Array.isArray(formData[type]) ? formData[type] : []
     const isGeneric = type === 'competenciasGenItems'
     const canEditCompetencies = !isDocenteView
     const catalogList = isGeneric ? careerCompetencies.generic : careerCompetencies.specific
+    const planName = formData.plan || getCatalogPlanName(activeCareer)
+    const filteredCatalogList = filterCompetenciesByPlan(catalogList, planName, activeCareer)
     const datalistId = `${type}-catalog`
     return (
       <div style={styles.section}>
@@ -3322,7 +4379,7 @@ const App = () => {
                   disabled={!canEditCompetencies}
                 />
                 <datalist id={datalistId}>
-                  {catalogList.map((entry) => (
+                  {filteredCatalogList.map((entry) => (
                     <option key={entry.id ?? entry.code} value={entry.code}>
                       {entry.description}
                     </option>
@@ -3377,30 +4434,27 @@ const App = () => {
           </div>
         </div>
         {!isDocenteView && (
-          <MenuButton label="Home" onClick={() => setActiveMenu('home')} active={activeMenu === 'home'} />
+          <MenuButton label="Home" onClick={() => handleMenuChange('home')} active={activeMenu === 'home'} />
         )}
         <MenuButton
           label="Propuestas"
-          onClick={() => {
-            setActiveMenu('propuestas')
-            setProposalsMode(null)
-          }}
+          onClick={() => handleMenuChange('propuestas')}
           active={activeMenu === 'propuestas'}
         />
         {!isDocenteView && (
           <MenuButton
             label="Competencias"
-            onClick={() => {
-              setActiveMenu('competencias')
-              setProposalsMode(null)
-            }}
+            onClick={() => handleMenuChange('competencias')}
             active={activeMenu === 'competencias'}
           />
         )}
         {!isDocenteView && (
-          <MenuButton label="Docentes" onClick={() => setActiveMenu('docentes')} active={activeMenu === 'docentes'} />
+          <MenuButton label="Docentes" onClick={() => handleMenuChange('docentes')} active={activeMenu === 'docentes'} />
         )}
-        <MenuButton label="Resoluciones" onClick={() => setActiveMenu('resoluciones')} active={activeMenu === 'resoluciones'} />
+        {!isDocenteView && (
+          <MenuButton label="Plan de Estudios" onClick={() => handleMenuChange('plan')} active={activeMenu === 'plan'} />
+        )}
+        <MenuButton label="Resoluciones" onClick={() => handleMenuChange('resoluciones')} active={activeMenu === 'resoluciones'} />
 
         <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
           <label style={{ ...styles.label, marginTop: 0 }}>Carrera activa</label>
@@ -3412,6 +4466,25 @@ const App = () => {
             <option value="">Seleccionar carrera...</option>
             {careerOptions.map((career) => (
               <option key={career} value={career}>{career}</option>
+            ))}
+          </select>
+          {activeCareer && (
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#1a3d5c', fontWeight: 600 }}>
+              Plan activo: {getActivePlan(activeCareer)?.name || 'Sin plan'}
+            </div>
+          )}
+          <label style={{ ...styles.label, marginTop: '10px' }}>Filtrar por plan</label>
+          <select
+            style={{ ...styles.input, marginBottom: 0 }}
+            value={selectedPlanFilterId || ''}
+            onChange={(e) => setSelectedPlanFilterId(e.target.value ? Number(e.target.value) : null)}
+            disabled={!activeCareer || !(savedPlans[activeCareer] || []).length}
+          >
+            <option value="">Todos los planes</option>
+            {(savedPlans[activeCareer] || []).map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {plan.name}{plan.is_active ? ' (vigente)' : ''}
+              </option>
             ))}
           </select>
           {!activeCareer && (
@@ -3498,6 +4571,18 @@ const App = () => {
                   <span style={{ fontSize: '24px' }}>📄</span> Resoluciones
                 </div>
                 <div style={{ fontSize: '40px', fontWeight: 800 }}>0</div>
+              </div>
+              <div style={{ border: '1px solid #d4a5d4', borderRadius: '10px', padding: '16px', background: '#f9f1f9' }}>
+                <div style={{ fontSize: '16px', color: '#6b2c6b', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
+                  <span style={{ fontSize: '24px' }}>📚</span> Asignaturas
+                </div>
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ fontSize: '32px', fontWeight: 800, color: '#6b2c6b' }}>{getSubjectStatistics(selectedPlanFilterId).total}</div>
+                  <div style={{ fontSize: '12px', color: '#888', marginTop: '8px' }}>
+                    <div>✅ Con propuesta: {getSubjectStatistics(selectedPlanFilterId).withProposals}</div>
+                    <div>❌ Sin propuesta: {getSubjectStatistics(selectedPlanFilterId).withoutProposals}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -3617,6 +4702,12 @@ const App = () => {
                           Cuatrimestre{getSortIndicator(completeProposalSort, 'quarter')}
                         </th>
                         <th
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'plan')}
+                        >
+                          Plan de estudio{getSortIndicator(completeProposalSort, 'plan')}
+                        </th>
+                        <th
                           style={{ width: '150px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
                           onClick={() => toggleSort(setCompleteProposalSort, 'updated_at')}
                         >
@@ -3674,6 +4765,14 @@ const App = () => {
                         <th style={{ padding: '6px' }}>
                           <input
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.plan}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, plan: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
+                        <th style={{ padding: '6px' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
                             value={completeProposalFilters.updated_at}
                             onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, updated_at: e.target.value }))}
                             placeholder="Buscar"
@@ -3698,6 +4797,7 @@ const App = () => {
                           <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
                           <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
+                          <td style={{ padding: '10px' }}>{prop.study_plan || prop.plan || '-'}</td>
                           <td style={{ padding: '10px' }}>{formatDateTime(prop.updated_at || prop.created_at)}</td>
                           <td style={{ padding: '10px', width: '90px' }}>{prop.status || '-'}</td>
                           <td style={{ padding: '10px', textAlign: 'center' }}>
@@ -3760,7 +4860,15 @@ const App = () => {
                     <select
                       style={styles.input}
                       value={activeCareer}
-                      onChange={(e) => setActiveCareer(e.target.value)}
+                      onChange={(e) => {
+                        const career = e.target.value
+                        setActiveCareer(career)
+                        // Auto-load the active plan for this career
+                        const plan = getActivePlan(career)
+                        if (plan) {
+                          updateFormData('plan', plan.name)
+                        }
+                      }}
                       disabled={isDocenteView}
                     >
                       <option value="">Seleccionar carrera...</option>
@@ -3769,24 +4877,123 @@ const App = () => {
                       ))}
                     </select>
                   </div>
-                  <div>
-                    <label style={styles.label}>Asignatura</label>
-                    <input style={styles.input} value={formData.asignatura} onChange={(e) => updateFormData('asignatura', e.target.value)} disabled={isDocenteView} />
+                  <div style={{ position: 'relative' }}>
+                    <label style={styles.label}>Asignatura *</label>
+                    {activeCareer && getActivePlan(activeCareer) ? (
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          style={styles.input}
+                          placeholder="Buscar o escribir asignatura..."
+                          value={subjectAutocompleteQuery || formData.asignatura}
+                          onChange={(e) => {
+                            setSubjectAutocompleteQuery(e.target.value)
+                            if (!e.target.value.trim()) {
+                              updateFormData('asignatura', '')
+                              updateFormData('ciclo', '')
+                              updateFormData('cuatrimestre', '')
+                            }
+                          }}
+                          onFocus={() => setSubjectAutocompleteFocus(true)}
+                          onBlur={() => {
+                            // If user typed something but didn't select from suggestions, save it anyway
+                            if (subjectAutocompleteQuery && !formData.asignatura) {
+                              updateFormData('asignatura', subjectAutocompleteQuery)
+                            }
+                            setTimeout(() => setSubjectAutocompleteFocus(false), 150)
+                          }}
+                          onKeyDown={(e) => {
+                            // Allow Enter to confirm current input without selecting from suggestions
+                            if (e.key === 'Enter' && subjectAutocompleteQuery && getSubjectSuggestions(subjectAutocompleteQuery, activeCareer).length === 0) {
+                              updateFormData('asignatura', subjectAutocompleteQuery)
+                              setSubjectAutocompleteQuery('')
+                              setSubjectAutocompleteFocus(false)
+                            }
+                          }}
+                          disabled={isDocenteView}
+                        />
+                        {subjectAutocompleteFocus && subjectAutocompleteQuery && (
+                          <div style={{ 
+                            position: 'absolute', 
+                            top: '100%', 
+                            left: 0, 
+                            right: 0, 
+                            background: '#fff', 
+                            border: '1px solid #ddd', 
+                            borderRadius: '4px', 
+                            zIndex: 5, 
+                            maxHeight: '200px', 
+                            overflowY: 'auto',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                          }}>
+                            {getSubjectSuggestions(subjectAutocompleteQuery, activeCareer).map((subject, idx) => (
+                              <div
+                                key={`${subject.id}-${idx}`}
+                                style={{ padding: '10px', cursor: 'pointer', borderBottom: '1px solid #eee' }}
+                                onMouseDown={() => {
+                                  handleSubjectSelection(subject.name)
+                                  setSubjectAutocompleteQuery('')
+                                  setSubjectAutocompleteFocus(false)
+                                }}
+                              >
+                                <div style={{ fontWeight: '600' }}>{subject.name}</div>
+                                <div style={{ fontSize: '12px', color: '#666' }}>Año {subject.year} • {subject.termName}</div>
+                              </div>
+                            ))}
+                            {getSubjectSuggestions(subjectAutocompleteQuery, activeCareer).length === 0 && (
+                              <div style={{ padding: '10px', color: '#999', fontSize: '12px' }}>
+                                No encontrado. Presiona Enter para continuar con este nombre.
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <input 
+                        style={styles.input} 
+                        value={formData.asignatura} 
+                        onChange={(e) => updateFormData('asignatura', e.target.value)} 
+                        disabled={isDocenteView}
+                        placeholder="Selecciona carrera con plan vigente"
+                      />
+                    )}
                   </div>
 
                   {/* ROW 1: Plan, Año, Ciclo, Cuatrimestre */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '30px', padding: '0 10px', gridColumn: '1 / -1' }}>
                     <div>
-                      <label style={styles.label}>Plan de Estudios</label>
-                      <input style={styles.input} value={formData.plan} onChange={(e) => updateFormData('plan', e.target.value)} placeholder="Ej: Plan 2023" disabled={isDocenteView} />
+                      <label style={styles.label}>Plan de Estudios *</label>
+                      {activeCareer ? (
+                        <select
+                          style={styles.input}
+                          value={formData.plan}
+                          onChange={(e) => updateFormData('plan', e.target.value)}
+                          disabled={isDocenteView || planOptions.length === 0}
+                        >
+                          <option value="">Seleccionar...</option>
+                          {hasCustomPlanOption && (
+                            <option value={formData.plan}>{formData.plan} (actual)</option>
+                          )}
+                          {planOptions.map((plan) => (
+                            <option key={plan.id} value={plan.name}>
+                              {plan.name}{plan.is_active ? ' (vigente)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div
+                          style={{ ...styles.input, ...styles.readonlyField, color: '#666', fontWeight: 'bold' }}
+                        >
+                          Sin plan vigente
+                        </div>
+                      )}
                     </div>
                     <div>
-                      <label style={styles.label}>Año Académico</label>
+                      <label style={styles.label}>Año Académico *</label>
                       <input style={styles.input} value={formData.anio} onChange={(e) => updateFormData('anio', e.target.value)} placeholder="Ej: 2024" disabled={isDocenteView} />
                     </div>
                     <div>
-                      <label style={styles.label}>Ciclo (Año en carrera)</label>
-                      <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} placeholder="Ej: 1º, 2º, 3º" disabled={isDocenteView} />
+                      <label style={styles.label}>Año en carrera *</label>
+                      <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} placeholder="Ej: 1, 2, 3, 4, 5" disabled={isDocenteView} />
                     </div>
                     <div>
                       <label style={styles.label}>Cuatrimestre *</label>
@@ -4438,6 +5645,7 @@ const App = () => {
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>ID</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Asignatura</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Carrera</th>
+                    <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Plan de Estudios</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Creada</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Ultima edición</th>
                     <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #006ba8' }}>Estado</th>
@@ -4450,6 +5658,7 @@ const App = () => {
                       <td style={{ padding: '10px' }}>{p.id}</td>
                       <td style={{ padding: '10px' }}>{p.title || 'Sin título'}</td>
                       <td style={{ padding: '10px' }}>{p.career || '-'}</td>
+                      <td style={{ padding: '10px' }}>{p.study_plan || p.plan || '-'}</td>
                       <td style={{ padding: '10px' }}>{new Date(p.created_at).toLocaleDateString()}</td>
                       <td style={{ padding: '10px' }}>{formatDateTime(p.updated_at || p.created_at)}</td>
                       <td style={{ padding: '10px' }}>{p.status || '-'}</td>
@@ -4511,6 +5720,9 @@ const App = () => {
                       >
                         Cuatrimestre{getSortIndicator(pendingProposalSort, 'quarter')}
                       </th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>
+                        Plan de Estudios
+                      </th>
                       <th
                         style={{ width: '150px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
                         onClick={() => toggleSort(setPendingProposalSort, 'updated_at')}
@@ -4569,6 +5781,14 @@ const App = () => {
                       <th style={{ padding: '6px' }}>
                         <input
                           style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.plan}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, plan: e.target.value }))}
+                          placeholder="Buscar"
+                        />
+                      </th>
+                      <th style={{ padding: '6px' }}>
+                        <input
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
                           value={pendingProposalFilters.updated_at}
                           onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, updated_at: e.target.value }))}
                           placeholder="Buscar"
@@ -4593,6 +5813,7 @@ const App = () => {
                         <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
                         <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
+                        <td style={{ padding: '10px' }}>{prop.study_plan || prop.plan || '-'}</td>
                         <td style={{ padding: '10px' }}>{formatDateTime(prop.updated_at || prop.created_at)}</td>
                         <td style={{ padding: '10px', width: '90px' }}>{prop.status || '-'}</td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
@@ -4897,7 +6118,20 @@ const App = () => {
               <div style={{ background: '#f8f8f8', padding: '15px', borderRadius: '8px', border: '1px solid #ddd' }}>
                 <div>
                   <h3>Nueva competencia genérica</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                    <select
+                      style={styles.input}
+                      value={catalogFormGeneric.plan_name}
+                      onChange={(e) => setCatalogFormGeneric(prev => ({ ...prev, plan_name: e.target.value }))}
+                      disabled={!activeCareer}
+                    >
+                      <option value="">Seleccionar plan...</option>
+                      {(savedPlans[activeCareer] || []).map((plan) => (
+                        <option key={plan.id} value={plan.name}>
+                          {plan.name}{plan.is_active ? ' (vigente)' : ''}
+                        </option>
+                      ))}
+                    </select>
                     <input
                       style={styles.input}
                       placeholder="Código"
@@ -4922,7 +6156,20 @@ const App = () => {
 
                 <div style={{ marginTop: '16px' }}>
                   <h3>Nueva competencia específica</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                    <select
+                      style={styles.input}
+                      value={catalogFormSpecific.plan_name}
+                      onChange={(e) => setCatalogFormSpecific(prev => ({ ...prev, plan_name: e.target.value }))}
+                      disabled={!activeCareer}
+                    >
+                      <option value="">Seleccionar plan...</option>
+                      {(savedPlans[activeCareer] || []).map((plan) => (
+                        <option key={plan.id} value={plan.name}>
+                          {plan.name}{plan.is_active ? ' (vigente)' : ''}
+                        </option>
+                      ))}
+                    </select>
                     <input
                       style={styles.input}
                       placeholder="Código"
@@ -4969,6 +6216,12 @@ const App = () => {
                           >
                             Descripción{getSortIndicator(genericCompetencySort, 'description')}
                           </th>
+                          <th
+                            style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                            onClick={() => toggleSort(setGenericCompetencySort, 'plan')}
+                          >
+                            Plan{getSortIndicator(genericCompetencySort, 'plan')}
+                          </th>
                           <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold' }}>Acciones</th>
                         </tr>
                         <tr style={{ background: '#eaf3ff' }}>
@@ -4985,6 +6238,14 @@ const App = () => {
                               style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
                               value={genericCompetencyFilters.description}
                               onChange={(e) => setGenericCompetencyFilters(prev => ({ ...prev, description: e.target.value }))}
+                              placeholder="Buscar"
+                            />
+                          </th>
+                          <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                            <input
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                              value={genericCompetencyFilters.plan}
+                              onChange={(e) => setGenericCompetencyFilters(prev => ({ ...prev, plan: e.target.value }))}
                               placeholder="Buscar"
                             />
                           </th>
@@ -5011,6 +6272,9 @@ const App = () => {
                                   onChange={(e) => setCatalogEditForm(prev => ({ ...prev, description: e.target.value }))}
                                 />
                               ) : (item.description || '-')}
+                            </td>
+                            <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                              {item.plan_name || '-'}
                             </td>
                             <td style={{ padding: '8px' }}>
                               {catalogEditId === item.id ? (
@@ -5088,6 +6352,12 @@ const App = () => {
                           >
                             Descripción{getSortIndicator(specificCompetencySort, 'description')}
                           </th>
+                          <th
+                            style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                            onClick={() => toggleSort(setSpecificCompetencySort, 'plan')}
+                          >
+                            Plan{getSortIndicator(specificCompetencySort, 'plan')}
+                          </th>
                           <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold' }}>Acciones</th>
                         </tr>
                         <tr style={{ background: '#eaf3ff' }}>
@@ -5104,6 +6374,14 @@ const App = () => {
                               style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
                               value={specificCompetencyFilters.description}
                               onChange={(e) => setSpecificCompetencyFilters(prev => ({ ...prev, description: e.target.value }))}
+                              placeholder="Buscar"
+                            />
+                          </th>
+                          <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                            <input
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                              value={specificCompetencyFilters.plan}
+                              onChange={(e) => setSpecificCompetencyFilters(prev => ({ ...prev, plan: e.target.value }))}
                               placeholder="Buscar"
                             />
                           </th>
@@ -5130,6 +6408,9 @@ const App = () => {
                                   onChange={(e) => setCatalogEditForm(prev => ({ ...prev, description: e.target.value }))}
                                 />
                               ) : (item.description || '-')}
+                            </td>
+                            <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                              {item.plan_name || '-'}
                             </td>
                             <td style={{ padding: '8px' }}>
                               {catalogEditId === item.id ? (
@@ -5609,6 +6890,893 @@ const App = () => {
           </div>
         )}
 
+        {/* PLAN DE ESTUDIOS */}
+        {activeMenu === 'plan' && (
+          <div style={styles.section}>
+            <h2>Plan de Estudios</h2>
+            {!activeCareer ? (
+              <div style={{ color: '#777', fontStyle: 'italic' }}>Selecciona una carrera activa para crear un plan de estudios.</div>
+            ) : (
+              <div>
+                {/* Lista de planes guardados */}
+                {planMode === 'list' && (
+                  <div style={{ marginBottom: '20px' }}>
+                    <h3>Planes de Estudios</h3>
+                    <div style={{ color: '#555', marginTop: '-4px', marginBottom: '10px', fontWeight: 600 }}>
+                      {activeCareer}
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                      <button
+                        style={{ ...styles.button, background: '#4caf50' }}
+                        onClick={() => {
+                          setPlanMode('new')
+                          setPlanName('')
+                          setPlanYears([{ id: Date.now(), year: 1, terms: [] }])
+                          setEditingPlanId(null)
+                        }}
+                      >
+                        + Nuevo Plan
+                      </button>
+                    </div>
+
+                    {savedPlans[activeCareer] && savedPlans[activeCareer].length > 0 ? (
+                      <div style={{ display: 'grid', gap: '10px' }}>
+                        {savedPlans[activeCareer].map((plan) => (
+                          <div key={plan.id} style={{ border: '1px solid #d9e1e6', borderRadius: '8px', padding: '12px', background: plan.is_active ? '#eaffea' : '#fff' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <strong>{plan.name}</strong>
+                                {plan.is_active && <span style={{ marginLeft: '10px', background: '#4caf50', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '12px' }}>Vigente</span>}
+                              </div>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                  title="Ver plan"
+                                  onClick={() => {
+                                    setPlanMode('view')
+                                    setPlanName(plan.name)
+                                    setPlanYears(plan.years || [])
+                                    setEditingPlanId(plan.id)
+                                    setActivePlanId(plan.id)
+                                  }}
+                                >
+                                  👁️
+                                </button>
+                                <button
+                                  style={{ ...styles.button, padding: '6px 10px', background: '#7c3aed', color: '#fff' }}
+                                  title="Ver Matriz de Tributación"
+                                  onClick={() => {
+                                    setPlanName(plan.name)
+                                    setPlanYears(plan.years || [])
+                                    setEditingPlanId(plan.id)
+                                    const matriz = buildCompetencyMatrix(activeCareer, plan.id)
+                                    setMatrizData(matriz)
+                                    setShowMatrizModal(true)
+                                  }}
+                                >
+                                  📊
+                                </button>
+                                <button
+                                  style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                  title="Editar plan"
+                                  onClick={() => {
+                                    setPlanMode('edit')
+                                    setPlanName(plan.name)
+                                    setPlanYears(plan.years || [])
+                                    setEditingPlanId(plan.id)
+                                  }}
+                                >
+                                  ✏️
+                                </button>
+                                  <button
+                                    style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                    title="Duplicar plan"
+                                    onClick={() => openDuplicatePlanModal(plan)}
+                                  >
+                                    📑
+                                  </button>
+                                {!plan.is_active && (
+                                  <button
+                                    style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                    title="Marcar como vigente"
+                                    onClick={() => setConfirmActivePlanId(plan.id)}
+                                  >
+                                    ⭐
+                                  </button>
+                                )}
+                                <button
+                                  style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                  title="Eliminar plan"
+                                  onClick={() => setShowConfirmDelete(plan.id)}
+                                >
+                                  🗑️
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p style={{ color: '#777' }}>No hay planes creados. Crea uno nuevo para empezar.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Modo edición/nuevo */}
+                {(planMode === 'new' || planMode === 'edit') && (
+                  <div>
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                      <button
+                        style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                        title="Volver a lista de planes"
+                        onClick={() => {
+                          setPlanMode('list')
+                          setPlanName('')
+                          setPlanYears([])
+                          setEditingPlanId(null)
+                          setPlanError('')
+                        }}
+                      >
+                        ← Volver a Lista
+                      </button>
+                    </div>
+
+                    <div style={{ background: '#f8f8f8', padding: '15px', borderRadius: '8px', marginBottom: '20px' }}>
+                      <h3>{planMode === 'new' ? 'Nuevo' : 'Editar'} Plan de Estudios</h3>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'end', marginBottom: '12px' }}>
+                        <div>
+                          <label style={styles.label}>Nombre del Plan</label>
+                          <input
+                            style={{
+                              ...styles.input,
+                              border: isPlanNameDuplicate ? '1px solid #b00020' : styles.input.border
+                            }}
+                            value={planName}
+                            onChange={(e) => {
+                              setPlanName(e.target.value)
+                              if (planError) setPlanError('')
+                            }}
+                            placeholder="Ej: Plan 2023"
+                          />
+                        </div>
+                      </div>
+                      {planError && <div style={{ color: '#b00020', fontSize: '12px' }}>{planError}</div>}
+                    </div>
+
+                    {planYears.length > 0 && (
+                      <div style={{ display: 'grid', gap: '16px' }}>
+                        {planYears.map((year) => {
+                          const anualTerms = year.terms.filter((t) => t.name === 'Anual')
+                          const otherTerms = year.terms.filter((t) => t.name !== 'Anual')
+
+                          return (
+                            <div key={year.id} style={{ border: '1px solid #d9e1e6', borderRadius: '8px', padding: '12px', background: '#fff' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                <h4 style={{ margin: 0 }}>Año {year.year}</h4>
+                                <button
+                                  style={{ ...styles.button, padding: '6px 10px', background: '#999', marginRight: 0 }}
+                                  onClick={() => {
+                                    const filtered = planYears.filter((y) => y.id !== year.id)
+                                    setPlanYears(filtered)
+                                  }}
+                                >
+                                  Eliminar Año
+                                </button>
+                              </div>
+
+                              {/* Mostrar Anual primero si existe */}
+                              {anualTerms.length > 0 && (
+                                <div style={{ marginBottom: '15px' }}>
+                                  {anualTerms.map((term) => renderTermCard(term, year, 'full'))}
+                                </div>
+                              )}
+
+                              {/* Mostrar cuatrimestres en 2 columnas */}
+                              {otherTerms.length > 0 && (
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '15px' }}>
+                                  {otherTerms.map((term) => (
+                                    <div key={term.id}>
+                                      {renderTermCard(term, year, 'half')}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Selector para agregar cuatrimestre */}
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'end', marginTop: '12px' }}>
+                                <select
+                                  style={styles.input}
+                                  onChange={(e) => {
+                                    if (e.target.value) {
+                                      // Validar que no exista ya
+                                      const existingTermNames = year.terms.map((t) => t.name)
+                                      if (existingTermNames.includes(e.target.value)) {
+                                        setPlanError(`Ya existe "${e.target.value}" en este año`)
+                                        setTimeout(() => setPlanError(''), 3000)
+                                        e.target.value = ''
+                                        return
+                                      }
+
+                                      const updatedYears = planYears.map((y) => {
+                                        if (y.id === year.id) {
+                                          return {
+                                            ...y,
+                                            terms: [...(y.terms || []), { id: Date.now(), name: e.target.value, subjects: [] }]
+                                          }
+                                        }
+                                        return y
+                                      })
+                                      setPlanYears(updatedYears)
+                                      setPlanError('')
+                                      e.target.value = ''
+                                    }
+                                  }}
+                                >
+                                  <option value="">Agregar Cuatrimestre...</option>
+                                  {!year.terms.some((t) => t.name === '1er Cuatrimestre') && <option value="1er Cuatrimestre">1er Cuatrimestre</option>}
+                                  {!year.terms.some((t) => t.name === '2do Cuatrimestre') && <option value="2do Cuatrimestre">2do Cuatrimestre</option>}
+                                  {!year.terms.some((t) => t.name === 'Anual') && <option value="Anual">Anual</option>}
+                                </select>
+                              </div>
+                            </div>
+                          )
+                        })}
+
+                        <button
+                          style={{
+                            ...styles.button,
+                            background: '#2196F3',
+                            marginTop: '12px'
+                          }}
+                          onClick={() => {
+                            if (planYears.length === 0) {
+                              setPlanYears([{ id: Date.now(), year: 1, terms: [] }])
+                            } else {
+                              const lastYear = planYears[planYears.length - 1]
+                              setPlanYears([
+                                ...planYears,
+                                { id: Date.now(), year: lastYear.year + 1, terms: [] }
+                              ])
+                            }
+                          }}
+                        >
+                          + Agregar Año
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Botones de acción (siempre visibles) */}
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+                      <button
+                        style={{
+                          ...styles.button,
+                          background: '#4caf50',
+                          flex: 1,
+                          padding: '12px 24px',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          ...(isPlanNameDuplicate && styles.buttonDisabled)
+                        }}
+                        disabled={isPlanNameDuplicate}
+                        onClick={async () => {
+                          const trimmedPlanName = String(planName || '').trim()
+                          if (!trimmedPlanName) {
+                            setPlanError('Ingresa un nombre para el plan')
+                            return
+                          }
+                          if (isPlanNameDuplicate) {
+                            setPlanNameDuplicateValue(trimmedPlanName)
+                            setShowPlanNameDuplicateModal(true)
+                            return
+                          }
+                          const existingNames = (savedPlans[activeCareer] || [])
+                            .filter((p) => p.id !== editingPlanId)
+                            .map((p) => String(p.name || '').trim().toLowerCase())
+                          if (existingNames.includes(trimmedPlanName.toLowerCase())) {
+                            setPlanNameDuplicateValue(trimmedPlanName)
+                            setShowPlanNameDuplicateModal(true)
+                            return
+                          }
+
+                          if (planYears.length === 0) {
+                            setPlanError('Agrega al menos un año al plan')
+                            return
+                          }
+
+                          // Determinar si este plan debe ser vigente
+                          let isActive = false
+                          if (editingPlanId) {
+                            // Si estamos editando, mantener su estado actual
+                            isActive = savedPlans[activeCareer]?.find((p) => p.id === editingPlanId)?.is_active === true
+                          } else {
+                            // Si es nuevo plan, solo es vigente si no hay ninguno vigente actualmente
+                            const hasActivePlan = (savedPlans[activeCareer] || []).some((p) => p.is_active === true)
+                            isActive = !hasActivePlan
+                          }
+
+                          const newPlan = {
+                            id: editingPlanId || undefined,
+                            name: trimmedPlanName,
+                            years: planYears,
+                            is_active: isActive
+                          }
+
+                          try {
+                            const saved = await saveStudyPlanToBackend(activeCareer, newPlan)
+                            setStatusMsg(`Plan "${saved?.name || trimmedPlanName}" guardado correctamente`)
+                            setStatusType('success')
+                            setPlanMode('list')
+                            setPlanName('')
+                            setPlanYears([])
+                            setEditingPlanId(null)
+                          } catch (err) {
+                            setStatusMsg(`Error al guardar plan: ${err.message || 'desconocido'}`)
+                            setStatusType('error')
+                          }
+                        }}
+                      >
+                        {editingPlanId ? '✓ Guardar Cambios' : '✓ Guardar Nuevo Plan'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Modo vista */}
+                {planMode === 'view' && (
+                  <div>
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                      <button
+                        style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                        title="Volver a lista de planes"
+                        onClick={() => {
+                          setPlanMode('list')
+                          setPlanError('')
+                        }}
+                      >
+                        ← Volver a Lista
+                      </button>
+                      <button
+                        style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                        title="Editar plan"
+                        onClick={() => setPlanMode('edit')}
+                      >
+                        ✏️ Editar Plan
+                      </button>
+                      <button
+                        style={{ ...styles.button, padding: '6px 10px', background: '#7c3aed', color: '#fff' }}
+                        title="Ver Matriz de Tributación"
+                        onClick={() => {
+                          const matriz = buildCompetencyMatrix(activeCareer, editingPlanId)
+                          setMatrizData(matriz)
+                          setShowMatrizModal(true)
+                        }}
+                      >
+                        📊 Matriz de Tributación
+                      </button>
+                    </div>
+
+                    <h3>{planName}</h3>
+                    {planYears.map((year) => {
+                      const anualTerms = year.terms.filter((t) => t.name === 'Anual')
+                      const otherTerms = year.terms.filter((t) => t.name !== 'Anual')
+
+                      return (
+                        <div key={year.id} style={{ border: '1px solid #d9e1e6', borderRadius: '8px', padding: '12px', marginBottom: '15px', background: '#f9fafb' }}>
+                          <h4>Año {year.year}</h4>
+
+                          {anualTerms.length > 0 && (
+                            <div style={{ marginBottom: '15px' }}>
+                              {anualTerms.map((term) => (
+                                <div key={term.id}>
+                                  <h5>{term.name}</h5>
+                                  {term.subjects && term.subjects.length > 0 ? (
+                                    <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', marginBottom: '8px' }}>
+                                      <thead>
+                                        <tr style={{ background: '#eaf3ff' }}>
+                                          <th style={{ padding: '6px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Asignatura</th>
+                                          <th style={{ padding: '6px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Correlativas</th>
+                                          <th style={{ padding: '6px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Propuesta</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {term.subjects.map((subject) => {
+                                          const proposal = findProposalForSubject(activeCareer, subject.name, planName)
+                                          return (
+                                            <tr key={subject.id} style={{ borderBottom: '1px solid #eee' }}>
+                                              <td style={{ padding: '6px' }}>{subject.name}</td>
+                                              <td style={{ padding: '6px' }}>
+                                              {subject.correlatives_to_enroll?.length > 0 || subject.correlatives_to_exam?.length > 0 ? (
+                                                <span style={{ fontSize: '11px', color: '#666' }}>
+                                                  <div style={{ marginBottom: '4px' }}>
+                                                    <strong>📋 Para poder Cursar:</strong>
+                                                    {subject.correlatives_to_enroll?.length > 0 && <div style={{ marginLeft: '8px' }}>📌 Regular: {subject.correlatives_to_enroll.join(', ')}</div>}
+                                                    {subject.correlatives_to_exam?.length > 0 && <div style={{ marginLeft: '8px' }}>📌 Rendida: {subject.correlatives_to_exam.join(', ')}</div>}
+                                                  </div>
+                                                  {(subject.correlatives_to_enroll?.length > 0 || subject.correlatives_to_exam?.length > 0) && (
+                                                    <div>
+                                                      <strong>📋 Para poder Rendir:</strong>
+                                                      <div style={{ marginLeft: '8px' }}>
+                                                        {[...(subject.correlatives_to_enroll || []), ...(subject.correlatives_to_exam || [])].join(', ')}
+                                                      </div>
+                                                    </div>
+                                                  )}
+                                                </span>
+                                              ) : (
+                                                <span style={{ fontSize: '11px', color: '#999' }}>Sin correlativas</span>
+                                              )}
+                                              </td>
+                                              <td style={{ padding: '6px' }}>
+                                                {proposal ? (
+                                                  <div style={{ fontSize: '11px' }}>
+                                                    <div style={{ color: '#0066cc', marginBottom: '4px' }}>✅ ID: {proposal.id}</div>
+                                                    <button
+                                                      style={{ ...styles.button, padding: '2px 6px', fontSize: '10px', marginRight: 0, background: 'rgba(0, 102, 204, 0.85)', color: '#fff' }}
+                                                      onClick={() => openProposalView(proposal.id)}
+                                                      title="Ver propuesta"
+                                                    >
+                                                      Ver
+                                                    </button>
+                                                  </div>
+                                                ) : (
+                                                  <button
+                                                    style={{ ...styles.button, padding: '2px 6px', fontSize: '10px', marginRight: 0, background: 'rgba(0, 168, 84, 0.85)', color: '#fff' }}
+                                                    onClick={() => {
+                                                      setActiveMenu('propuestas')
+                                                      preloadProposalFromPlan(activeCareer, subject.name, year.year, term.name)
+                                                    }}
+                                                    title="Crear propuesta"
+                                                  >
+                                                    Crear
+                                                  </button>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          )
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  ) : (
+                                    <p style={{ color: '#777', fontSize: '12px' }}>Sin asignaturas</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {otherTerms.length > 0 && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                              {otherTerms.map((term) => (
+                                <div key={term.id}>
+                                  <h5>{term.name}</h5>
+                                  {term.subjects && term.subjects.length > 0 ? (
+                                    <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+                                      <thead>
+                                        <tr style={{ background: '#eaf3ff' }}>
+                                          <th style={{ padding: '4px', textAlign: 'left', borderBottom: '1px solid #ddd', fontSize: '11px' }}>Asignatura</th>
+                                          <th style={{ padding: '4px', textAlign: 'left', borderBottom: '1px solid #ddd', fontSize: '11px' }}>Correlativas</th>
+                                          <th style={{ padding: '4px', textAlign: 'left', borderBottom: '1px solid #ddd', fontSize: '11px' }}>Propuesta</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {term.subjects.map((subject) => {
+                                          const proposal = findProposalForSubject(activeCareer, subject.name, planName)
+                                          return (
+                                            <tr key={subject.id} style={{ borderBottom: '1px solid #eee' }}>
+                                              <td style={{ padding: '4px', fontSize: '11px' }}>{subject.name}</td>
+                                              <td style={{ padding: '4px' }}>
+                                              {subject.correlatives_to_enroll?.length > 0 || subject.correlatives_to_exam?.length > 0 ? (
+                                                <span style={{ fontSize: '10px', color: '#666' }}>
+                                                  <div style={{ marginBottom: '3px' }}>
+                                                    <strong>📋 Para poder Cursar:</strong>
+                                                    {subject.correlatives_to_enroll?.length > 0 && <div style={{ marginLeft: '6px' }}>📌 Regular: {subject.correlatives_to_enroll.join(', ')}</div>}
+                                                    {subject.correlatives_to_exam?.length > 0 && <div style={{ marginLeft: '6px' }}>📌 Rendida: {subject.correlatives_to_exam.join(', ')}</div>}
+                                                  </div>
+                                                  {(subject.correlatives_to_enroll?.length > 0 || subject.correlatives_to_exam?.length > 0) && (
+                                                    <div>
+                                                      <strong>📋 Para poder Rendir:</strong>
+                                                      <div style={{ marginLeft: '6px' }}>
+                                                        {[...(subject.correlatives_to_enroll || []), ...(subject.correlatives_to_exam || [])].join(', ')}
+                                                      </div>
+                                                    </div>
+                                                  )}
+                                                </span>
+                                              ) : (
+                                                <span style={{ fontSize: '10px', color: '#999' }}>Sin correlativas</span>
+                                              )}
+                                              </td>
+                                              <td style={{ padding: '4px' }}>
+                                                {proposal ? (
+                                                  <div style={{ fontSize: '10px' }}>
+                                                    <div style={{ color: '#0066cc', marginBottom: '3px' }}>✅ ID: {proposal.id}</div>
+                                                    <button
+                                                      style={{ ...styles.button, padding: '1px 4px', fontSize: '9px', marginRight: 0, background: 'rgba(0, 102, 204, 0.85)', color: '#fff' }}
+                                                      onClick={() => openProposalView(proposal.id)}
+                                                      title="Ver propuesta"
+                                                    >
+                                                      Ver
+                                                    </button>
+                                                  </div>
+                                                ) : (
+                                                  <button
+                                                    style={{ ...styles.button, padding: '1px 4px', fontSize: '9px', marginRight: 0, background: 'rgba(0, 168, 84, 0.85)', color: '#fff' }}
+                                                    onClick={() => {
+                                                      setActiveMenu('propuestas')
+                                                      preloadProposalFromPlan(activeCareer, subject.name, year.year, term.name)
+                                                    }}
+                                                    title="Crear propuesta"
+                                                  >
+                                                    Crear
+                                                  </button>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          )
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  ) : (
+                                    <p style={{ color: '#777', fontSize: '11px' }}>Sin asignaturas</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Modal de correlativas */}
+                {correlativeMode && selectedSubjectForCorrelatives && (
+                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                    <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '700px', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <h3 style={{ margin: 0 }}>Mapeo de Correlativas - {selectedSubjectForCorrelatives.name}</h3>
+                        <button
+                          style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff', marginRight: 0, fontWeight: 'bold' }}
+                          title="Cerrar"
+                          onClick={() => setCorrelativeMode(false)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                    {/* Obtener asignaturas previas */}
+                    {(() => {
+                      // Encontrar en qué año/cuatrimestre está esta asignatura
+                      let currentYearNum = 0
+                      let currentTermIndex = 0
+                      let currentTermName = ''
+
+                      for (let y of planYears) {
+                        for (let t of y.terms) {
+                          if (t.subjects?.some((s) => s.id === selectedSubjectForCorrelatives.id)) {
+                            currentYearNum = y.year
+                            currentTermName = t.name
+                            break
+                          }
+                        }
+                      }
+
+                      // Obtener asignaturas previas (año anterior completo + cuatrimestres anteriores del año actual)
+                      const previousSubjects = []
+                      const termOrder = { 'Anual': 999, '1er Cuatrimestre': 1, '2do Cuatrimestre': 2 }
+                      const currentTermOrder = termOrder[currentTermName] || 0
+                      
+                      for (let y of planYears) {
+                        if (y.year < currentYearNum) {
+                          // Todos los años anteriores
+                          for (let t of y.terms) {
+                            for (let s of t.subjects || []) {
+                              // No agregar la misma asignatura como correlativa de sí misma
+                              if (s.id !== selectedSubjectForCorrelatives.id) {
+                                previousSubjects.push({ ...s, yearNum: y.year, termName: t.name })
+                              }
+                            }
+                          }
+                        } else if (y.year === currentYearNum) {
+                          // Mismo año: mostrar Anual + cuatrimestres anteriores (pero NO el cuatrimestre actual)
+                          for (let t of y.terms) {
+                            const tOrder = termOrder[t.name] || 0
+                            // Mostrar Anual siempre, o cuatrimestres anteriores al actual
+                            if (t.name === 'Anual' || (tOrder > 0 && tOrder < currentTermOrder)) {
+                              for (let s of t.subjects || []) {
+                                // No agregar la misma asignatura como correlativa de sí misma
+                                if (s.id !== selectedSubjectForCorrelatives.id) {
+                                  previousSubjects.push({ ...s, yearNum: y.year, termName: t.name })
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+
+                      return (
+                        <>
+                          <div style={{ marginBottom: '12px', padding: '10px', background: '#fff', borderRadius: '6px' }}>
+                            <small style={{ color: '#666' }}>
+                              Asignaturas disponibles para vincular como correlativas:
+                              {previousSubjects.length === 0 && ' (Ninguna)'}
+                            </small>
+                          </div>
+
+                          {previousSubjects.length > 0 ? (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+                              <div>
+                                <label style={styles.label}>Regular para Cursar</label>
+                                <div style={{ border: '1px solid #ddd', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', padding: '8px' }}>
+                                  {previousSubjects.map((subject) => (
+                                    <div key={`enroll-${subject.id}`} style={{ marginBottom: '6px' }}>
+                                      <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '12px' }}>
+                                        <input
+                                          type="checkbox"
+                                          defaultChecked={selectedSubjectForCorrelatives.correlatives_to_enroll?.includes(subject.name)}
+                                          onChange={(e) => {
+                                            setSelectedSubjectForCorrelatives((prev) => {
+                                              const current = prev.correlatives_to_enroll || []
+                                              return {
+                                                ...prev,
+                                                correlatives_to_enroll: e.target.checked ? [...current, subject.name] : current.filter((n) => n !== subject.name)
+                                              }
+                                            })
+                                          }}
+                                          style={{ marginRight: '6px' }}
+                                        />
+                                        <span>{subject.name} <small style={{ color: '#888' }}>({subject.yearNum}° - {subject.termName})</small></span>
+                                      </label>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div>
+                                <label style={styles.label}>Rendida para Cursar</label>
+                                <div style={{ border: '1px solid #ddd', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', padding: '8px' }}>
+                                  {previousSubjects.map((subject) => (
+                                    <div key={`exam-${subject.id}`} style={{ marginBottom: '6px' }}>
+                                      <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '12px' }}>
+                                        <input
+                                          type="checkbox"
+                                          defaultChecked={selectedSubjectForCorrelatives.correlatives_to_exam?.includes(subject.name)}
+                                          onChange={(e) => {
+                                            setSelectedSubjectForCorrelatives((prev) => {
+                                              const current = prev.correlatives_to_exam || []
+                                              return {
+                                                ...prev,
+                                                correlatives_to_exam: e.target.checked ? [...current, subject.name] : current.filter((n) => n !== subject.name)
+                                              }
+                                            })
+                                          }}
+                                          style={{ marginRight: '6px' }}
+                                        />
+                                        <span>{subject.name} <small style={{ color: '#888' }}>({subject.yearNum}° - {subject.termName})</small></span>
+                                      </label>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ padding: '15px', background: '#fff', borderRadius: '6px', marginBottom: '15px', color: '#777', textAlign: 'center' }}>
+                              Esta es la primera asignatura del plan, no hay correlativas disponibles.
+                            </div>
+                          )}
+
+                          <button
+                            style={{ ...styles.button, background: '#4caf50' }}
+                            onClick={async () => {
+                              // Guardar las correlatividades en el plan
+                              const updatedYears = planYears.map((y) => ({
+                                ...y,
+                                terms: y.terms.map((t) => ({
+                                  ...t,
+                                  subjects: t.subjects.map((s) =>
+                                    s.id === selectedSubjectForCorrelatives.id
+                                      ? {
+                                          ...s,
+                                          correlatives_to_enroll: selectedSubjectForCorrelatives.correlatives_to_enroll || [],
+                                          correlatives_to_exam: selectedSubjectForCorrelatives.correlatives_to_exam || []
+                                        }
+                                      : s
+                                  )
+                                }))
+                              }))
+                              setPlanYears(updatedYears)
+
+                              if (editingPlanId) {
+                                try {
+                                  await saveStudyPlanToBackend(activeCareer, {
+                                    id: editingPlanId,
+                                    name: planName,
+                                    years: updatedYears,
+                                    is_active: getActivePlan(activeCareer)?.id === editingPlanId
+                                  })
+                                } catch (err) {
+                                  setStatusMsg(`Error al guardar correlativas: ${err.message || 'desconocido'}`)
+                                  setStatusType('error')
+                                  return
+                                }
+                              }
+
+                              setStatusMsg('Correlativas guardadas')
+                              setStatusType('success')
+                              setCorrelativeMode(false)
+                            }}
+                          >
+                            ✓ Guardar Correlativas
+                          </button>
+                        </>
+                      )
+                    })()}
+                    </div>
+                  </div>
+                )}
+
+            {/* MODAL: Confirmar cambio de plan vigente */}
+            {confirmActivePlanId && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '400px' }}>
+                  <h3 style={{ marginTop: 0 }}>¿Cambiar plan vigente?</h3>
+                  <p>Al seleccionar este plan como vigente, el plan anterior dejará de serlo. ¿Deseas continuar?</p>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button
+                      style={{ ...styles.button, background: '#999' }}
+                      onClick={() => setConfirmActivePlanId(null)}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      style={{ ...styles.button, background: '#4caf50' }}
+                      onClick={async () => {
+                        try {
+                          const result = await activateStudyPlanBackend(confirmActivePlanId)
+                          await fetchStudyPlans(activeCareer)
+                          const planName = result?.name || 'Plan'
+                          setSelectedPlanFilterId(confirmActivePlanId)
+                          setStatusMsg(`Plan "${planName}" marcado como vigente`)
+                          setStatusType('success')
+                          setConfirmActivePlanId(null)
+                        } catch (err) {
+                          setStatusMsg(`Error al marcar plan vigente: ${err.message || 'desconocido'}`)
+                          setStatusType('error')
+                        }
+                      }}
+                    >
+                      Sí, cambiar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MODAL: Duplicar plan */}
+            {showDuplicatePlanModal && duplicatePlanTarget && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '420px', width: '90%' }}>
+                  <h3 style={{ marginTop: 0 }}>Duplicar plan</h3>
+                  <div style={{ marginBottom: '10px', color: '#555' }}>
+                    Se creara una copia de <strong>{duplicatePlanTarget.name}</strong>.
+                  </div>
+                  <label style={styles.label}>Nombre del nuevo plan</label>
+                  <input
+                    style={styles.input}
+                    value={duplicatePlanName}
+                    onChange={(e) => {
+                      setDuplicatePlanName(e.target.value)
+                      setDuplicatePlanError('')
+                    }}
+                    placeholder="Ej: Plan 2023 (copia)"
+                  />
+                  {duplicatePlanError && (
+                    <div style={{ color: '#b00020', fontSize: '12px', marginTop: '6px' }}>{duplicatePlanError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '16px' }}>
+                    <button
+                      style={{ ...styles.button, background: '#999' }}
+                      onClick={() => {
+                        setShowDuplicatePlanModal(false)
+                        setDuplicatePlanTarget(null)
+                        setDuplicatePlanName('')
+                        setDuplicatePlanError('')
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      style={{ ...styles.button, background: '#4caf50' }}
+                      onClick={async () => {
+                        const trimmedName = String(duplicatePlanName || '').trim()
+                        if (!trimmedName) {
+                          setDuplicatePlanError('Ingresa un nombre para el nuevo plan.')
+                          return
+                        }
+                        const existingNames = new Set((savedPlans[activeCareer] || []).map((p) => String(p.name || '').trim().toLowerCase()))
+                        if (existingNames.has(trimmedName.toLowerCase())) {
+                          setDuplicatePlanError('Ya existe un plan con ese nombre.')
+                          return
+                        }
+                        await duplicatePlan(duplicatePlanTarget, trimmedName)
+                        setShowDuplicatePlanModal(false)
+                        setDuplicatePlanTarget(null)
+                        setDuplicatePlanName('')
+                        setDuplicatePlanError('')
+                      }}
+                    >
+                      Duplicar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MODAL: Nombre de plan duplicado */}
+            {showPlanNameDuplicateModal && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '420px', width: '90%' }}>
+                  <h3 style={{ marginTop: 0 }}>Nombre de plan ya existente</h3>
+                  <p style={{ marginBottom: '12px' }}>
+                    Ya existe un plan con el nombre <strong>{planNameDuplicateValue || planName}</strong>.
+                  </p>
+                  <p style={{ color: '#555', marginTop: 0 }}>
+                    Escribe un nombre diferente para poder guardar.
+                  </p>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '16px' }}>
+                    <button
+                      style={{ ...styles.button, background: '#999' }}
+                      onClick={() => {
+                        const normalized = String(planName || '').trim().toLowerCase()
+                        setShowPlanNameDuplicateModal(false)
+                        setPlanNameDuplicateAcknowledged(normalized)
+                      }}
+                    >
+                      Entendido
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MODAL: Confirmar eliminación de plan */}
+            {showConfirmDelete && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '400px' }}>
+                  <h3 style={{ marginTop: 0, color: '#b00020' }}>¿Eliminar plan?</h3>
+                  <p>Esta acción no se puede deshacer. ¿Estás seguro de que deseas eliminar este plan?</p>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button
+                      style={{ ...styles.button, background: '#999' }}
+                      onClick={() => setShowConfirmDelete(null)}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      style={{ ...styles.button, background: '#b00020' }}
+                      onClick={async () => {
+                        try {
+                          await deleteStudyPlanBackend(showConfirmDelete)
+                          await fetchStudyPlans(activeCareer)
+                          setStatusMsg('Plan eliminado correctamente')
+                          setStatusType('success')
+                          setShowConfirmDelete(null)
+                        } catch (err) {
+                          setStatusMsg(`Error al eliminar plan: ${err.message || 'desconocido'}`)
+                          setStatusType('error')
+                        }
+                      }}
+                    >
+                      Sí, eliminar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+              </div>
+            )}
+
+          </div>
+        )}
+
         {/* RESOLUCIONES - Placeholder */}
         {activeMenu === 'resoluciones' && (
           <div style={styles.section}>
@@ -5623,7 +7791,10 @@ const App = () => {
             <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '900px', maxHeight: '80vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h2>Resumen de Propuesta #{viewProposal.id}</h2>
-                <button style={{ ...styles.button, background: '#999' }} onClick={() => setViewProposal(null)}>Cerrar</button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button style={{ ...styles.button, background: '#2196F3' }} onClick={() => downloadProposalDocx(viewProposal.id)}>Descargar DOCX</button>
+                  <button style={{ ...styles.button, background: '#999' }} onClick={() => setViewProposal(null)}>Cerrar</button>
+                </div>
               </div>
 
               <div style={{ marginTop: '15px', padding: '12px', background: '#f5f5f5', borderRadius: '6px' }}>
@@ -5649,7 +7820,7 @@ const App = () => {
                 <h3>Equipo Docente</h3>
                 {Array.isArray(viewProposal.teaching_team) && viewProposal.teaching_team.length > 0 ? (
                   <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr', gap: '8px' }}>
-                    {viewProposal.teaching_team.map((doc, idx) => (
+                    {getTeachingTeamView(viewProposal.teaching_team).map((doc, idx) => (
                       <React.Fragment key={doc.id ?? idx}>
                         <div>{doc.name || '-'}</div>
                         <div>{doc.category || '-'}</div>
@@ -5716,6 +7887,536 @@ const App = () => {
               <div style={{ marginTop: '15px' }}>
                 <h3>Observaciones</h3>
                 <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.observations || '-'}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Matriz de Tributación */}
+        {showMatrizModal && matrizData && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            zIndex: 1000,
+            padding: '10px'
+          }}>
+            <div style={{
+              background: '#fff',
+              borderRadius: '8px',
+              width: '98%',
+              height: '95vh',
+              maxHeight: '95vh',
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h2 style={{ margin: 0, fontSize: '20px' }}>Matriz de Tributación - {activeCareer}</h2>
+                <button
+                  style={{ ...styles.button, background: '#999', padding: '8px 16px' }}
+                  onClick={() => {
+                    setShowMatrizModal(false)
+                    setMatrixColumnFilters({})
+                  }}
+                >
+                  Cerrar ✕
+                </button>
+              </div>
+
+              {matrizData.subjects.length === 0 ? (
+                <p style={{ color: '#777', textAlign: 'center', padding: '20px' }}>No hay asignaturas en el plan</p>
+              ) : (
+                <div style={{ 
+                  flex: 1, 
+                  overflowX: 'auto', 
+                  overflowY: 'auto',
+                  border: '1px solid #ddd', 
+                  borderRadius: '4px',
+                  background: '#fafafa'
+                }}>
+                  <table style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: '13px'
+                  }}>
+                    <thead>
+                      {/* Row 1: Competency Types Headers */}
+                      <tr style={{ background: '#3949ab', color: '#fff', position: 'sticky', top: 0, zIndex: 10 }}>
+                        <th style={{
+                          padding: '12px 10px',
+                          textAlign: 'left',
+                          borderRight: '2px solid #fff',
+                          minWidth: '220px',
+                          position: 'sticky',
+                          left: 0,
+                          background: '#3949ab',
+                          zIndex: 11,
+                          fontWeight: 600
+                        }}>
+                          Asignatura
+                        </th>
+                        
+                        {/* Generic Competencies Header */}
+                        {matrizData.competencies.generic.length > 0 && (
+                          <th colSpan={matrizData.competencies.generic.length} style={{
+                            padding: '12px 10px',
+                            textAlign: 'center',
+                            borderRight: '2px solid #fff',
+                            background: '#283593',
+                            fontWeight: 600
+                          }}>
+                            📋 COMPETENCIAS GENÉRICAS
+                          </th>
+                        )}
+
+                        {/* Specific Competencies Header */}
+                        {matrizData.competencies.specific.length > 0 && (
+                          <th colSpan={matrizData.competencies.specific.length} style={{
+                            padding: '12px 10px',
+                            textAlign: 'center',
+                            background: '#283593',
+                            fontWeight: 600
+                          }}>
+                            🎯 COMPETENCIAS ESPECÍFICAS
+                          </th>
+                        )}
+                      </tr>
+
+                      {/* Row 2: Competency Code Headers */}
+                      <tr style={{ background: '#5c6bc0', color: '#fff', position: 'sticky', top: '48px', zIndex: 9 }}>
+                        <th style={{
+                          padding: '8px 10px',
+                          textAlign: 'left',
+                          borderRight: '2px solid #fff',
+                          minWidth: '220px',
+                          position: 'sticky',
+                          left: 0,
+                          background: '#5c6bc0',
+                          zIndex: 11,
+                          fontWeight: 600,
+                          fontSize: '12px'
+                        }}></th>
+                        {matrizData.competencies.generic.map((comp) => {
+                          const compKey = comp.code || comp.id
+                          const filterKey = `gen:${compKey}`
+                          const selectedLevels = matrixColumnFilters[filterKey] || []
+                          const availableLevels = getMatrixColumnLevels('generic', compKey)
+                          return (
+                          <th key={`gen-${compKey}`} title={comp.description || ''} style={{
+                            padding: '8px 4px',
+                            textAlign: 'center',
+                            borderRight: '1px solid #999',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            minWidth: '80px',
+                            maxWidth: '80px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {comp.code}
+                            <details style={{ marginTop: '4px' }}>
+                              <summary style={{ cursor: 'pointer', fontSize: '10px', color: '#eef', listStyle: 'none' }}>
+                                Filtro{selectedLevels.length > 0 ? ` (${selectedLevels.length})` : ''}
+                              </summary>
+                              <div style={{ display: 'grid', gap: '4px', padding: '6px 4px', background: '#fff', color: '#333', borderRadius: '4px', border: '1px solid #c5cae9' }}>
+                                {[
+                                  { label: 'Alto (3)', value: 3 },
+                                  { label: 'Medio (2)', value: 2 },
+                                  { label: 'Bajo (1)', value: 1 },
+                                  { label: 'Sin Aporte (0)', value: 0 }
+                                ].map((opt) => (
+                                  <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedLevels.includes(opt.value)}
+                                      disabled={availableLevels.length > 0 && !availableLevels.includes(opt.value)}
+                                      onChange={() => toggleMatrixColumnFilter(filterKey, opt.value)}
+                                    />
+                                    {opt.label}
+                                  </label>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => clearMatrixColumnFilter(filterKey)}
+                                  style={{ fontSize: '10px', padding: '2px 4px', border: '1px solid #c5cae9', borderRadius: '4px', background: '#f5f5f5', cursor: 'pointer' }}
+                                >
+                                  Limpiar
+                                </button>
+                              </div>
+                            </details>
+                          </th>
+                        )})}
+                        {matrizData.competencies.specific.map((comp) => {
+                          const compKey = comp.code || comp.id
+                          const filterKey = `spec:${compKey}`
+                          const selectedLevels = matrixColumnFilters[filterKey] || []
+                          const availableLevels = getMatrixColumnLevels('specific', compKey)
+                          return (
+                          <th key={`spec-${compKey}`} title={comp.description || ''} style={{
+                            padding: '8px 4px',
+                            textAlign: 'center',
+                            borderRight: '1px solid #999',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            minWidth: '80px',
+                            maxWidth: '80px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {comp.code}
+                            <details style={{ marginTop: '4px' }}>
+                              <summary style={{ cursor: 'pointer', fontSize: '10px', color: '#eef', listStyle: 'none' }}>
+                                Filtro{selectedLevels.length > 0 ? ` (${selectedLevels.length})` : ''}
+                              </summary>
+                              <div style={{ display: 'grid', gap: '4px', padding: '6px 4px', background: '#fff', color: '#333', borderRadius: '4px', border: '1px solid #c5cae9' }}>
+                                {[
+                                  { label: 'Alto (3)', value: 3 },
+                                  { label: 'Medio (2)', value: 2 },
+                                  { label: 'Bajo (1)', value: 1 },
+                                  { label: 'Sin Aporte (0)', value: 0 }
+                                ].map((opt) => (
+                                  <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedLevels.includes(opt.value)}
+                                      disabled={availableLevels.length > 0 && !availableLevels.includes(opt.value)}
+                                      onChange={() => toggleMatrixColumnFilter(filterKey, opt.value)}
+                                    />
+                                    {opt.label}
+                                  </label>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => clearMatrixColumnFilter(filterKey)}
+                                  style={{ fontSize: '10px', padding: '2px 4px', border: '1px solid #c5cae9', borderRadius: '4px', background: '#f5f5f5', cursor: 'pointer' }}
+                                >
+                                  Limpiar
+                                </button>
+                              </div>
+                            </details>
+                          </th>
+                        )})}
+                        {/* Total column header */}
+                        <th style={{
+                          padding: '8px 10px',
+                          textAlign: 'center',
+                          borderLeft: '2px solid #fff',
+                          background: '#3f51b5',
+                          fontWeight: 600,
+                          fontSize: '18px',
+                          minWidth: '60px',
+                          position: 'sticky',
+                          right: 0,
+                          zIndex: 11
+                        }}>
+                          Total
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {matrixFilteredSubjects.length > 0 && (
+                        <tr>
+                          <td colSpan="999" style={{ padding: '2px', background: '#e8eaf6', height: '2px' }}></td>
+                        </tr>
+                      )}
+
+                      {(() => {
+                        // Agrupar asignaturas por año y cuatrimestre
+                        const grouped = {}
+                        matrixFilteredSubjects.forEach((subject) => {
+                          const key = `${subject.year || 0}-${subject.termName || 'Desconocido'}`
+                          if (!grouped[key]) {
+                            grouped[key] = { year: subject.year, termName: subject.termName, subjects: [] }
+                          }
+                          grouped[key].subjects.push(subject)
+                        })
+
+                        const groups = Object.values(grouped).sort((a, b) => {
+                          if (a.year !== b.year) return a.year - b.year
+                          const termOrder = { 'Anual': 0, '1er Cuatrimestre': 1, '2do Cuatrimestre': 2 }
+                          return (termOrder[a.termName] || 999) - (termOrder[b.termName] || 999)
+                        })
+
+                        return groups.map((group, groupIdx) => (
+                          <React.Fragment key={`group-${group.year}-${group.termName}`}>
+                            <tr style={{
+                              background: '#e3f2fd',
+                              borderTop: groupIdx > 0 ? '2px solid #90caf9' : 'none',
+                              borderBottom: '1px solid #90caf9'
+                            }}>
+                              <td colSpan="999" style={{
+                                padding: '8px 12px',
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                color: '#1565c0'
+                              }}>
+                                📚 Año {group.year} - {group.termName}
+                              </td>
+                            </tr>
+
+                            {group.subjects.map((subject, idx) => {
+                              const subjectMatrix = matrizData.matrix[subject.id]
+                              const hasProposal = !!findProposalForSubject(activeCareer, subject.name, matrizData.planName)
+
+                              return (
+                                <tr key={subject.id} style={{
+                                  background: hasProposal ? (idx % 2 === 0 ? '#fff' : '#fafafa') : '#fffbf0',
+                                  borderBottom: '1px solid #e0e0e0',
+                                  opacity: hasProposal ? 1 : 0.85
+                                }}>
+                                  {/* Subject Name (Sticky) */}
+                                  <td style={{
+                                    padding: '10px 8px',
+                                    borderRight: '3px solid #ddd',
+                                    fontWeight: hasProposal ? 600 : 400,
+                                    minWidth: '150px',
+                                    position: 'sticky',
+                                    left: 0,
+                                    background: hasProposal ? (idx % 2 === 0 ? '#fff' : '#fafafa') : '#fffbf0',
+                                    zIndex: 5,
+                                    color: hasProposal ? '#000' : '#999',
+                                    fontSize: '12px'
+                                  }}>
+                                    {subject.name}
+                                    {!hasProposal && <span style={{ fontSize: '10px', marginLeft: '4px', color: '#bbb' }}>(sin ✽)</span>}
+                                  </td>
+
+                                  {/* Generic Competency Levels */}
+                                  {matrizData.competencies.generic.map((comp) => {
+                                    const compKey = comp.code || comp.id
+                                    const level = subjectMatrix ? subjectMatrix.generic[compKey] : 0
+                                    const filterKey = `gen:${compKey}`
+                                    const selectedLevels = matrixColumnFilters[filterKey] || []
+                                    const isFiltered = selectedLevels.length > 0
+                                    const isMatch = !isFiltered || selectedLevels.includes(level)
+                                    return (
+                                      <td key={`${subject.id}-gen-${compKey}`} style={{
+                                        padding: '8px 4px',
+                                        textAlign: 'center',
+                                        borderRight: '1px solid #e0e0e0',
+                                        minWidth: '70px',
+                                        maxWidth: '70px',
+                                        background: level > 0 && hasProposal ? 'rgba(124, 58, 237, 0.12)' : (hasProposal ? (idx % 2 === 0 ? '#fff' : '#fafafa') : '#fffbf0'),
+                                        fontWeight: level > 0 && hasProposal ? 600 : 400,
+                                        fontSize: '11px',
+                                        opacity: isMatch ? 1 : 0.2,
+                                        boxShadow: isFiltered && isMatch ? 'inset 0 0 0 2px #3f51b5' : 'none'
+                                      }}>
+                                        <span style={{
+                                          display: 'inline-block',
+                                          minWidth: '48px',
+                                          padding: '4px 6px',
+                                          borderRadius: '3px',
+                                          color: level === 3 ? '#388e3c' : (level === 2 ? '#f57c00' : (level === 1 ? '#d32f2f' : '#bbb')),
+                                          fontWeight: 600
+                                        }}>
+                                          {getLevelDisplay(level)}
+                                        </span>
+                                      </td>
+                                    )
+                                  })}
+
+                                  {/* Specific Competency Levels */}
+                                  {matrizData.competencies.specific.map((comp) => {
+                                    const compKey = comp.code || comp.id
+                                    const level = subjectMatrix ? subjectMatrix.specific[compKey] : 0
+                                    const filterKey = `spec:${compKey}`
+                                    const selectedLevels = matrixColumnFilters[filterKey] || []
+                                    const isFiltered = selectedLevels.length > 0
+                                    const isMatch = !isFiltered || selectedLevels.includes(level)
+                                    return (
+                                      <td key={`${subject.id}-spec-${compKey}`} style={{
+                                        padding: '8px 4px',
+                                        textAlign: 'center',
+                                        borderRight: '1px solid #e0e0e0',
+                                        minWidth: '70px',
+                                        maxWidth: '70px',
+                                        background: level > 0 && hasProposal ? 'rgba(124, 58, 237, 0.12)' : (hasProposal ? (idx % 2 === 0 ? '#fff' : '#fafafa') : '#fffbf0'),
+                                        fontWeight: level > 0 && hasProposal ? 600 : 400,
+                                        fontSize: '11px',
+                                        opacity: isMatch ? 1 : 0.2,
+                                        boxShadow: isFiltered && isMatch ? 'inset 0 0 0 2px #3f51b5' : 'none'
+                                      }}>
+                                        <span style={{
+                                          display: 'inline-block',
+                                          minWidth: '48px',
+                                          padding: '4px 6px',
+                                          borderRadius: '3px',
+                                          color: level === 3 ? '#388e3c' : (level === 2 ? '#f57c00' : (level === 1 ? '#d32f2f' : '#bbb')),
+                                          fontWeight: 600
+                                        }}>
+                                          {getLevelDisplay(level)}
+                                        </span>
+                                      </td>
+                                    )
+                                  })}
+
+                                  {/* Total Competencies Count (Sticky) */}
+                                  {(() => {
+                                    let totalComps = 0
+                                    if (subjectMatrix) {
+                                      matrizData.competencies.generic.forEach((comp) => {
+                                        const key = comp.code || comp.id
+                                        if (subjectMatrix.generic[key] > 0) totalComps++
+                                      })
+                                      matrizData.competencies.specific.forEach((comp) => {
+                                        const key = comp.code || comp.id
+                                        if (subjectMatrix.specific[key] > 0) totalComps++
+                                      })
+                                    }
+                                    return (
+                                      <td style={{
+                                        padding: '8px 10px',
+                                        textAlign: 'center',
+                                        borderLeft: '2px solid #ddd',
+                                        minWidth: '60px',
+                                        position: 'sticky',
+                                        right: 0,
+                                        background: hasProposal ? (idx % 2 === 0 ? '#fff' : '#fafafa') : '#fffbf0',
+                                        zIndex: 5,
+                                        fontWeight: 600,
+                                        fontSize: '18px',
+                                        color: totalComps > 0 ? '#7c3aed' : '#999'
+                                      }}>
+                                        {totalComps}
+                                      </td>
+                                    )
+                                  })()}
+                                </tr>
+                              )
+                            })}
+                          </React.Fragment>
+                        ))
+                      })()}
+
+                      {/* Footer Row - Total Competencies per Subject */}
+                      <tr style={{
+                        background: '#3f51b5',
+                        color: '#fff',
+                        fontWeight: 600,
+                        borderTop: '2px solid #1a1a4d'
+                      }}>
+                        <td style={{
+                          padding: '10px 8px',
+                          borderRight: '3px solid #fff',
+                          minWidth: '150px',
+                          position: 'sticky',
+                          left: 0,
+                          background: '#3f51b5',
+                          zIndex: 5,
+                          fontSize: '18px',
+                          fontWeight: 700
+                        }}>
+                          📊 TOTAL
+                        </td>
+
+                        {/* Count for each generic competency */}
+                        {matrizData.competencies.generic.map((comp) => {
+                          const compKey = comp.code || comp.id
+                          let count = 0
+                          matrixFilteredSubjects.forEach((subject) => {
+                            const subjectMatrix = matrizData.matrix[subject.id]
+                            if (subjectMatrix && subjectMatrix.generic[compKey] > 0) {
+                              count++
+                            }
+                          })
+                          return (
+                            <td key={`total-gen-${compKey}`} style={{
+                              padding: '8px 4px',
+                              textAlign: 'center',
+                              borderRight: '1px solid #7986cb',
+                              minWidth: '70px',
+                              maxWidth: '70px',
+                              fontSize: '18px',
+                              fontWeight: 700
+                            }}>
+                              {count}
+                            </td>
+                          )
+                        })}
+
+                        {/* Count for each specific competency */}
+                        {matrizData.competencies.specific.map((comp) => {
+                          const compKey = comp.code || comp.id
+                          let count = 0
+                          matrixFilteredSubjects.forEach((subject) => {
+                            const subjectMatrix = matrizData.matrix[subject.id]
+                            if (subjectMatrix && subjectMatrix.specific[compKey] > 0) {
+                              count++
+                            }
+                          })
+                          return (
+                            <td key={`total-spec-${compKey}`} style={{
+                              padding: '8px 4px',
+                              textAlign: 'center',
+                              borderRight: '1px solid #7986cb',
+                              minWidth: '70px',
+                              maxWidth: '70px',
+                              fontSize: '18px',
+                              fontWeight: 700
+                            }}>
+                              {count}
+                            </td>
+                          )
+                        })}
+
+                        {/* Grand total - all competencies with level > 0 */}
+                        <td style={{
+                          padding: '10px 8px',
+                          textAlign: 'center',
+                          borderLeft: '2px solid #fff',
+                          minWidth: '60px',
+                          position: 'sticky',
+                          right: 0,
+                          background: '#3f51b5',
+                          zIndex: 5,
+                          fontSize: '18px',
+                          fontWeight: 700
+                        }}>
+                          {(() => {
+                            let grandTotal = 0
+                            matrixFilteredSubjects.forEach((subject) => {
+                              const subjectMatrix = matrizData.matrix[subject.id]
+                              if (subjectMatrix) {
+                                matrizData.competencies.generic.forEach((comp) => {
+                                  const key = comp.code || comp.id
+                                  if (subjectMatrix.generic[key] > 0) grandTotal++
+                                })
+                                matrizData.competencies.specific.forEach((comp) => {
+                                  const key = comp.code || comp.id
+                                  if (subjectMatrix.specific[key] > 0) grandTotal++
+                                })
+                              }
+                            })
+                            return grandTotal
+                          })()}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Legend */}
+              <div style={{ marginTop: '15px', padding: '12px 15px', background: '#f5f5f5', borderRadius: '4px', fontSize: '12px', borderTop: '1px solid #ddd' }}>
+                <strong style={{ fontSize: '13px' }}>📌 Leyenda de Niveles:</strong>
+                <div style={{ display: 'flex', gap: '25px', marginTop: '8px', flexWrap: 'wrap' }}>
+                  <div><span style={{ color: '#d32f2f', fontWeight: 700, fontSize: '13px' }}>Bajo (1)</span> - Aporte bajo</div>
+                  <div><span style={{ color: '#f57c00', fontWeight: 700, fontSize: '13px' }}>Medio (2)</span> - Aporte medio</div>
+                  <div><span style={{ color: '#388e3c', fontWeight: 700, fontSize: '13px' }}>Alto (3)</span> - Aporte alto</div>
+                  <div><span style={{ color: '#bbb', fontWeight: 700, fontSize: '13px' }}>-</span> - Sin aporte</div>
+                </div>
               </div>
             </div>
           </div>

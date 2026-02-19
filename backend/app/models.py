@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -45,6 +45,8 @@ class Proposal(Base):
     source_type = Column(String(50), nullable=True)  # docx, pdf, manual
     status = Column(String(50), nullable=True)  # EnProceso, Importada, Creada
     
+    study_subject_id = Column(Integer, ForeignKey("study_subjects.id"), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -60,6 +62,8 @@ class Proposal(Base):
         back_populates="proposal",
         cascade="all, delete-orphan",
     )
+
+    study_subject = relationship("StudySubject", back_populates="proposals")
     
     def __repr__(self):
         return f"<Proposal(id={self.id}, title={self.title}, career={self.career})>"
@@ -70,6 +74,7 @@ class CompetencyCatalog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     career = Column(String(255), nullable=False, index=True)
+    plan_name = Column(String(255), nullable=True, index=True)
     competency_type = Column(String(20), nullable=False, index=True)  # generic | specific
     code = Column(String(50), nullable=False, index=True)
     description = Column(Text, nullable=False)
@@ -136,3 +141,99 @@ class ProposalTeacher(Base):
 
     proposal = relationship("Proposal", back_populates="teachers")
     teacher = relationship("Teacher", back_populates="proposals")
+
+
+class StudyPlan(Base):
+    __tablename__ = "study_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career = Column(String(255), nullable=False, index=True)
+    name = Column(String(255), nullable=False, index=True)
+    is_active = Column(Boolean, nullable=True, default=False)
+    payload = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    years = relationship(
+        "StudyYear",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+    )
+
+
+class StudyYear(Base):
+    __tablename__ = "study_years"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("study_plans.id"), nullable=False, index=True)
+    year_number = Column(Integer, nullable=False)
+    label = Column(String(50), nullable=True)
+    sort_order = Column(Integer, nullable=True)
+
+    plan = relationship("StudyPlan", back_populates="years")
+    terms = relationship(
+        "StudyTerm",
+        back_populates="year",
+        cascade="all, delete-orphan",
+    )
+
+
+class StudyTerm(Base):
+    __tablename__ = "study_terms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    year_id = Column(Integer, ForeignKey("study_years.id"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    sort_order = Column(Integer, nullable=True)
+
+    year = relationship("StudyYear", back_populates="terms")
+    subjects = relationship(
+        "StudySubject",
+        back_populates="term",
+        cascade="all, delete-orphan",
+    )
+
+
+class StudySubject(Base):
+    __tablename__ = "study_subjects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    term_id = Column(Integer, ForeignKey("study_terms.id"), nullable=False, index=True)
+    code = Column(String(50), nullable=True)
+    name = Column(String(255), nullable=False, index=True)
+    character = Column(String(50), nullable=True)
+    regime = Column(String(50), nullable=True)
+    theoretical_hours = Column(Integer, nullable=True)
+    practical_hours = Column(Integer, nullable=True)
+    total_hours = Column(Integer, nullable=True)
+    weekly_hours = Column(Integer, nullable=True)
+    practice_scope = Column(Text, nullable=True)
+    minimum_content = Column(Text, nullable=True)
+    generic_competencies = Column(Text, nullable=True)
+    specific_competencies = Column(Text, nullable=True)
+    blocks = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    term = relationship("StudyTerm", back_populates="subjects")
+    proposals = relationship("Proposal", back_populates="study_subject")
+    prerequisites = relationship(
+        "StudySubjectPrerequisite",
+        foreign_keys="StudySubjectPrerequisite.subject_id",
+        cascade="all, delete-orphan",
+    )
+    required_for = relationship(
+        "StudySubjectPrerequisite",
+        foreign_keys="StudySubjectPrerequisite.prerequisite_id",
+        cascade="all, delete-orphan",
+    )
+
+
+class StudySubjectPrerequisite(Base):
+    __tablename__ = "study_subject_prerequisites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subject_id = Column(Integer, ForeignKey("study_subjects.id"), nullable=False, index=True)
+    prerequisite_id = Column(Integer, ForeignKey("study_subjects.id"), nullable=False, index=True)
