@@ -31,6 +31,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 # --- Google Docs import logic and endpoint ---
@@ -1071,6 +1072,7 @@ async def upload_proposal(
 
     proposal = models.Proposal(
         title=subject or file.filename,  # Use subject as title, or filename as fallback
+        filename=file.filename,
         original_filename=file.filename,
         source_type="upload",
         status="Importada",
@@ -1791,27 +1793,28 @@ def download_proposal_docx(
         output_dir = os.path.dirname(output_path)
         background.add_task(shutil.rmtree, output_dir, ignore_errors=True)
 
-    # Generate filename: Year - Cuatrimestre - Subject.docx
+    # Generate filename: Año°_Cuatrimestre - Asignatura.docx
     year = proposal.year_of_career or "0"
     quarter_raw = proposal.quarter or "0"
     subject = proposal.subject or "Sin_Asignatura"
     
-    # Normalize quarter to 1º, 2º, or A
+    # Normalize quarter to 1° , 2° , or A
     import re
     quarter_lower = str(quarter_raw).lower()
     if "anual" in quarter_lower or quarter_lower.strip() == "a":
         quarter = "A"
     elif "1" in quarter_lower or "primer" in quarter_lower:
-        quarter = "1º"
+        quarter = "1°"
     elif "2" in quarter_lower or "segundo" in quarter_lower:
-        quarter = "2º"
+        quarter = "2°"
     else:
         quarter = quarter_raw
     
     # Clean filename (remove invalid characters)
     subject_clean = re.sub(r'[<>:"/\\|?*]', '', subject)
     
-    filename = f"{year} - {quarter} - {subject_clean}.docx"
+    year_display = f"{year}°" if str(year).strip() else "0°"
+    filename = f"{year_display}_{quarter} - {subject_clean}.docx"
     return FileResponse(
         output_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1823,6 +1826,12 @@ def download_proposal_docx(
 def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_db)):
     """Create a new proposal from form data (no file upload)."""
     try:
+        subject_clean = re.sub(r'[<>:"/\\|?*]', '', proposal.subject or '').strip()
+        safe_subject = subject_clean or "Sin materia"
+        safe_year = proposal.academic_year or "Sin año"
+        safe_quarter = proposal.quarter or "Sin cuatrimestre"
+        filename = f"{safe_year} - {safe_quarter} - {safe_subject}.docx"
+
         # Convert Pydantic models to dicts for JSON storage
         learning_outcomes_dict = [lo.model_dump() if hasattr(lo, 'model_dump') else lo.dict() for lo in proposal.learning_outcomes] if proposal.learning_outcomes else []
         units_dict = [u.model_dump() if hasattr(u, 'model_dump') else u.dict() for u in proposal.units] if proposal.units else []
@@ -1846,6 +1855,7 @@ def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_
 
         db_proposal = models.Proposal(
             title=proposal.title,
+            filename=filename,
             career=proposal.career,
             subject=proposal.subject,
             study_plan=proposal.study_plan,

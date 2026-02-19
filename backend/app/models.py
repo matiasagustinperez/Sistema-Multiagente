@@ -41,6 +41,7 @@ class Proposal(Base):
     observations = Column(Text, nullable=True)
     
     # File metadata
+    filename = Column(String(500), nullable=False)
     original_filename = Column(String(500), nullable=True)
     source_type = Column(String(50), nullable=True)  # docx, pdf, manual
     status = Column(String(50), nullable=True)  # EnProceso, Importada, Creada

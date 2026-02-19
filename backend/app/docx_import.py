@@ -762,18 +762,40 @@ def extract_units_from_docx(doc: Document, section_start_idx: int, section_end_i
             content_raw = text
             biblio_raw = ""
 
-        # Limpiar prefijo de contenidos
-        content = re.sub(r'(?i)contenidos\s*:?', '', content_raw).strip()
+        # Tomar contenido solo desde "Contenidos:" y cortar cualquier bibliografia
+        content_section = content_raw
+        content_parts = re.split(r'(?i)contenidos\s*:?', content_raw, maxsplit=1)
+        if len(content_parts) > 1:
+            content_section = content_parts[1]
+        content_section = re.split(r'(?i)bibliograf[ií]a\s+(basica|básica|complementaria)\b', content_section, maxsplit=1)[0]
+        content = content_section.strip()
+
+        # Elegir fuente de bibliografia: específica si existe, sino la del bloque general
+        biblio_source = biblio_raw.strip() if biblio_raw else ""
+        if not biblio_source:
+            basic_parts = re.split(r'(?i)bibliograf[ií]a\s+basica\s*\(.*?\)\s*:?', content_raw, maxsplit=1)
+            if len(basic_parts) > 1:
+                biblio_source = basic_parts[1]
+            else:
+                basic_parts = re.split(r'(?i)bibliograf[ií]a\s+basica\s*:?', content_raw, maxsplit=1)
+                if len(basic_parts) > 1:
+                    biblio_source = basic_parts[1]
+
+        # Cortar bibliografia si luego aparece contenido o bibliografia especifica
+        if biblio_source:
+            biblio_source = re.split(r'(?i)contenidos\s*:?', biblio_source, maxsplit=1)[0]
+            biblio_source = re.split(r'(?i)bibliograf[ií]a\s+espec[ií]fica\s+de\s+la\s+unidad\s*:?', biblio_source, maxsplit=1)[0]
 
         # Separar bibliografia basica y complementaria
         bib_basic = ""
         bib_comp = ""
-        if biblio_raw:
-            basic_parts = re.split(r'(?i)bibliograf[ií]a\s+basica\s*\(.*?\)\s*:?', biblio_raw, maxsplit=1)
+        if biblio_source:
+            basic_parts = re.split(r'(?i)bibliograf[ií]a\s+basica\s*\(.*?\)\s*:?', biblio_source, maxsplit=1)
             if len(basic_parts) > 1:
                 biblio_after_basic = basic_parts[1]
             else:
-                biblio_after_basic = biblio_raw
+                basic_parts = re.split(r'(?i)bibliograf[ií]a\s+basica\s*:?', biblio_source, maxsplit=1)
+                biblio_after_basic = basic_parts[1] if len(basic_parts) > 1 else biblio_source
 
             comp_parts = re.split(r'(?i)bibliograf[ií]a\s+complementaria\s*:?', biblio_after_basic, maxsplit=1)
             if len(comp_parts) > 1:

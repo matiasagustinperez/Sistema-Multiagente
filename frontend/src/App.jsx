@@ -630,6 +630,38 @@ const App = () => {
                     )}
                     <button
                       style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                      title="Renombrar asignatura"
+                      onClick={() => {
+                        const nextName = window.prompt('Nuevo nombre de asignatura', subject.name || '')
+                        if (!nextName || !nextName.trim()) {
+                          return
+                        }
+                        const updatedYears = planYears.map((y) => {
+                          if (y.id === year.id) {
+                            return {
+                              ...y,
+                              terms: y.terms.map((t) => {
+                                if (t.id === term.id) {
+                                  return {
+                                    ...t,
+                                    subjects: t.subjects.map((s) =>
+                                      s.id === subject.id ? { ...s, name: nextName.trim() } : s
+                                    )
+                                  }
+                                }
+                                return t
+                              })
+                            }
+                          }
+                          return y
+                        })
+                        setPlanYears(updatedYears)
+                      }}
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
                       title="Eliminar asignatura"
                       onClick={() => {
                         const updatedYears = planYears.map((y) => {
@@ -4272,9 +4304,9 @@ const App = () => {
       unidades: data.units?.map((unit, idx) => ({
         id: idx + 1,
         nombre: unit.name || '',
-        contenidos: unit.content || '',
-        bibBasica: unit.bibliography_basic || '',
-        bibCompl: unit.bibliography_complementary || ''
+        contenidos: unit.contenidos || unit.content || '',
+        bibBasica: unit.bib_basica || unit.bibliography_basic || '',
+        bibCompl: unit.bib_complementaria || unit.bibliography_complementary || ''
       })) || [],
       trabajosPracticos: data.practicals?.map((tp, idx) => ({
         id: idx + 1,
@@ -7447,6 +7479,12 @@ const App = () => {
                         {planYears.map((year) => {
                           const anualTerms = year.terms.filter((t) => t.name === 'Anual')
                           const otherTerms = year.terms.filter((t) => t.name !== 'Anual')
+                          const firstTerm = otherTerms.find((t) => t.name === '1er Cuatrimestre')
+                          const secondTerm = otherTerms.find((t) => t.name === '2do Cuatrimestre')
+                          const remainingTerms = otherTerms.filter(
+                            (t) => t !== firstTerm && t !== secondTerm
+                          )
+                          const orderedTerms = [firstTerm, secondTerm, ...remainingTerms].filter(Boolean)
 
                           return (
                             <div key={year.id} style={{ border: '1px solid #d9e1e6', borderRadius: '8px', padding: '12px', background: '#fff' }}>
@@ -7471,9 +7509,9 @@ const App = () => {
                               )}
 
                               {/* Mostrar cuatrimestres en 2 columnas */}
-                              {otherTerms.length > 0 && (
+                              {orderedTerms.length > 0 && (
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '15px' }}>
-                                  {otherTerms.map((term) => (
+                                  {orderedTerms.map((term) => (
                                     <div key={term.id}>
                                       {renderTermCard(term, year, 'half')}
                                     </div>
@@ -7658,6 +7696,12 @@ const App = () => {
                     {planYears.map((year) => {
                       const anualTerms = year.terms.filter((t) => t.name === 'Anual')
                       const otherTerms = year.terms.filter((t) => t.name !== 'Anual')
+                      const firstTerm = otherTerms.find((t) => t.name === '1er Cuatrimestre')
+                      const secondTerm = otherTerms.find((t) => t.name === '2do Cuatrimestre')
+                      const remainingTerms = otherTerms.filter(
+                        (t) => t !== firstTerm && t !== secondTerm
+                      )
+                      const orderedTerms = [firstTerm, secondTerm, ...remainingTerms].filter(Boolean)
 
                       return (
                         <div key={year.id} style={{ border: '1px solid #d9e1e6', borderRadius: '8px', padding: '12px', marginBottom: '15px', background: '#f9fafb' }}>
@@ -7742,9 +7786,9 @@ const App = () => {
                             </div>
                           )}
 
-                          {otherTerms.length > 0 && (
+                          {orderedTerms.length > 0 && (
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                              {otherTerms.map((term) => (
+                              {orderedTerms.map((term) => (
                                 <div key={term.id}>
                                   <h5>{term.name}</h5>
                                   {term.subjects && term.subjects.length > 0 ? (
