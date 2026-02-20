@@ -168,7 +168,7 @@ def extract_gdoc_payload(gdoc_url: str) -> tuple[str, str, str, dict]:
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-    doc_hash = compute_payload_hash(extracted_payload)
+    doc_hash = compute_payload_hash(build_extracted_snapshot(extracted_payload))
     return extracted_subject, extracted_title, doc_hash, extracted_payload
 
 
@@ -720,7 +720,11 @@ def create_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
         proposal.gdoc_last_checked = now
         proposal.gdoc_last_synced = now
         proposal.gdoc_status = "ok"
-        proposal.gdoc_hash = compute_payload_hash(build_proposal_snapshot(db, proposal))
+        try:
+            _, _, extracted_hash, _ = extract_gdoc_payload(gdoc_url)
+            proposal.gdoc_hash = extracted_hash
+        except Exception:
+            proposal.gdoc_hash = compute_payload_hash(build_extracted_snapshot(build_proposal_snapshot(db, proposal)))
         db.add(proposal)
         db.commit()
         db.refresh(proposal)
@@ -889,11 +893,13 @@ def apply_extracted_payload_to_proposal(db: Session, proposal: models.Proposal, 
 def build_proposal_snapshot(db: Session, proposal: models.Proposal) -> dict:
     competencies = get_proposal_competencies(db, proposal.id)
     return {
+        "minimum_content": proposal.minimum_content or "",
         "importance": proposal.fundamentals_part1 or "",
         "professional_profile": proposal.fundamentals_part2 or "",
         "learning_outcomes": normalize_learning_outcomes(proposal.learning_outcomes or []),
-        "units": normalize_list_items(proposal.units or [], {"id"}),
-        "practicals": normalize_list_items(proposal.practicals or [], {"id"}),
+        "units": normalize_unit_items(proposal.units or []),
+        "practicals": normalize_practical_items(proposal.practicals or []),
+        "teaching_team": normalize_teaching_team_items(proposal.teaching_team or []),
         "methodology": proposal.methodology or "",
         "evaluation": proposal.evaluation or "",
         "generic_competencies": normalize_competency_items(competencies.get("generic") or []),
@@ -903,11 +909,13 @@ def build_proposal_snapshot(db: Session, proposal: models.Proposal) -> dict:
 
 def build_extracted_snapshot(payload: dict) -> dict:
     return {
+        "minimum_content": payload.get("minimum_content") or "",
         "importance": payload.get("importance") or "",
         "professional_profile": payload.get("professional_profile") or "",
         "learning_outcomes": normalize_learning_outcomes(payload.get("learning_outcomes") or []),
-        "units": normalize_list_items(payload.get("units") or [], {"id"}),
-        "practicals": normalize_list_items(payload.get("practicals") or [], {"id"}),
+        "units": normalize_unit_items(payload.get("units") or []),
+        "practicals": normalize_practical_items(payload.get("practicals") or []),
+        "teaching_team": normalize_teaching_team_items(payload.get("teaching_team") or []),
         "methodology": payload.get("methodology") or "",
         "evaluation": payload.get("evaluation") or "",
         "generic_competencies": normalize_competency_items(payload.get("generic_competencies") or []),
@@ -935,6 +943,64 @@ def normalize_list_items(items: list, drop_keys: set[str] | None = None) -> list
     return normalized
 
 
+def normalize_snapshot_text(value) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def normalize_unit_items(items: list) -> list[dict]:
+    normalized: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "name": normalize_snapshot_text(item.get("name")),
+                "content": normalize_snapshot_text(item.get("content") or item.get("contenidos")),
+                "bibliography_basic": normalize_snapshot_text(
+                    item.get("bibliography_basic") or item.get("bib_basica") or item.get("bib_basic")
+                ),
+                "bibliography_complementary": normalize_snapshot_text(
+                    item.get("bibliography_complementary") or item.get("bib_complementaria") or item.get("bib_comp")
+                ),
+            }
+        )
+    return normalized
+
+
+def normalize_practical_items(items: list) -> list[dict]:
+    normalized: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "number": normalize_snapshot_text(item.get("number") or item.get("numero")),
+                "name": normalize_snapshot_text(item.get("name") or item.get("nombre")),
+                "objective": normalize_snapshot_text(item.get("objective") or item.get("objetivo")),
+                "activities": normalize_snapshot_text(item.get("activities") or item.get("actividades")),
+                "materials": normalize_snapshot_text(item.get("materials") or item.get("materiales")),
+                "scope": normalize_snapshot_text(item.get("scope") or item.get("ambito")),
+            }
+        )
+    return normalized
+
+
+def normalize_teaching_team_items(items: list) -> list[dict]:
+    normalized: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "name": re.sub(r"\s+", " ", str(item.get("name") or item.get("nombre") or "").strip()),
+                "email": re.sub(r"\s+", " ", str(item.get("email") or item.get("correo") or "").strip().lower()),
+                "category": re.sub(r"\s+", " ", str(item.get("category") or item.get("categoria") or "").strip()),
+            }
+        )
+    normalized.sort(key=lambda value: (value.get("name") or "", value.get("email") or "", value.get("category") or ""))
+    return normalized
+
+
 def normalize_learning_outcomes(items: list) -> list[str]:
     normalized = []
     for item in items or []:
@@ -959,6 +1025,8 @@ def get_gdoc_diff(proposal_id: int, db: Session = Depends(get_db)):
     latest_snapshot = build_extracted_snapshot(extracted_payload)
 
     labels = {
+        "teaching_team": "Equipo docente",
+        "minimum_content": "Contenidos mínimos",
         "importance": "Importancia",
         "professional_profile": "Perfil profesional",
         "learning_outcomes": "Resultados de aprendizaje",
@@ -969,6 +1037,8 @@ def get_gdoc_diff(proposal_id: int, db: Session = Depends(get_db)):
         "methodology": "Metodología",
         "evaluation": "Evaluación",
     }
+
+    review_required_keys = {"minimum_content", "teaching_team"}
 
     changes = {}
     for key, label in labels.items():
@@ -981,6 +1051,7 @@ def get_gdoc_diff(proposal_id: int, db: Session = Depends(get_db)):
                 "latest": latest_val,
                 "current_display": format_diff_value(current_val),
                 "latest_display": format_diff_value(latest_val),
+                "review_required": key in review_required_keys,
             }
 
     return {
@@ -1298,7 +1369,19 @@ def normalize_competency_level(value) -> int:
     if isinstance(value, bool):
         return 0
     if isinstance(value, (int, float)):
-        return int(value)
+        try:
+            level = int(value)
+            return level if level in (0, 1, 2, 3) else 0
+        except Exception:
+            return 0
+    text = strip_accents(str(value)).strip().lower()
+    if not text:
+        return 0
+    if text.isdigit():
+        level = int(text)
+        return level if level in (0, 1, 2, 3) else 0
+    if text in LEVEL_VALUES:
+        return LEVEL_VALUES[text]
     return 0
 
 
@@ -1839,13 +1922,13 @@ def normalize_competency_items(items: list) -> list[dict]:
     for item in items or []:
         if isinstance(item, dict):
             code = (item.get("code") or "").strip()
-            description = (item.get("description") or "").strip()
-            level = normalize_competency_level(item.get("level"))
+            description = (item.get("description") or item.get("descripcion") or "").strip()
+            level = normalize_competency_level(item.get("level") or item.get("level_label") or item.get("nivel"))
         else:
             data = item.model_dump() if hasattr(item, "model_dump") else item.dict()
             code = (data.get("code") or "").strip()
-            description = (data.get("description") or "").strip()
-            level = normalize_competency_level(data.get("level"))
+            description = (data.get("description") or data.get("descripcion") or "").strip()
+            level = normalize_competency_level(data.get("level") or data.get("level_label") or data.get("nivel"))
         if not code and not description:
             continue
         normalized.append({

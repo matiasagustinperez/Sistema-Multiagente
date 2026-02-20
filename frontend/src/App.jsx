@@ -1403,7 +1403,7 @@ const App = () => {
       fetchProposals()
     } catch (err) {
       const message = err?.message === 'Failed to fetch'
-        ? 'No se pudo conectar al backend (http://localhost:8001). Verifica que esté levantado.'
+        ? 'No se pudo conectar al backend. Verifica que esté levantado.'
         : (err?.message || 'No se pudo crear y vincular el documento')
       setViewProposalGdocError(message)
     } finally {
@@ -1428,6 +1428,7 @@ const App = () => {
       setViewProposalLinkIssue('Documento sincronizado desde Google Docs.')
       setViewProposalGdocUpdateAvailable(false)
       setViewProposalGdocUpdateMessage('')
+      setShowGdocDiff(false)
       setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
       fetchProposals()
     } catch (err) {
@@ -1435,6 +1436,28 @@ const App = () => {
     } finally {
       setViewProposalGdocSyncLoading(false)
     }
+  }
+
+  const acceptLatestGdocChanges = async (proposalId) => {
+    if (!proposalId) {
+      return
+    }
+    const res = await fetch(`http://localhost:8001/proposals/${proposalId}/gdoc-accept-latest`, {
+      method: 'POST'
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.detail || 'No se pudo marcar la versión actual como revisada')
+    }
+    setViewProposal((prev) => {
+      if (!prev || prev.id !== proposalId) return prev
+      return {
+        ...prev,
+        gdoc_hash: data.gdoc_hash || prev.gdoc_hash,
+        gdoc_status: 'ok'
+      }
+    })
+    setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
   }
 
   const openGdocDiff = async (proposalId) => {
@@ -1451,8 +1474,8 @@ const App = () => {
       }
       setGdocDiffData(data)
       const initialSelection = {}
-      Object.keys(data.changes || {}).forEach((key) => {
-        initialSelection[key] = true
+      Object.entries(data.changes || {}).forEach(([key, change]) => {
+        initialSelection[key] = !change?.review_required
       })
       setGdocDiffSelection(initialSelection)
       if (!data.changes || Object.keys(data.changes).length === 0) {
@@ -1523,9 +1546,15 @@ const App = () => {
       return
     }
     try {
+      const reviewOnlyKeys = ['minimum_content', 'teaching_team']
+      const selectedReviewOnly = reviewOnlyKeys.filter((key) => !!gdocDiffSelection[key])
       const patch = buildPatchFromDiff(gdocDiffData.latest, gdocDiffSelection)
       if (Object.keys(patch).length === 0) {
-        setViewProposalGdocUpdateMessage('No hay cambios seleccionados para aplicar.')
+        if (selectedReviewOnly.length > 0) {
+          setViewProposalGdocUpdateMessage('Los bloques sensibles seleccionados son solo de revisión y no se aplican automáticamente.')
+        } else {
+          setViewProposalGdocUpdateMessage('No hay cambios seleccionados para aplicar.')
+        }
         return
       }
       const res = await fetch(`http://localhost:8001/proposals/${viewProposal.id}`, {
@@ -1539,10 +1568,34 @@ const App = () => {
       }
       setViewProposal(data)
       setViewProposalLinkIssue('Cambios aplicados desde Google Docs.')
+      if (selectedReviewOnly.length > 0) {
+        setViewProposalGdocUpdateMessage('Se aplicaron los cambios permitidos. Los bloques sensibles quedan marcados para revisión manual.')
+      }
+      await acceptLatestGdocChanges(viewProposal.id)
+      setShowGdocDiff(false)
+      setViewProposalGdocUpdateAvailable(false)
+      if (selectedReviewOnly.length === 0) {
+        setViewProposalGdocUpdateMessage('')
+      }
       fetchProposals()
-      openGdocDiff(viewProposal.id)
     } catch (err) {
       setViewProposalGdocUpdateMessage(err.message || 'No se pudieron aplicar los cambios')
+    }
+  }
+
+  const closeGdocDiff = async () => {
+    setShowGdocDiff(false)
+    if (!viewProposal?.id) {
+      return
+    }
+    try {
+      await acceptLatestGdocChanges(viewProposal.id)
+      setViewProposalGdocUpdateAvailable(false)
+      setViewProposalGdocUpdateMessage('')
+      setViewProposalLinkIssue('Cambios de Google Docs marcados como revisados.')
+      fetchProposals()
+    } catch (err) {
+      setViewProposalGdocUpdateMessage(err.message || 'No se pudo cerrar la revisión de cambios')
     }
   }
 
@@ -8968,7 +9021,7 @@ const App = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
                 <h2 style={{ margin: 0 }}>Comparar cambios de Google Docs</h2>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <button style={{ ...styles.button, background: '#999' }} onClick={() => setShowGdocDiff(false)}>Cerrar</button>
+                  <button style={{ ...styles.button, background: '#999' }} onClick={closeGdocDiff}>Cerrar</button>
                 </div>
               </div>
 
@@ -8983,9 +9036,17 @@ const App = () => {
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                       {Object.entries(gdocDiffData.changes).map(([key, change]) => (
-                        <div key={key} style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '12px' }}>
+                        <div
+                          key={key}
+                          style={{
+                            border: change.review_required ? '1px solid #ef4444' : '1px solid #e2e8f0',
+                            borderRadius: '6px',
+                            padding: '12px',
+                            background: change.review_required ? '#fef2f2' : '#fff'
+                          }}
+                        >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                            <strong>{change.label || key}</strong>
+                            <strong style={{ color: change.review_required ? '#b91c1c' : '#111827' }}>{change.label || key}</strong>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <input
                                 type="checkbox"
@@ -8995,6 +9056,11 @@ const App = () => {
                               Aplicar cambio
                             </label>
                           </div>
+                          {change.review_required && (
+                            <div style={{ color: '#b91c1c', fontSize: '12px', marginBottom: '8px', fontWeight: 600 }}>
+                              Revisión obligatoria: cambio sensible detectado.
+                            </div>
+                          )}
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                             <div>
                               <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Tu versión</div>
