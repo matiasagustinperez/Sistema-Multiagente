@@ -25,6 +25,7 @@ const App = () => {
   const [viewProposalGdocInput, setViewProposalGdocInput] = useState('')
   const [viewProposalGdocError, setViewProposalGdocError] = useState('')
   const [viewProposalGdocLoading, setViewProposalGdocLoading] = useState(false)
+  const [viewProposalCreateGdocLoading, setViewProposalCreateGdocLoading] = useState(false)
   const [viewProposalGdocUpdateAvailable, setViewProposalGdocUpdateAvailable] = useState(false)
   const [viewProposalGdocUpdateMessage, setViewProposalGdocUpdateMessage] = useState('')
   const [viewProposalGdocSyncLoading, setViewProposalGdocSyncLoading] = useState(false)
@@ -1355,6 +1356,32 @@ const App = () => {
       setViewProposalGdocError(err.message || 'No se pudo validar el enlace')
     } finally {
       setViewProposalGdocLoading(false)
+    }
+  }
+
+  const createAndLinkProposalGdoc = async (proposalId) => {
+    if (!proposalId) {
+      return
+    }
+    try {
+      setViewProposalCreateGdocLoading(true)
+      setViewProposalGdocError('')
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/create-gdoc`, {
+        method: 'POST'
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo crear el documento en Drive')
+      }
+      setViewProposal(data)
+      setViewProposalGdocInput(data.gdoc_url || '')
+      setViewProposalLinkIssue('Documento creado en Drive y vinculado correctamente.')
+      setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
+      fetchProposals()
+    } catch (err) {
+      setViewProposalGdocError(err.message || 'No se pudo crear y vincular el documento')
+    } finally {
+      setViewProposalCreateGdocLoading(false)
     }
   }
 
@@ -8737,6 +8764,14 @@ const App = () => {
                 <h2>Resumen de Propuesta #{viewProposal.id}</h2>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button style={{ ...styles.button, background: '#2196F3' }} onClick={() => downloadProposalDocx(viewProposal.id)}>Descargar DOCX</button>
+                  <button
+                    style={{ ...styles.button, background: viewProposal.gdoc_url ? '#bbb' : '#7c4dff' }}
+                    onClick={() => createAndLinkProposalGdoc(viewProposal.id)}
+                    disabled={!!viewProposal.gdoc_url || viewProposalCreateGdocLoading}
+                    title={viewProposal.gdoc_url ? 'La propuesta ya tiene link de Google Docs' : 'Crear documento en Drive y vincular'}
+                  >
+                    {viewProposalCreateGdocLoading ? 'Creando en Drive...' : 'Crear en Drive y vincular'}
+                  </button>
                   <button
                     style={{ ...styles.button, background: viewProposal.gdoc_url ? '#4caf50' : '#bbb' }}
                     onClick={() => openProposalGdocUrl(viewProposal.gdoc_url)}

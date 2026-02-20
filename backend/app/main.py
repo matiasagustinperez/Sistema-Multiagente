@@ -172,6 +172,99 @@ def extract_gdoc_payload(gdoc_url: str) -> tuple[str, str, str, dict]:
     return extracted_subject, extracted_title, doc_hash, extracted_payload
 
 
+def extract_drive_folder_id(url_or_id: str | None) -> str | None:
+    raw = str(url_or_id or "").strip()
+    if not raw:
+        return None
+    folder_match = re.search(r"/folders/([\w-]+)", raw)
+    if folder_match:
+        return folder_match.group(1)
+    query_match = re.search(r"[?&]id=([\w-]+)", raw)
+    if query_match:
+        return query_match.group(1)
+    if re.fullmatch(r"[\w-]+", raw):
+        return raw
+    return None
+
+
+def load_gcp_service_account_info() -> dict:
+    raw = (os.getenv("GCP_SERVICE_ACCOUNT_JSON") or "").strip()
+    if not raw:
+        raise HTTPException(status_code=500, detail="Falta configurar GCP_SERVICE_ACCOUNT_JSON en backend/.env")
+
+    if os.path.exists(raw):
+        try:
+            with open(raw, "r", encoding="utf-8") as handler:
+                return json.load(handler)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"No se pudo leer el archivo de service account: {exc}")
+
+    try:
+        return json.loads(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"GCP_SERVICE_ACCOUNT_JSON inválido: {exc}")
+
+
+def get_google_drive_service():
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="Faltan dependencias de Google Drive. Instala google-api-python-client y google-auth",
+        )
+
+    service_account_info = load_gcp_service_account_info()
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info,
+            scopes=["https://www.googleapis.com/auth/drive"],
+        )
+        return build("drive", "v3", credentials=credentials)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"No se pudo inicializar Google Drive API: {exc}")
+
+
+def resolve_drive_settings_for_proposal(db: Session, proposal: models.Proposal) -> models.DriveSettings | None:
+    if not proposal.career:
+        return None
+
+    study_plan = (proposal.study_plan or "").strip()
+    if study_plan:
+        scoped = db.query(models.DriveSettings).filter(
+            models.DriveSettings.career == proposal.career,
+            models.DriveSettings.plan_name == study_plan,
+        ).first()
+        if scoped:
+            return scoped
+
+    return db.query(models.DriveSettings).filter(
+        models.DriveSettings.career == proposal.career,
+        models.DriveSettings.plan_name.is_(None),
+    ).first()
+
+
+def build_proposal_docx_filename(proposal: models.Proposal) -> str:
+    year = proposal.year_of_career or "0"
+    quarter_raw = proposal.quarter or "0"
+    subject = proposal.subject or proposal.title or "Sin_Asignatura"
+
+    quarter_lower = str(quarter_raw).lower()
+    if "anual" in quarter_lower or quarter_lower.strip() == "a":
+        quarter = "A"
+    elif "1" in quarter_lower or "primer" in quarter_lower:
+        quarter = "1°"
+    elif "2" in quarter_lower or "segundo" in quarter_lower:
+        quarter = "2°"
+    else:
+        quarter = quarter_raw
+
+    subject_clean = re.sub(r'[<>:"/\\|?*]', '', subject)
+    year_display = f"{year}°" if str(year).strip() else "0°"
+    return f"{year_display}_{quarter} - {subject_clean}.docx"
+
+
 @app.post("/proposals/{proposal_id}/validate-gdoc")
 def validate_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
     proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
@@ -344,6 +437,79 @@ def unlink_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
     db.add(proposal)
     db.commit()
     return {"status": "unlinked", "gdoc_url": None}
+
+
+@app.post("/proposals/{proposal_id}/create-gdoc", response_model=schemas.Proposal)
+def create_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    if proposal.gdoc_url:
+        return build_proposal_response(db, proposal)
+
+    if not os.path.exists(TEMPLATE_PATH):
+        raise HTTPException(status_code=500, detail="Template Propuestas.docx not found")
+
+    settings = resolve_drive_settings_for_proposal(db, proposal)
+    if not settings or not settings.root_folder_url:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay carpeta raíz de Drive configurada para esta carrera/plan",
+        )
+
+    folder_id = extract_drive_folder_id(settings.root_folder_url)
+    if not folder_id:
+        raise HTTPException(status_code=400, detail="La URL de Carpeta Raíz (Drive) es inválida")
+
+    try:
+        from googleapiclient.http import MediaFileUpload
+        from .docx_export import generate_proposal_docx
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="Faltan dependencias para generar/subir DOCX. Verifica python-docx y google-api-python-client",
+        )
+
+    drive_service = get_google_drive_service()
+    output_path = generate_proposal_docx(proposal, TEMPLATE_PATH)
+    output_dir = os.path.dirname(output_path)
+    try:
+        filename = build_proposal_docx_filename(proposal)
+        file_title = filename[:-5] if filename.lower().endswith(".docx") else filename
+        media = MediaFileUpload(
+            output_path,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            resumable=False,
+        )
+        created = drive_service.files().create(
+            body={
+                "name": file_title,
+                "parents": [folder_id],
+                "mimeType": "application/vnd.google-apps.document",
+            },
+            media_body=media,
+            fields="id, webViewLink",
+        ).execute()
+
+        doc_id = created.get("id")
+        if not doc_id:
+            raise HTTPException(status_code=500, detail="Google Drive no devolvió el ID del documento creado")
+
+        gdoc_url = created.get("webViewLink") or f"https://docs.google.com/document/d/{doc_id}/edit"
+        now = datetime.utcnow()
+        proposal.gdoc_url = gdoc_url
+        proposal.source_type = "gdoc"
+        proposal.gdoc_last_checked = now
+        proposal.gdoc_last_synced = now
+        proposal.gdoc_status = "ok"
+        proposal.gdoc_hash = compute_payload_hash(build_proposal_snapshot(db, proposal))
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+        return build_proposal_response(db, proposal)
+    finally:
+        shutil.rmtree(output_dir, ignore_errors=True)
 
 
 @app.post("/proposals/gdoc-status")
