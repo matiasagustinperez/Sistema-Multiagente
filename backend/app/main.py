@@ -205,6 +205,53 @@ def load_gcp_service_account_info() -> dict:
         raise HTTPException(status_code=500, detail=f"GCP_SERVICE_ACCOUNT_JSON inválido: {exc}")
 
 
+def load_google_oauth_user_credentials(required: bool = False):
+    client_id = (os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "").strip()
+    client_secret = (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "").strip()
+    refresh_token = (os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()
+    access_token = (os.getenv("GOOGLE_OAUTH_ACCESS_TOKEN") or "").strip() or None
+    token_uri = (os.getenv("GOOGLE_OAUTH_TOKEN_URI") or "https://oauth2.googleapis.com/token").strip()
+
+    has_any = any([client_id, client_secret, refresh_token, access_token])
+    has_required = bool(client_id and client_secret and refresh_token)
+
+    if not has_required:
+        if required:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Modo OAuth de usuario activo, pero faltan variables: "
+                    "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN"
+                ),
+            )
+        if has_any:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Configuración OAuth de usuario incompleta. Debes definir: "
+                    "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN"
+                ),
+            )
+        return None
+
+    try:
+        from google.oauth2.credentials import Credentials
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="Faltan dependencias para OAuth de Google. Instala google-auth y google-api-python-client",
+        )
+
+    return Credentials(
+        token=access_token,
+        refresh_token=refresh_token,
+        token_uri=token_uri,
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=["https://www.googleapis.com/auth/drive"],
+    )
+
+
 def get_google_drive_service():
     try:
         from google.oauth2 import service_account
@@ -215,15 +262,98 @@ def get_google_drive_service():
             detail="Faltan dependencias de Google Drive. Instala google-api-python-client y google-auth",
         )
 
-    service_account_info = load_gcp_service_account_info()
+    auth_mode = (os.getenv("GDRIVE_AUTH_MODE") or "auto").strip().lower()
+    oauth_aliases = {"oauth", "oauth-user", "user"}
+    service_aliases = {"service-account", "service", "sa"}
+
+    def build_service(credentials):
+        return build("drive", "v3", credentials=credentials)
+
+    if auth_mode in oauth_aliases:
+        oauth_credentials = load_google_oauth_user_credentials(required=True)
+        try:
+            return build_service(oauth_credentials)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"No se pudo inicializar Google Drive API (OAuth usuario): {exc}")
+
+    if auth_mode in service_aliases:
+        service_account_info = load_gcp_service_account_info()
+        try:
+            credentials = service_account.Credentials.from_service_account_info(
+                service_account_info,
+                scopes=["https://www.googleapis.com/auth/drive"],
+            )
+            return build_service(credentials)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"No se pudo inicializar Google Drive API (Service Account): {exc}")
+
+    oauth_error = None
+    service_error = None
+
     try:
+        oauth_credentials = load_google_oauth_user_credentials(required=False)
+        if oauth_credentials is not None:
+            return build_service(oauth_credentials)
+    except HTTPException as exc:
+        oauth_error = exc.detail
+    except Exception as exc:
+        oauth_error = str(exc)
+
+    try:
+        service_account_info = load_gcp_service_account_info()
         credentials = service_account.Credentials.from_service_account_info(
             service_account_info,
             scopes=["https://www.googleapis.com/auth/drive"],
         )
-        return build("drive", "v3", credentials=credentials)
+        return build_service(credentials)
+    except HTTPException as exc:
+        service_error = exc.detail
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"No se pudo inicializar Google Drive API: {exc}")
+        service_error = str(exc)
+
+    raise HTTPException(
+        status_code=500,
+        detail=(
+            "No se pudo inicializar Google Drive API. "
+            f"OAuth usuario: {oauth_error or 'no configurado'}. "
+            f"Service Account: {service_error or 'no configurado'}."
+        ),
+    )
+
+
+@app.get("/drive-auth-debug")
+def drive_auth_debug():
+    service = get_google_drive_service()
+    try:
+        about = service.about().get(
+            fields="user(displayName,emailAddress),storageQuota(limit,usage,usageInDrive,usageInDriveTrash)"
+        ).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar datos de Drive: {exc}")
+
+    user = about.get("user") or {}
+    quota = about.get("storageQuota") or {}
+
+    def to_int(value):
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    return {
+        "auth_mode": (os.getenv("GDRIVE_AUTH_MODE") or "auto").strip().lower(),
+        "user": {
+            "display_name": user.get("displayName"),
+            "email": user.get("emailAddress"),
+        },
+        "storage_quota": {
+            "limit": to_int(quota.get("limit")),
+            "usage": to_int(quota.get("usage")),
+            "usage_in_drive": to_int(quota.get("usageInDrive")),
+            "usage_in_drive_trash": to_int(quota.get("usageInDriveTrash")),
+        },
+        "raw": about,
+    }
 
 
 def resolve_drive_settings_for_proposal(db: Session, proposal: models.Proposal) -> models.DriveSettings | None:
@@ -475,6 +605,8 @@ def create_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
     output_path = generate_proposal_docx(proposal, TEMPLATE_PATH)
     output_dir = os.path.dirname(output_path)
     try:
+        from googleapiclient.errors import HttpError
+
         filename = build_proposal_docx_filename(proposal)
         file_title = filename[:-5] if filename.lower().endswith(".docx") else filename
         media = MediaFileUpload(
@@ -482,15 +614,100 @@ def create_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             resumable=False,
         )
-        created = drive_service.files().create(
-            body={
+
+        def extract_google_error(exc: Exception) -> tuple[int | None, list[str], str]:
+            status_code = None
+            reasons: list[str] = []
+            message = str(exc)
+            if isinstance(exc, HttpError):
+                status_code = getattr(exc.resp, "status", None)
+                content = getattr(exc, "content", None)
+                if content:
+                    try:
+                        payload = json.loads(content.decode("utf-8") if isinstance(content, (bytes, bytearray)) else str(content))
+                        err = payload.get("error") if isinstance(payload, dict) else None
+                        if isinstance(err, dict):
+                            parsed_message = err.get("message")
+                            if parsed_message:
+                                message = str(parsed_message)
+                            parsed_reasons = err.get("errors")
+                            if isinstance(parsed_reasons, list):
+                                reasons = [str(item.get("reason")) for item in parsed_reasons if isinstance(item, dict) and item.get("reason")]
+                    except Exception:
+                        pass
+            return status_code, reasons, message
+
+        def create_google_doc(target_folder_id: str | None):
+            body = {
                 "name": file_title,
-                "parents": [folder_id],
                 "mimeType": "application/vnd.google-apps.document",
-            },
-            media_body=media,
-            fields="id, webViewLink",
-        ).execute()
+            }
+            if target_folder_id:
+                body["parents"] = [target_folder_id]
+            return drive_service.files().create(
+                body=body,
+                media_body=media,
+                fields="id, webViewLink, parents",
+                supportsAllDrives=True,
+            ).execute()
+
+        try:
+            created = create_google_doc(folder_id)
+        except Exception as first_exc:
+            status_code, reasons, message = extract_google_error(first_exc)
+            lower_message = message.lower()
+            has_quota_error = "storagequotaexceeded" in lower_message or "drive storage quota" in lower_message or "storageQuotaExceeded" in reasons
+
+            if has_quota_error:
+                raise HTTPException(
+                    status_code=507,
+                    detail="No se pudo crear el documento: la cuota de almacenamiento de la cuenta autenticada en Google Drive está excedida.",
+                )
+
+            # Fallback probado: crear primero en raíz y luego mover a carpeta destino.
+            try:
+                created = create_google_doc(None)
+                doc_id_for_move = created.get("id")
+                if doc_id_for_move and folder_id:
+                    try:
+                        current_parents = created.get("parents") or []
+                        remove_parents = ",".join([parent for parent in current_parents if parent and parent != folder_id])
+                        move_kwargs = {
+                            "fileId": doc_id_for_move,
+                            "addParents": folder_id,
+                            "fields": "id, webViewLink, parents",
+                            "supportsAllDrives": True,
+                        }
+                        if remove_parents:
+                            move_kwargs["removeParents"] = remove_parents
+                        created = drive_service.files().update(**move_kwargs).execute()
+                    except Exception:
+                        # Si no se puede mover, igual dejamos el documento creado y vinculado.
+                        pass
+            except Exception as fallback_exc:
+                fb_status, fb_reasons, fb_message = extract_google_error(fallback_exc)
+                fb_lower = fb_message.lower()
+                if "storagequotaexceeded" in fb_lower or "drive storage quota" in fb_lower or "storageQuotaExceeded" in fb_reasons:
+                    raise HTTPException(
+                        status_code=507,
+                        detail="No se pudo crear el documento: la cuota de almacenamiento de la cuenta autenticada en Google Drive está excedida.",
+                    )
+                status_text = f"{fb_status}" if fb_status is not None else "unknown"
+                reason_text = ", ".join(fb_reasons) if fb_reasons else "none"
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Error al crear el documento en Google Drive (status={status_text}, reasons={reason_text}): {fb_message}",
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raw_message = str(exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error al crear el documento en Google Drive: {raw_message}",
+        )
+
+    try:
 
         doc_id = created.get("id")
         if not doc_id:

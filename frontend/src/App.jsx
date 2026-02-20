@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import logoMacau from '../Logo MACAU.png'
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8011').replace(/\/$/, '')
+const LEGACY_API_BASE_URL = 'http://localhost:8001'
+
 const careerOptions = [
   'Ingeniería en Sistemas',
   'Ingeniería Mecatrónica',
@@ -8,6 +11,26 @@ const careerOptions = [
 ]
 
 const App = () => {
+  useEffect(() => {
+    const nativeFetch = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      if (typeof input === 'string') {
+        return nativeFetch(input.replace(LEGACY_API_BASE_URL, API_BASE_URL), init)
+      }
+      if (input instanceof Request) {
+        const nextUrl = input.url.replace(LEGACY_API_BASE_URL, API_BASE_URL)
+        if (nextUrl !== input.url) {
+          const nextRequest = new Request(nextUrl, input)
+          return nativeFetch(nextRequest, init)
+        }
+      }
+      return nativeFetch(input, init)
+    }
+    return () => {
+      window.fetch = nativeFetch
+    }
+  }, [])
+
   // Main navigation
   const [activeMenu, setActiveMenu] = useState('home')
   const [proposalsMode, setProposalsMode] = useState(null)
@@ -1379,7 +1402,10 @@ const App = () => {
       setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
       fetchProposals()
     } catch (err) {
-      setViewProposalGdocError(err.message || 'No se pudo crear y vincular el documento')
+      const message = err?.message === 'Failed to fetch'
+        ? 'No se pudo conectar al backend (http://localhost:8001). Verifica que esté levantado.'
+        : (err?.message || 'No se pudo crear y vincular el documento')
+      setViewProposalGdocError(message)
     } finally {
       setViewProposalCreateGdocLoading(false)
     }

@@ -6,6 +6,7 @@ __pycache__/
 # Env
 backend/.env
 backend/.env.example
+backend/secrets/
 
 # Node
 frontend/node_modules/
