@@ -56,6 +56,9 @@ const App = () => {
   const [gdocDiffLoading, setGdocDiffLoading] = useState(false)
   const [gdocDiffData, setGdocDiffData] = useState(null)
   const [gdocDiffSelection, setGdocDiffSelection] = useState({})
+  const [showLocalDiff, setShowLocalDiff] = useState(false)
+  const [localDiffData, setLocalDiffData] = useState(null)
+  const [localDiffSelection, setLocalDiffSelection] = useState({})
   const [gdocStatusById, setGdocStatusById] = useState({})
   const [gdocStatusLoading, setGdocStatusLoading] = useState(false)
   const [lastGdocCheckAt, setLastGdocCheckAt] = useState(null)
@@ -1617,6 +1620,82 @@ const App = () => {
     } catch (err) {
       setStatusMsg('Error al desvincular enlace: ' + err.message)
       setStatusType('error')
+    }
+  }
+
+  const openLocalDiff = async (proposalId) => {
+    if (!proposalId) {
+      return
+    }
+    try {
+      setGdocDiffLoading(true)
+      setShowLocalDiff(true)
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/local-diff`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo obtener los cambios locales')
+      }
+      setLocalDiffData(data)
+      const initialSelection = {}
+      Object.entries(data.changes || {}).forEach(([key, change]) => {
+        initialSelection[key] = true // Por defecto, seleccionar todos los cambios locales
+      })
+      setLocalDiffSelection(initialSelection)
+      if (!data.changes || Object.keys(data.changes).length === 0) {
+        setShowLocalDiff(false)
+        setStatusMsg('No hay cambios locales para enviar a Google Docs')
+        setStatusType('info')
+      }
+    } catch (err) {
+      setStatusMsg(err.message || 'No se pudo obtener los cambios locales')
+      setStatusType('error')
+    } finally {
+      setGdocDiffLoading(false)
+    }
+  }
+
+  const closeLocalDiff = () => {
+    setShowLocalDiff(false)
+    setLocalDiffData(null)
+    setLocalDiffSelection({})
+  }
+
+  const pushProposalToGdoc = async () => {
+    if (!viewProposal?.id || !localDiffData?.changes) {
+      return
+    }
+    try {
+      setGdocDiffLoading(true)
+      const changesToApply = localDiffSelection
+      const res = await fetch(`http://localhost:8001/proposals/${viewProposal.id}/push-to-gdoc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes_to_apply: changesToApply })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const filename = viewProposal.subject && viewProposal.year_of_career
+        ? `${viewProposal.year_of_career}° - ${viewProposal.subject}.docx`
+        : 'propuesta_actualizada.docx'
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      closeLocalDiff()
+      setStatusMsg('DOCX actualizado descargado. Reemplaza manualmente en Google Docs.')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'Error al generar DOCX actualizado')
+      setStatusType('error')
+    } finally {
+      setGdocDiffLoading(false)
     }
   }
 
@@ -8920,6 +8999,22 @@ const App = () => {
                 )}
               </div>
 
+              {viewProposal.gdoc_url && (
+                <div style={{ marginTop: '12px', padding: '12px', background: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '8px', color: '#15803d' }}>📤 Cambios locales a Google Docs</div>
+                  <button
+                    style={{ ...styles.button, background: '#16a34a', width: '100%' }}
+                    onClick={() => openLocalDiff(viewProposal.id)}
+                    disabled={gdocDiffLoading}
+                  >
+                    {gdocDiffLoading ? 'Cargando...' : 'Validar cambios locales'}
+                  </button>
+                  <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+                    Detecta qué cambios hiciste en local para enviarlos a Google Docs.
+                  </div>
+                </div>
+              )}
+
               <div style={{ marginTop: '15px', padding: '12px', background: '#f5f5f5', borderRadius: '6px' }}>
                 <strong>Estado:</strong> {viewProposal.status || '-'}
               </div>
@@ -9083,6 +9178,82 @@ const App = () => {
                     <button style={{ ...styles.button, background: '#1a73e8' }} onClick={() => syncProposalGdoc(viewProposal.id)}>
                       Sincronizar todo
                     </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {showLocalDiff && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+            <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', width: '95%', maxWidth: '1100px', maxHeight: '85vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                <h2 style={{ margin: 0 }}>Cambios locales para enviar a Google Docs</h2>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button style={{ ...styles.button, background: '#999' }} onClick={closeLocalDiff}>Cerrar</button>
+                </div>
+              </div>
+
+              {gdocDiffLoading && (
+                <div style={{ marginTop: '12px', color: '#555' }}>Cargando cambios locales...</div>
+              )}
+
+              {!gdocDiffLoading && localDiffData && (
+                <div style={{ marginTop: '16px' }}>
+                  <p style={{ color: '#666', fontSize: '14px', marginBottom: '16px' }}>{localDiffData.message}</p>
+                  {Object.keys(localDiffData.changes || {}).length === 0 ? (
+                    <div style={{ color: '#555' }}>No se encontraron cambios locales que enviar.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {Object.entries(localDiffData.changes).map(([key, change]) => (
+                        <div
+                          key={key}
+                          style={{
+                            border: change.review_required ? '1px solid #16a34a' : '1px solid #e2e8f0',
+                            borderRadius: '6px',
+                            padding: '12px',
+                            background: change.review_required ? '#f0fdf4' : '#fff'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <strong style={{ color: change.review_required ? '#15803d' : '#111827' }}>{change.label || key}</strong>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <input
+                                type="checkbox"
+                                checked={!!localDiffSelection[key]}
+                                onChange={(e) => setLocalDiffSelection((prev) => ({ ...prev, [key]: e.target.checked }))}
+                              />
+                              Incluir en envío
+                            </label>
+                          </div>
+                          {change.review_required && (
+                            <div style={{ color: '#15803d', fontSize: '12px', marginBottom: '8px', fontWeight: 600 }}>
+                              ℹ️ Campo importante: se recomienda revisar antes de enviar.
+                            </div>
+                          )}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div>
+                              <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Tu versión local</div>
+                              <pre style={{ background: '#f0fdf4', padding: '8px', borderRadius: '4px', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>{change.local_display || '-'}</pre>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Versión en Google Docs</div>
+                              <pre style={{ background: '#f0f9ff', padding: '8px', borderRadius: '4px', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>{change.gdoc_display || '-'}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: '16px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button style={{ ...styles.button, background: '#16a34a' }} onClick={pushProposalToGdoc}>
+                      📥 Descargar DOCX actualizado
+                    </button>
+                  </div>
+                  <div style={{ marginTop: '8px', color: '#666', fontSize: '12px', textAlign: 'right' }}>
+                    Descarga el DOCX, reemplaza manualmente en Google Docs y guarda los cambios.
                   </div>
                 </div>
               )}

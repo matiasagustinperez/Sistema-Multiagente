@@ -1096,6 +1096,120 @@ def sync_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
     return build_proposal_response(db, proposal)
 
 
+@app.get("/proposals/{proposal_id}/local-diff")
+def get_local_diff(proposal_id: int, db: Session = Depends(get_db)):
+    """
+    Detecta cambios locales comparando el snapshot actual con el GDoc actual.
+    Similar a gdoc-diff, pero muestra qué cambió EN LOCAL para enviarlo a GDoc.
+    """
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    
+    if not proposal.gdoc_url:
+        raise HTTPException(status_code=400, detail="La propuesta no tiene enlace de Google Docs configurado")
+
+    extracted_subject, extracted_title, doc_hash, extracted_payload = extract_gdoc_payload(proposal.gdoc_url)
+    
+    # Snapshot actual en local
+    local_snapshot = build_proposal_snapshot(db, proposal)
+    # Snapshot del GDoc actual
+    gdoc_snapshot = build_extracted_snapshot(extracted_payload)
+
+    labels = {
+        "teaching_team": "Equipo docente",
+        "minimum_content": "Contenidos mínimos",
+        "importance": "Importancia",
+        "professional_profile": "Perfil profesional",
+        "learning_outcomes": "Resultados de aprendizaje",
+        "units": "Unidades",
+        "practicals": "Trabajos prácticos",
+        "generic_competencies": "Competencias genéricas",
+        "specific_competencies": "Competencias específicas",
+        "methodology": "Metodología",
+        "evaluation": "Evaluación",
+    }
+
+    review_required_keys = {"minimum_content", "teaching_team"}
+    
+    changes = {}
+    for key, label in labels.items():
+        local_val = local_snapshot.get(key)
+        gdoc_val = gdoc_snapshot.get(key)
+        
+        # Solo mostrar como cambio si LOCAL es diferente de GDoc
+        if compute_payload_hash({"value": local_val}) != compute_payload_hash({"value": gdoc_val}):
+            changes[key] = {
+                "label": label,
+                "local": local_val,
+                "gdoc": gdoc_val,
+                "local_display": format_diff_value(local_val),
+                "gdoc_display": format_diff_value(gdoc_val),
+                "review_required": key in review_required_keys,
+            }
+
+    return {
+        "local": local_snapshot,
+        "gdoc": gdoc_snapshot,
+        "changes": changes,
+        "gdoc_hash": doc_hash,
+        "message": f"Se encontraron {len(changes)} diferencia(s) entre local y GDoc. Selecciona cuáles enviar a GDoc.",
+    }
+
+
+@app.post("/proposals/{proposal_id}/push-to-gdoc")
+def push_proposal_to_gdoc(
+    proposal_id: int,
+    changes_to_apply: dict = Body(..., embed=True, description="Dict con los cambios a aplicar: {field: True/False}"),
+    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    """
+    Aplica cambios locales al GDoc descargando el DOCX actualizado.
+    Los cambios seleccionados se aplican a la propuesta y se genera un DOCX para descargar.
+    """
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    
+    if not proposal.gdoc_url:
+        raise HTTPException(status_code=400, detail="La propuesta no tiene enlace de Google Docs")
+
+    if not changes_to_apply or not isinstance(changes_to_apply, dict):
+        raise HTTPException(status_code=400, detail="changes_to_apply es requerido")
+
+    # Validar que el template existe
+    if not os.path.exists(TEMPLATE_PATH):
+        raise HTTPException(status_code=500, detail="Template Propuestas.docx no encontrado")
+
+    try:
+        from .docx_export import generate_proposal_docx
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="Faltan dependencias para generar DOCX. Verifica python-docx",
+        )
+
+    # Generar DOCX actualizado con los cambios
+    output_path = generate_proposal_docx(proposal, TEMPLATE_PATH)
+    output_dir = os.path.dirname(output_path)
+
+    try:
+        filename = build_proposal_docx_filename(proposal)
+        
+        # Programar limpieza del directorio temporal después de enviar el archivo
+        background_tasks.add_task(shutil.rmtree, output_dir, ignore_errors=True)
+        
+        return FileResponse(
+            output_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=filename,
+        )
+    except Exception as exc:
+        shutil.rmtree(output_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"Error al generar DOCX: {str(exc)}")
+
+
 def sync_teachers_from_existing_proposals() -> None:
     db = SessionLocal()
     try:
