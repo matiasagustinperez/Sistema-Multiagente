@@ -40,6 +40,18 @@ def ensure_proposals_columns():
         if "study_subject_id" not in columns:
             conn.execute(text("ALTER TABLE proposals ADD COLUMN study_subject_id INTEGER"))
             conn.commit()
+        if "gdoc_hash" not in columns:
+            conn.execute(text("ALTER TABLE proposals ADD COLUMN gdoc_hash VARCHAR(64)"))
+            conn.commit()
+        if "gdoc_last_checked" not in columns:
+            conn.execute(text("ALTER TABLE proposals ADD COLUMN gdoc_last_checked DATETIME"))
+            conn.commit()
+        if "gdoc_last_synced" not in columns:
+            conn.execute(text("ALTER TABLE proposals ADD COLUMN gdoc_last_synced DATETIME"))
+            conn.commit()
+        if "gdoc_status" not in columns:
+            conn.execute(text("ALTER TABLE proposals ADD COLUMN gdoc_status VARCHAR(20)"))
+            conn.commit()
 
 
 def ensure_teachers_columns():

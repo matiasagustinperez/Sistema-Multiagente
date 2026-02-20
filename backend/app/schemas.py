@@ -126,6 +126,12 @@ class ProposalBase(BaseModel):
     observations: Optional[str] = None
     status: Optional[str] = None
     study_subject_id: Optional[int] = None
+    source_type: Optional[str] = None
+    gdoc_url: Optional[str] = None
+    gdoc_hash: Optional[str] = None
+    gdoc_last_checked: Optional[datetime] = None
+    gdoc_last_synced: Optional[datetime] = None
+    gdoc_status: Optional[str] = None
 
 class ProposalCreate(ProposalBase):
     pass
@@ -162,6 +168,8 @@ class ProposalUpdate(BaseModel):
     observations: Optional[str] = None
     status: Optional[str] = None
     study_subject_id: Optional[int] = None
+    source_type: Optional[str] = None
+    gdoc_url: Optional[str] = None
 
 class Proposal(ProposalBase):
     id: int
@@ -188,6 +196,11 @@ class ProposalOut(BaseModel):
     specific_competencies_items: Optional[List[CompetencyItem]] = []
     teaching_team: Optional[List[TeachingStaff]] = []
     source_type: Optional[str] = None
+    gdoc_url: Optional[str] = None
+    gdoc_hash: Optional[str] = None
+    gdoc_last_checked: Optional[datetime] = None
+    gdoc_status: Optional[str] = None
+    gdoc_last_synced: Optional[datetime] = None
     status: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None

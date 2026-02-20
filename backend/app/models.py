@@ -44,6 +44,11 @@ class Proposal(Base):
     filename = Column(String(500), nullable=False)
     original_filename = Column(String(500), nullable=True)
     source_type = Column(String(50), nullable=True)  # docx, pdf, manual
+    gdoc_url = Column(String(1000), nullable=True)
+    gdoc_hash = Column(String(64), nullable=True)
+    gdoc_last_checked = Column(DateTime(timezone=True), nullable=True)
+    gdoc_last_synced = Column(DateTime(timezone=True), nullable=True)
+    gdoc_status = Column(String(20), nullable=True)
     status = Column(String(50), nullable=True)  # EnProceso, Importada, Creada
     
     study_subject_id = Column(Integer, ForeignKey("study_subjects.id"), nullable=True)

@@ -15,6 +15,9 @@ import shutil
 import tempfile
 import unicodedata
 import re
+import hashlib
+import json
+from datetime import datetime
 from io import BytesIO
 import requests
 
@@ -73,9 +76,11 @@ async def import_proposal_gdoc_url(
             tmp_path = tmp.name
         try:
             extracted_data = import_proposal_from_docx(tmp_path, "imported_from_gdoc.docx")
+            extracted_data["gdoc_url"] = url
             return {
                 "success": True,
                 "data": extracted_data,
+                "gdoc_url": url,
                 "preview": {
                     "career": extracted_data.get('career', ''),
                     "subject": extracted_data.get('subject', ''),
@@ -112,12 +117,529 @@ TEMPLATE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "T
 class AiPrompt(BaseModel):
     prompt: str
 
+
+class GdocStatusRequest(BaseModel):
+    ids: list[int]
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+def normalize_subject_name(value: str | None) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def normalize_title_name(value: str | None) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def normalize_hash_value(value):
+    if isinstance(value, str):
+        return re.sub(r"\s+", " ", value.strip())
+    if isinstance(value, list):
+        return [normalize_hash_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: normalize_hash_value(value[key]) for key in sorted(value.keys())}
+    return value
+
+
+def compute_payload_hash(payload: dict) -> str:
+    normalized = normalize_hash_value(payload)
+    encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def extract_gdoc_payload(gdoc_url: str) -> tuple[str, str, str, dict]:
+    docx_bytes = get_docx_from_gdoc_url(gdoc_url)
+    extracted_subject = ""
+    extracted_title = ""
+    extracted_payload: dict = {}
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+        tmp.write(docx_bytes)
+        tmp_path = tmp.name
+    try:
+        extracted_payload = import_proposal_from_docx(tmp_path, "imported_from_gdoc.docx")
+        extracted_subject = extracted_payload.get("subject") or ""
+        extracted_title = extracted_payload.get("title") or ""
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    doc_hash = compute_payload_hash(extracted_payload)
+    return extracted_subject, extracted_title, doc_hash, extracted_payload
+
+
+@app.post("/proposals/{proposal_id}/validate-gdoc")
+def validate_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not proposal.gdoc_url:
+        proposal.gdoc_status = "missing"
+        proposal.gdoc_last_checked = datetime.utcnow()
+        db.add(proposal)
+        db.commit()
+        return {"status": "missing", "message": "La propuesta no tiene enlace de Google Docs."}
+
+    try:
+        extracted_subject, extracted_title, doc_hash, _ = extract_gdoc_payload(proposal.gdoc_url)
+    except HTTPException:
+        proposal.gdoc_url = None
+        proposal.gdoc_status = "lost"
+        proposal.gdoc_last_checked = datetime.utcnow()
+        db.add(proposal)
+        db.commit()
+        return {
+            "status": "missing",
+            "message": "No se pudo acceder al documento de Google Docs. Se eliminó el enlace.",
+            "gdoc_url": None,
+        }
+
+    extracted_name = extracted_subject or extracted_title
+    if not extracted_name:
+        proposal.gdoc_url = None
+        proposal.gdoc_status = "lost"
+        proposal.gdoc_last_checked = datetime.utcnow()
+        db.add(proposal)
+        db.commit()
+        return {
+            "status": "mismatch",
+            "message": "No se pudo identificar la asignatura en el documento. Se eliminó el enlace.",
+            "gdoc_url": None,
+        }
+
+    if proposal.subject and extracted_name:
+        if normalize_subject_name(proposal.subject) != normalize_subject_name(extracted_name):
+            proposal.gdoc_url = None
+            proposal.gdoc_status = "lost"
+            proposal.gdoc_last_checked = datetime.utcnow()
+            db.add(proposal)
+            db.commit()
+            return {
+                "status": "mismatch",
+                "message": "El documento no coincide con la propuesta. Se eliminó el enlace.",
+                "gdoc_url": None,
+                "extracted_subject": extracted_subject,
+                "extracted_title": extracted_title,
+            }
+
+    if proposal.title and (extracted_title or extracted_subject):
+        compare_value = extracted_title or extracted_subject
+        if normalize_title_name(proposal.title) != normalize_title_name(compare_value):
+            proposal.gdoc_url = None
+            proposal.gdoc_status = "lost"
+            proposal.gdoc_last_checked = datetime.utcnow()
+            db.add(proposal)
+            db.commit()
+            return {
+                "status": "mismatch",
+                "message": "El documento no coincide con el título de la propuesta. Se eliminó el enlace.",
+                "gdoc_url": None,
+                "extracted_subject": extracted_subject,
+                "extracted_title": extracted_title,
+            }
+
+    proposal.gdoc_last_checked = datetime.utcnow()
+
+    if not proposal.gdoc_hash or not proposal.gdoc_last_synced:
+        proposal.gdoc_hash = doc_hash
+        if not proposal.gdoc_last_synced:
+            proposal.gdoc_last_synced = proposal.gdoc_last_checked
+        proposal.gdoc_status = "ok"
+        db.add(proposal)
+        db.commit()
+        return {
+            "status": "ok",
+            "message": "Enlace válido.",
+            "gdoc_url": proposal.gdoc_url,
+            "extracted_subject": extracted_subject or None,
+            "extracted_title": extracted_title or None,
+            "gdoc_hash": proposal.gdoc_hash,
+            "gdoc_last_checked": proposal.gdoc_last_checked,
+            "gdoc_last_synced": proposal.gdoc_last_synced,
+        }
+
+    if proposal.gdoc_hash != doc_hash:
+        proposal.gdoc_status = "updated"
+        db.add(proposal)
+        db.commit()
+        return {
+            "status": "updated",
+            "message": "El documento fue actualizado en Google Docs.",
+            "gdoc_url": proposal.gdoc_url,
+            "extracted_subject": extracted_subject or None,
+            "extracted_title": extracted_title or None,
+            "new_hash": doc_hash,
+            "gdoc_last_checked": proposal.gdoc_last_checked,
+            "gdoc_last_synced": proposal.gdoc_last_synced,
+        }
+
+    proposal.gdoc_status = "ok"
+    db.add(proposal)
+    db.commit()
+    return {
+        "status": "ok",
+        "message": "Enlace válido.",
+        "gdoc_url": proposal.gdoc_url,
+        "extracted_subject": extracted_subject or None,
+        "extracted_title": extracted_title or None,
+        "gdoc_hash": proposal.gdoc_hash,
+        "gdoc_last_checked": proposal.gdoc_last_checked,
+        "gdoc_last_synced": proposal.gdoc_last_synced,
+    }
+
+
+@app.post("/proposals/{proposal_id}/link-gdoc")
+def link_proposal_gdoc(
+    proposal_id: int,
+    url: str = Body(..., embed=True, description="URL pública de Google Docs"),
+    db: Session = Depends(get_db),
+):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not url or not str(url).strip():
+        raise HTTPException(status_code=400, detail="URL de Google Docs requerida")
+
+    extracted_subject, extracted_title, doc_hash, _ = extract_gdoc_payload(url)
+    extracted_name = extracted_subject or extracted_title
+    if not extracted_name:
+        raise HTTPException(status_code=400, detail="No se pudo identificar la asignatura en el documento")
+
+    if proposal.subject and normalize_subject_name(proposal.subject) != normalize_subject_name(extracted_name):
+        raise HTTPException(status_code=400, detail="El documento no coincide con la propuesta")
+
+    if proposal.title and (extracted_title or extracted_subject):
+        compare_value = extracted_title or extracted_subject
+        if normalize_title_name(proposal.title) != normalize_title_name(compare_value):
+            raise HTTPException(status_code=400, detail="El documento no coincide con el título de la propuesta")
+
+    proposal.gdoc_url = url
+    proposal.source_type = "gdoc"
+    proposal.gdoc_hash = doc_hash
+    proposal.gdoc_last_checked = datetime.utcnow()
+    proposal.gdoc_last_synced = proposal.gdoc_last_checked
+    proposal.gdoc_status = "ok"
+    db.add(proposal)
+    db.commit()
+    return {
+        "status": "linked",
+        "gdoc_url": proposal.gdoc_url,
+        "extracted_subject": extracted_subject or None,
+        "extracted_title": extracted_title or None,
+    }
+
+
+@app.post("/proposals/{proposal_id}/unlink-gdoc")
+def unlink_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    proposal.gdoc_url = None
+    proposal.gdoc_status = "missing"
+    proposal.gdoc_last_checked = datetime.utcnow()
+    db.add(proposal)
+    db.commit()
+    return {"status": "unlinked", "gdoc_url": None}
+
+
+@app.post("/proposals/gdoc-status")
+def get_gdoc_statuses(request: GdocStatusRequest, db: Session = Depends(get_db)):
+    ids = request.ids or []
+    if not ids:
+        return {"statuses": {}}
+
+    proposals = db.query(models.Proposal).filter(models.Proposal.id.in_(ids)).all()
+    statuses: dict[int, dict] = {}
+    now = datetime.utcnow()
+    has_updates = False
+
+    for proposal in proposals:
+        status = "missing"
+        if proposal.gdoc_url:
+            try:
+                _, _, doc_hash, _ = extract_gdoc_payload(proposal.gdoc_url)
+            except HTTPException:
+                status = "lost"
+            else:
+                if not proposal.gdoc_hash:
+                    proposal.gdoc_hash = doc_hash
+                    proposal.gdoc_last_synced = proposal.gdoc_last_synced or now
+                    has_updates = True
+                elif proposal.gdoc_hash != doc_hash:
+                    status = "updated"
+                else:
+                    status = "ok"
+                proposal.gdoc_last_checked = now
+                has_updates = True
+        else:
+            if proposal.source_type == "gdoc":
+                status = "lost"
+            else:
+                status = "missing"
+
+        proposal.gdoc_status = status
+        proposal.gdoc_last_checked = proposal.gdoc_last_checked or now
+        has_updates = True
+
+        statuses[proposal.id] = {"status": status}
+
+    if has_updates:
+        db.add_all(proposals)
+        db.commit()
+
+    return {"statuses": statuses}
+
+
+@app.post("/proposals/{proposal_id}/gdoc-accept-latest")
+def accept_latest_gdoc(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not proposal.gdoc_url:
+        raise HTTPException(status_code=400, detail="La propuesta no tiene enlace de Google Docs")
+
+    _, _, doc_hash, _ = extract_gdoc_payload(proposal.gdoc_url)
+    proposal.gdoc_hash = doc_hash
+    proposal.gdoc_last_checked = datetime.utcnow()
+    proposal.gdoc_last_synced = proposal.gdoc_last_checked
+    proposal.gdoc_status = "ok"
+    db.add(proposal)
+    db.commit()
+    return {"status": "ok", "gdoc_hash": proposal.gdoc_hash}
+
+
+def apply_extracted_payload_to_proposal(db: Session, proposal: models.Proposal, payload: dict) -> None:
+    def has_text(value) -> bool:
+        return isinstance(value, str) and value.strip() != ""
+
+    def has_items(value) -> bool:
+        return isinstance(value, list) and len(value) > 0
+
+    proposal.career = payload.get("career") or proposal.career
+    proposal.subject = payload.get("subject") or proposal.subject
+    proposal.study_plan = payload.get("study_plan") or proposal.study_plan
+    proposal.academic_year = payload.get("academic_year") or proposal.academic_year
+    proposal.year_of_career = payload.get("year_of_career") or proposal.year_of_career
+    payload_quarter = payload.get("quarter")
+    proposal.quarter = normalize_term_name(payload_quarter) if payload_quarter else proposal.quarter
+    proposal.character = payload.get("character") or proposal.character
+    proposal.regime = payload.get("regime") or proposal.regime
+    proposal.total_hours = parse_int(payload.get("total_hours"), proposal.total_hours)
+    proposal.theoretical_hours = parse_int(payload.get("theoretical_hours"), proposal.theoretical_hours)
+    proposal.practical_hours = parse_int(payload.get("practical_hours"), proposal.practical_hours)
+    proposal.weekly_hours = parse_int(payload.get("weekly_hours"), proposal.weekly_hours)
+    minimum_content = payload.get("minimum_content")
+    if has_text(minimum_content):
+        proposal.minimum_content = minimum_content
+
+    fundamentals_part1 = payload.get("importance")
+    if has_text(fundamentals_part1):
+        proposal.fundamentals_part1 = fundamentals_part1
+
+    fundamentals_part2 = payload.get("professional_profile")
+    if has_text(fundamentals_part2):
+        proposal.fundamentals_part2 = fundamentals_part2
+
+    methodology = payload.get("methodology")
+    if has_text(methodology):
+        proposal.methodology = methodology
+
+    evaluation = payload.get("evaluation")
+    if has_text(evaluation):
+        proposal.evaluation = evaluation
+
+    bibliography = payload.get("bibliography")
+    if has_text(bibliography):
+        proposal.bibliography = bibliography
+
+    observations = payload.get("observations")
+    if has_text(observations):
+        proposal.observations = observations
+
+    learning_outcomes = payload.get("learning_outcomes")
+    if has_items(learning_outcomes):
+        proposal.learning_outcomes = learning_outcomes
+
+    units = payload.get("units")
+    if has_items(units):
+        proposal.units = units
+
+    practicals = payload.get("practicals")
+    if has_items(practicals):
+        proposal.practicals = practicals
+
+    teaching_team = payload.get("teaching_team")
+    if isinstance(teaching_team, list):
+        teacher_objs = []
+        teacher_ids = []
+        for entry in teaching_team:
+            if not isinstance(entry, dict):
+                continue
+            teacher = upsert_teacher(db, entry)
+            if teacher:
+                db.flush()
+                ensure_teacher_career(db, teacher.id, proposal.career)
+                teacher_objs.append(teacher)
+                teacher_ids.append(teacher.id)
+        if teacher_ids:
+            replace_proposal_teachers(db, proposal.id, teacher_ids)
+        proposal.teaching_team = build_teaching_team_payload(teacher_objs)
+
+    generic_items = normalize_competency_items(payload.get("generic_competencies") or [])
+    specific_items = normalize_competency_items(payload.get("specific_competencies") or [])
+    if generic_items:
+        proposal.generic_competencies = build_competencies_text(generic_items)
+        ensure_competency_catalog(db, proposal.career, generic_items, "generic", proposal.study_plan)
+        replace_proposal_competencies(db, proposal.id, generic_items, "generic")
+    if specific_items:
+        proposal.specific_competencies = build_competencies_text(specific_items)
+        ensure_competency_catalog(db, proposal.career, specific_items, "specific", proposal.study_plan)
+        replace_proposal_competencies(db, proposal.id, specific_items, "specific")
+
+    sync_subject_from_proposal(db, proposal)
+
+
+def build_proposal_snapshot(db: Session, proposal: models.Proposal) -> dict:
+    competencies = get_proposal_competencies(db, proposal.id)
+    return {
+        "importance": proposal.fundamentals_part1 or "",
+        "professional_profile": proposal.fundamentals_part2 or "",
+        "learning_outcomes": normalize_learning_outcomes(proposal.learning_outcomes or []),
+        "units": normalize_list_items(proposal.units or [], {"id"}),
+        "practicals": normalize_list_items(proposal.practicals or [], {"id"}),
+        "methodology": proposal.methodology or "",
+        "evaluation": proposal.evaluation or "",
+        "generic_competencies": normalize_competency_items(competencies.get("generic") or []),
+        "specific_competencies": normalize_competency_items(competencies.get("specific") or []),
+    }
+
+
+def build_extracted_snapshot(payload: dict) -> dict:
+    return {
+        "importance": payload.get("importance") or "",
+        "professional_profile": payload.get("professional_profile") or "",
+        "learning_outcomes": normalize_learning_outcomes(payload.get("learning_outcomes") or []),
+        "units": normalize_list_items(payload.get("units") or [], {"id"}),
+        "practicals": normalize_list_items(payload.get("practicals") or [], {"id"}),
+        "methodology": payload.get("methodology") or "",
+        "evaluation": payload.get("evaluation") or "",
+        "generic_competencies": normalize_competency_items(payload.get("generic_competencies") or []),
+        "specific_competencies": normalize_competency_items(payload.get("specific_competencies") or []),
+    }
+
+
+def format_diff_value(value) -> str:
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return "\n".join([item for item in value if item])
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    return str(value or "")
+
+
+def normalize_list_items(items: list, drop_keys: set[str] | None = None) -> list:
+    drop_keys = drop_keys or set()
+    normalized = []
+    for item in items or []:
+        if isinstance(item, dict):
+            cleaned = {key: item.get(key) for key in item.keys() if key not in drop_keys}
+            normalized.append(cleaned)
+        else:
+            normalized.append(item)
+    return normalized
+
+
+def normalize_learning_outcomes(items: list) -> list[str]:
+    normalized = []
+    for item in items or []:
+        if isinstance(item, dict):
+            value = item.get("description") or item.get("descripcion") or ""
+        else:
+            value = str(item)
+        normalized.append(re.sub(r"\s+", " ", value).strip())
+    return normalized
+
+
+@app.get("/proposals/{proposal_id}/gdoc-diff")
+def get_gdoc_diff(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not proposal.gdoc_url:
+        raise HTTPException(status_code=400, detail="La propuesta no tiene enlace de Google Docs")
+
+    extracted_subject, extracted_title, doc_hash, extracted_payload = extract_gdoc_payload(proposal.gdoc_url)
+    current_snapshot = build_proposal_snapshot(db, proposal)
+    latest_snapshot = build_extracted_snapshot(extracted_payload)
+
+    labels = {
+        "importance": "Importancia",
+        "professional_profile": "Perfil profesional",
+        "learning_outcomes": "Resultados de aprendizaje",
+        "units": "Unidades",
+        "practicals": "Trabajos prácticos",
+        "generic_competencies": "Competencias genéricas",
+        "specific_competencies": "Competencias específicas",
+        "methodology": "Metodología",
+        "evaluation": "Evaluación",
+    }
+
+    changes = {}
+    for key, label in labels.items():
+        current_val = current_snapshot.get(key)
+        latest_val = latest_snapshot.get(key)
+        if compute_payload_hash({"value": current_val}) != compute_payload_hash({"value": latest_val}):
+            changes[key] = {
+                "label": label,
+                "current": current_val,
+                "latest": latest_val,
+                "current_display": format_diff_value(current_val),
+                "latest_display": format_diff_value(latest_val),
+            }
+
+    return {
+        "current": current_snapshot,
+        "latest": latest_snapshot,
+        "changes": changes,
+        "extracted_subject": extracted_subject or None,
+        "extracted_title": extracted_title or None,
+        "gdoc_hash": doc_hash,
+    }
+
+
+@app.post("/proposals/{proposal_id}/sync-gdoc", response_model=schemas.Proposal)
+def sync_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not proposal.gdoc_url:
+        raise HTTPException(status_code=400, detail="La propuesta no tiene enlace de Google Docs")
+
+    extracted_subject, extracted_title, doc_hash, extracted_payload = extract_gdoc_payload(proposal.gdoc_url)
+    extracted_name = extracted_subject or extracted_title
+    if not extracted_name:
+        raise HTTPException(status_code=400, detail="No se pudo identificar la asignatura en el documento")
+
+    if proposal.subject and normalize_subject_name(proposal.subject) != normalize_subject_name(extracted_name):
+        raise HTTPException(status_code=400, detail="El documento no coincide con la propuesta")
+
+    if proposal.title and (extracted_title or extracted_subject):
+        compare_value = extracted_title or extracted_subject
+        if normalize_title_name(proposal.title) != normalize_title_name(compare_value):
+            raise HTTPException(status_code=400, detail="El documento no coincide con el título de la propuesta")
+
+    apply_extracted_payload_to_proposal(db, proposal, extracted_payload)
+    proposal.gdoc_hash = doc_hash
+    proposal.gdoc_last_checked = datetime.utcnow()
+    proposal.gdoc_last_synced = proposal.gdoc_last_checked
+    proposal.gdoc_status = "ok"
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    return build_proposal_response(db, proposal)
 
 
 def sync_teachers_from_existing_proposals() -> None:
@@ -1882,7 +2404,8 @@ def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_
             bibliography=proposal.bibliography,
             observations=proposal.observations,
             original_filename="form_submission",
-            source_type="manual",
+            source_type=proposal.source_type or ("gdoc" if proposal.gdoc_url else "manual"),
+            gdoc_url=proposal.gdoc_url,
             status=proposal.status or "EnProceso"
         )
         db.add(db_proposal)

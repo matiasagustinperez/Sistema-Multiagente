@@ -21,6 +21,20 @@ const App = () => {
   const [importError, setImportError] = useState('')
   const [importPreview, setImportPreview] = useState(null)
   const [importGdocUrl, setImportGdocUrl] = useState('')
+  const [viewProposalLinkIssue, setViewProposalLinkIssue] = useState('')
+  const [viewProposalGdocInput, setViewProposalGdocInput] = useState('')
+  const [viewProposalGdocError, setViewProposalGdocError] = useState('')
+  const [viewProposalGdocLoading, setViewProposalGdocLoading] = useState(false)
+  const [viewProposalGdocUpdateAvailable, setViewProposalGdocUpdateAvailable] = useState(false)
+  const [viewProposalGdocUpdateMessage, setViewProposalGdocUpdateMessage] = useState('')
+  const [viewProposalGdocSyncLoading, setViewProposalGdocSyncLoading] = useState(false)
+  const [showGdocDiff, setShowGdocDiff] = useState(false)
+  const [gdocDiffLoading, setGdocDiffLoading] = useState(false)
+  const [gdocDiffData, setGdocDiffData] = useState(null)
+  const [gdocDiffSelection, setGdocDiffSelection] = useState({})
+  const [gdocStatusById, setGdocStatusById] = useState({})
+  const [gdocStatusLoading, setGdocStatusLoading] = useState(false)
+  const [lastGdocCheckAt, setLastGdocCheckAt] = useState(null)
 
   // AI state
   const [aiSection, setAiSection] = useState(null)
@@ -75,7 +89,9 @@ const App = () => {
     metodologia: '',
     evaluacion: '',
     bibliografia: '',
-    observaciones: ''
+    observaciones: '',
+    gdocUrl: '',
+    sourceType: ''
   }
 
   const [formData, setFormData] = useState(emptyFormData)
@@ -174,6 +190,10 @@ const App = () => {
   const [specificCompetencyFilters, setSpecificCompetencyFilters] = useState({ code: '', description: '', plan: '' })
   const [specificCompetencySort, setSpecificCompetencySort] = useState({ key: '', direction: 'asc' })
   const [competencyPlanMappedByCareer, setCompetencyPlanMappedByCareer] = useState({})
+  const variantPaletteRegistry = useRef({
+    year: { index: 0, map: {} },
+    plan: { index: 0, map: {} }
+  })
   
   // Study Plan state
   const [planName, setPlanName] = useState('')
@@ -203,6 +223,145 @@ const App = () => {
   const [showMatrizModal, setShowMatrizModal] = useState(false)
   const [matrizData, setMatrizData] = useState(null)
   const [matrixColumnFilters, setMatrixColumnFilters] = useState({})
+
+  const capsuleBaseStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '4px 12px',
+    borderRadius: '999px',
+    fontSize: '12px',
+    fontWeight: 600,
+    textTransform: 'capitalize',
+    whiteSpace: 'nowrap'
+  }
+
+  const capsuleVariants = {
+    default: { background: '#eef2ff', color: '#1e3a8a', border: '1px solid #c7d2fe' }
+  }
+
+  const dedicationCapsuleStyles = {
+    'SIN INFORMAR': { background: 'rgba(244, 63, 94, 0.15)', color: '#b91c1c', border: '1px solid rgba(244, 63, 94, 0.4)' },
+    SIMPLE: { background: 'rgba(14, 165, 233, 0.15)', color: '#0c4a6e', border: '1px solid rgba(14, 165, 233, 0.4)' },
+    PARCIAL: { background: 'rgba(59, 130, 246, 0.18)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.5)' },
+    'PARCIAL + SIMPLE': { background: 'rgba(147, 51, 234, 0.16)', color: '#6d28d9', border: '1px solid rgba(147, 51, 234, 0.4)' },
+    EXCLUSIVO: { background: 'rgba(16, 185, 129, 0.18)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.4)' },
+    default: capsuleVariants.default
+  }
+
+  const categoryCapsuleStyles = {
+    TITULAR: { background: 'rgba(16, 185, 129, 0.18)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.4)' },
+    ASOCIADO: { background: 'rgba(59, 130, 246, 0.18)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.4)' },
+    ADJUNTO: { background: 'rgba(251, 191, 36, 0.18)', color: '#b45309', border: '1px solid rgba(250, 204, 21, 0.4)' },
+    JTP: { background: 'rgba(14, 165, 233, 0.15)', color: '#0c4a6e', border: '1px solid rgba(14, 165, 233, 0.4)' },
+    'AYUDANTE 1º': { background: 'rgba(236, 72, 153, 0.15)', color: '#9d174d', border: '1px solid rgba(236, 72, 153, 0.4)' },
+    default: capsuleVariants.default
+  }
+
+  const quarterCapsuleStyles = {
+    '1ER CUATRIMESTRE': { background: 'rgba(59, 130, 246, 0.18)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.4)' },
+    '2DO CUATRIMESTRE': { background: 'rgba(251, 191, 36, 0.2)', color: '#92400e', border: '1px solid rgba(251, 191, 36, 0.5)' },
+    ANUAL: { background: 'rgba(168, 85, 247, 0.18)', color: '#6b21a8', border: '1px solid rgba(168, 85, 247, 0.4)' },
+    default: capsuleVariants.default
+  }
+
+  const variantPalettePools = {
+    year: [
+      { background: '#e0f2fe', color: '#0c4a6e', border: '1px solid #bae6fd' },
+      { background: '#ecfdf5', color: '#065f46', border: '1px solid #6ee7b7' },
+      { background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' },
+      { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' },
+      { background: '#ede9fe', color: '#312e81', border: '1px solid #c4b5fd' },
+      { background: '#f0fdf4', color: '#047857', border: '1px solid #bbf7d0' }
+    ],
+    plan: [
+      { background: '#ecfeff', color: '#0f766e', border: '1px solid #5eead4' },
+      { background: '#f9f5ff', color: '#6d28d9', border: '1px solid #c4b5fd' },
+      { background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3' },
+      { background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74' },
+      { background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' },
+      { background: '#f0fdfa', color: '#115e59', border: '1px solid #6ee7b7' },
+      { background: '#e0f2fe', color: '#0c4a6e', border: '1px solid #bae6fd' },
+      { background: '#f3e8ff', color: '#6b21a8', border: '1px solid #d8b4fe' }
+    ],
+    default: [
+      { background: '#eef2ff', color: '#1e3a8a', border: '1px solid #c7d2fe' },
+      { background: '#ecfdf5', color: '#0f766e', border: '1px solid #86efac' },
+      { background: '#fff1f2', color: '#831843', border: '1px solid #fecdd3' },
+      { background: '#fdf2f8', color: '#9d174d', border: '1px solid #fbcfe8' },
+      { background: '#fefce8', color: '#a16207', border: '1px solid #fde047' }
+    ]
+  }
+
+  const normalizeLabelKey = (value) => {
+    const normalized = String(value ?? 'Sin valor').trim()
+    return normalized || 'Sin valor'
+  }
+
+  const getDynamicVariantStyle = (variant, valueLabel) => {
+    const normalized = normalizeLabelKey(valueLabel)
+    const registry = variantPaletteRegistry.current[variant]
+    if (!registry) {
+      return capsuleVariants.default
+    }
+    if (registry.map[normalized]) {
+      return registry.map[normalized]
+    }
+    const pool = variantPalettePools[variant] || variantPalettePools.default
+    const selected = pool[registry.index % pool.length]
+    registry.map[normalized] = selected
+    registry.index += 1
+    return selected
+  }
+
+  const getCapsuleVariantStyle = (variant, value) => {
+    const labelKey = normalizeLabelKey(value)
+    switch (variant) {
+      case 'dedication':
+        return dedicationCapsuleStyles[labelKey.toUpperCase()] || dedicationCapsuleStyles.default
+      case 'category':
+        return categoryCapsuleStyles[labelKey.toUpperCase()] || categoryCapsuleStyles.default
+      case 'year':
+        return getDynamicVariantStyle('year', labelKey)
+      case 'plan':
+        return getDynamicVariantStyle('plan', labelKey)
+      case 'quarter':
+        return quarterCapsuleStyles[labelKey.toUpperCase()] || quarterCapsuleStyles.default
+      default:
+        return capsuleVariants.default
+    }
+  }
+
+  const renderCapsule = (value, variant = 'default', overrides = {}) => {
+    const displayValue = value ?? '-'
+    const variantStyle = getCapsuleVariantStyle(variant, value)
+    return (
+      <span style={{ ...capsuleBaseStyle, ...capsuleVariants.default, ...variantStyle, ...overrides }}>
+        {displayValue}
+      </span>
+    )
+  }
+
+  const statusCapsuleStyles = {
+    CREADA: { background: 'rgba(16, 185, 129, 0.18)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.4)' },
+    ENPROCESO: { background: 'rgba(249, 115, 22, 0.18)', color: '#b45309', border: '1px solid rgba(249, 115, 22, 0.45)' },
+    IMPORTADA: { background: 'rgba(59, 130, 246, 0.18)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.45)' },
+    REVISADA: { background: 'rgba(14, 165, 233, 0.18)', color: '#0c4a6e', border: '1px solid rgba(14, 165, 233, 0.45)' },
+    APROBADA: { background: 'rgba(34, 197, 94, 0.18)', color: '#15803d', border: '1px solid rgba(34, 197, 94, 0.45)' },
+    RECHAZADA: { background: 'rgba(239, 68, 68, 0.18)', color: '#b91c1c', border: '1px solid rgba(239, 68, 68, 0.45)' },
+    DEFAULT: { background: '#f5f5f5', color: '#374151', border: '1px solid #d1d5db' }
+  }
+
+  const normalizeStatusKey = (status) => (String(status || '').replace(/\s+/g, '')).toUpperCase()
+
+  const renderStatusCapsule = (status) => {
+    const variantStyle = statusCapsuleStyles[normalizeStatusKey(status)] || statusCapsuleStyles.DEFAULT
+    return (
+      <span style={{ ...capsuleBaseStyle, ...variantStyle }}>
+        {status || 'Sin estado'}
+      </span>
+    )
+  }
 
   const isPlanNameTaken = (career, name, excludeId = null) => {
     const normalized = String(name || '').trim().toLowerCase()
@@ -568,6 +727,41 @@ const App = () => {
     })
   }, [formData, unitDebug, showComparison, showUnitBibliografiaModal, showTpCommentModal])
 
+  const normalizeCorrelativeSelections = (subject) => {
+    if (!subject) {
+      return subject
+    }
+    const correlativesToEnroll = Array.isArray(subject.correlatives_to_enroll)
+      ? subject.correlatives_to_enroll
+      : []
+    const correlativesToExam = Array.isArray(subject.correlatives_to_exam)
+      ? subject.correlatives_to_exam
+      : []
+    const examSet = new Set(correlativesToExam)
+    return {
+      ...subject,
+      correlatives_to_enroll: correlativesToEnroll.filter((name) => !examSet.has(name)),
+      correlatives_to_exam: correlativesToExam
+    }
+  }
+
+  const hasDuplicateSubjectName = (years, name, excludeId = null) => {
+    const target = String(name || '').trim().toLowerCase()
+    if (!target) {
+      return false
+    }
+    return (years || []).some((year) =>
+      (year.terms || []).some((term) =>
+        (term.subjects || []).some((subject) => {
+          if (excludeId !== null && subject.id === excludeId) {
+            return false
+          }
+          return String(subject.name || '').trim().toLowerCase() === target
+        })
+      )
+    )
+  }
+
   // Función auxiliar para renderizar tarjetas de términos
   const renderTermCard = (term, year, layout) => (
     <div
@@ -621,7 +815,7 @@ const App = () => {
                         style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
                         title="Editar correlativas"
                         onClick={() => {
-                          setSelectedSubjectForCorrelatives(subject)
+                          setSelectedSubjectForCorrelatives(normalizeCorrelativeSelections(subject))
                           setCorrelativeMode(true)
                         }}
                       >
@@ -634,6 +828,11 @@ const App = () => {
                       onClick={() => {
                         const nextName = window.prompt('Nuevo nombre de asignatura', subject.name || '')
                         if (!nextName || !nextName.trim()) {
+                          return
+                        }
+                        if (hasDuplicateSubjectName(planYears, nextName, subject.id)) {
+                          setPlanError('Ya existe una asignatura con ese nombre en el plan')
+                          setTimeout(() => setPlanError(''), 3000)
                           return
                         }
                         const updatedYears = planYears.map((y) => {
@@ -700,6 +899,11 @@ const App = () => {
           placeholder="Asignatura"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && e.target.value.trim()) {
+              if (hasDuplicateSubjectName(planYears, e.target.value)) {
+                setPlanError('Ya existe una asignatura con ese nombre en el plan')
+                setTimeout(() => setPlanError(''), 3000)
+                return
+              }
               const updatedYears = planYears.map((y) => {
                 if (y.id === year.id) {
                   return {
@@ -727,6 +931,11 @@ const App = () => {
           onClick={(e) => {
             const input = e.target.previousElementSibling
             if (input && input.value.trim()) {
+              if (hasDuplicateSubjectName(planYears, input.value)) {
+                setPlanError('Ya existe una asignatura con ese nombre en el plan')
+                setTimeout(() => setPlanError(''), 3000)
+                return
+              }
               const updatedYears = planYears.map((y) => {
                 if (y.id === year.id) {
                   return {
@@ -760,10 +969,75 @@ const App = () => {
       const res = await fetch('http://localhost:8001/proposals')
       const data = await res.json()
       setProposals(data)
+      return data
     } catch (err) {
       console.error('Error fetching proposals:', err)
     }
+    return []
   }
+
+  const fetchGdocStatuses = async (items) => {
+    const target = Array.isArray(items) ? items : proposals
+    const ids = target.filter((p) => p.gdoc_url).map((p) => p.id)
+    if (ids.length === 0) {
+      return
+    }
+    try {
+      setGdocStatusLoading(true)
+      const res = await fetch('http://localhost:8001/proposals/gdoc-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo verificar el estado de los enlaces')
+      }
+      setGdocStatusById((prev) => ({ ...prev, ...(data.statuses || {}) }))
+      setLastGdocCheckAt(Date.now())
+    } catch (err) {
+      console.error('Error checking gdoc statuses:', err)
+    } finally {
+      setGdocStatusLoading(false)
+    }
+  }
+
+  const getProposalGdocStatus = (proposal) => {
+    const status = gdocStatusById[proposal.id]?.status || proposal.gdoc_status
+    if (status) return status
+    if (!proposal.gdoc_url) {
+      return proposal.source_type === 'gdoc' ? 'lost' : 'missing'
+    }
+    return 'ok'
+  }
+
+  const getProposalGdocBadge = (proposal) => {
+    const status = getProposalGdocStatus(proposal)
+    const stylesByStatus = {
+      ok: { label: 'Con link', background: 'rgba(16, 185, 129, 0.18)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.4)' },
+      missing: { label: 'Sin link', background: 'rgba(107, 114, 128, 0.18)', color: '#374151', border: '1px solid rgba(107, 114, 128, 0.4)' },
+      lost: { label: 'Link perdido', background: 'rgba(239, 68, 68, 0.18)', color: '#b91c1c', border: '1px solid rgba(239, 68, 68, 0.45)' },
+      updated: { label: 'Actualizada', background: 'rgba(59, 130, 246, 0.18)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.45)' }
+    }
+    return stylesByStatus[status] || stylesByStatus.missing
+  }
+
+  const renderDriveCapsule = (proposal) => {
+    const badge = getProposalGdocBadge(proposal)
+    return renderCapsule(badge.label, 'default', {
+      background: badge.background,
+      color: badge.color,
+      border: badge.border
+    })
+  }
+
+  useEffect(() => {
+    if (activeMenu !== 'propuestas') return
+    if (!proposals || proposals.length === 0) return
+    if (gdocStatusLoading) return
+    if (lastGdocCheckAt && Date.now() - lastGdocCheckAt < 30000) return
+    fetchGdocStatuses(proposals)
+  }, [activeMenu, proposalsMode, proposals, gdocStatusLoading, lastGdocCheckAt])
 
   const mapCompetenciesToPlans = async (career) => {
     if (!career || competencyPlanMappedByCareer[career]) {
@@ -1034,6 +1308,210 @@ const App = () => {
       return
     }
     window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const openProposalGdocUrl = (value) => {
+    const url = normalizeDriveUrl(value)
+    if (!url) {
+      return
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      setStatusMsg('El enlace de Google Docs no es válido')
+      setStatusType('error')
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const linkProposalGdoc = async (proposalId) => {
+    if (!proposalId) {
+      return
+    }
+    const normalized = normalizeDriveUrl(viewProposalGdocInput)
+    if (!normalized || !/^https?:\/\//i.test(normalized)) {
+      setViewProposalGdocError('Ingresa una URL válida de Google Docs o Drive.')
+      return
+    }
+    try {
+      setViewProposalGdocLoading(true)
+      setViewProposalGdocError('')
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/link-gdoc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: normalized })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo validar el enlace')
+      }
+      setViewProposal((prev) => (prev ? { ...prev, gdoc_url: data.gdoc_url || normalized, source_type: 'gdoc' } : prev))
+      setViewProposalLinkIssue('Enlace vinculado y validado correctamente.')
+      setViewProposalGdocError('')
+      setViewProposalGdocUpdateAvailable(false)
+      setViewProposalGdocUpdateMessage('')
+      setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
+      fetchProposals()
+    } catch (err) {
+      setViewProposalGdocError(err.message || 'No se pudo validar el enlace')
+    } finally {
+      setViewProposalGdocLoading(false)
+    }
+  }
+
+  const syncProposalGdoc = async (proposalId) => {
+    if (!proposalId) {
+      return
+    }
+    try {
+      setViewProposalGdocSyncLoading(true)
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/sync-gdoc`, {
+        method: 'POST'
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo sincronizar el documento')
+      }
+      setViewProposal(data)
+      setViewProposalLinkIssue('Documento sincronizado desde Google Docs.')
+      setViewProposalGdocUpdateAvailable(false)
+      setViewProposalGdocUpdateMessage('')
+      setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
+      fetchProposals()
+    } catch (err) {
+      setViewProposalGdocUpdateMessage(err.message || 'No se pudo sincronizar el documento')
+    } finally {
+      setViewProposalGdocSyncLoading(false)
+    }
+  }
+
+  const openGdocDiff = async (proposalId) => {
+    if (!proposalId) {
+      return
+    }
+    try {
+      setGdocDiffLoading(true)
+      setShowGdocDiff(true)
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/gdoc-diff`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo obtener la comparación')
+      }
+      setGdocDiffData(data)
+      const initialSelection = {}
+      Object.keys(data.changes || {}).forEach((key) => {
+        initialSelection[key] = true
+      })
+      setGdocDiffSelection(initialSelection)
+      if (!data.changes || Object.keys(data.changes).length === 0) {
+        setShowGdocDiff(false)
+        setViewProposalGdocUpdateAvailable(false)
+        setViewProposalGdocUpdateMessage('')
+        setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
+      }
+    } catch (err) {
+      setViewProposalGdocUpdateMessage(err.message || 'No se pudo obtener la comparación')
+    } finally {
+      setGdocDiffLoading(false)
+    }
+  }
+
+  const buildPatchFromDiff = (latest, selection) => {
+    const patch = {}
+    if (selection.importance) {
+      patch.fundamentals_part1 = latest.importance || ''
+    }
+    if (selection.professional_profile) {
+      patch.fundamentals_part2 = latest.professional_profile || ''
+    }
+    if (selection.learning_outcomes) {
+      patch.learning_outcomes = (latest.learning_outcomes || []).map((lo, idx) => ({
+        id: lo.id ?? idx + 1,
+        description: lo.description || lo.descripcion || '',
+        observable_verb: lo.observable_verb || ''
+      }))
+    }
+    if (selection.units) {
+      patch.units = (latest.units || []).map((unit, idx) => ({
+        id: unit.id ?? idx + 1,
+        name: unit.name || '',
+        content: unit.content || unit.contenidos || '',
+        bibliography_basic: unit.bibliography_basic || unit.bib_basica || '',
+        bibliography_complementary: unit.bibliography_complementary || unit.bib_complementaria || ''
+      }))
+    }
+    if (selection.practicals) {
+      patch.practicals = (latest.practicals || []).map((tp, idx) => ({
+        id: tp.id ?? idx + 1,
+        number: tp.number || tp.numero || String(idx + 1),
+        name: tp.name || '',
+        objective: tp.objective || '',
+        activities: tp.activities || '',
+        materials: tp.materials || '',
+        scope: tp.scope || ''
+      }))
+    }
+    if (selection.methodology) {
+      patch.methodology = latest.methodology || ''
+    }
+    if (selection.evaluation) {
+      patch.evaluation = latest.evaluation || ''
+    }
+    if (selection.generic_competencies) {
+      patch.generic_competencies_items = latest.generic_competencies || []
+    }
+    if (selection.specific_competencies) {
+      patch.specific_competencies_items = latest.specific_competencies || []
+    }
+    return patch
+  }
+
+  const applyGdocSelectedChanges = async () => {
+    if (!viewProposal?.id || !gdocDiffData?.latest) {
+      return
+    }
+    try {
+      const patch = buildPatchFromDiff(gdocDiffData.latest, gdocDiffSelection)
+      if (Object.keys(patch).length === 0) {
+        setViewProposalGdocUpdateMessage('No hay cambios seleccionados para aplicar.')
+        return
+      }
+      const res = await fetch(`http://localhost:8001/proposals/${viewProposal.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudieron aplicar los cambios')
+      }
+      setViewProposal(data)
+      setViewProposalLinkIssue('Cambios aplicados desde Google Docs.')
+      fetchProposals()
+      openGdocDiff(viewProposal.id)
+    } catch (err) {
+      setViewProposalGdocUpdateMessage(err.message || 'No se pudieron aplicar los cambios')
+    }
+  }
+
+  const unlinkProposalGdoc = async (proposalId) => {
+    if (!proposalId) {
+      return
+    }
+    try {
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/unlink-gdoc`, {
+        method: 'POST'
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      setViewProposal((prev) => (prev ? { ...prev, gdoc_url: null } : prev))
+      setViewProposalLinkIssue('Se desvinculó el enlace de Google Docs.')
+      fetchProposals()
+    } catch (err) {
+      setStatusMsg('Error al desvincular enlace: ' + err.message)
+      setStatusType('error')
+    }
   }
 
   const saveDriveSettings = async () => {
@@ -2277,6 +2755,7 @@ const App = () => {
     setEditingProposalId(null)
     setEditingProposalStatus(null)
     setViewProposal(null)
+    setViewProposalLinkIssue('')
     setIsDirty(false)
     setAiSection(null)
     setAiError('')
@@ -3873,6 +4352,8 @@ const App = () => {
       evaluation: formData.evaluacion,
       bibliography: formData.bibliografia,
       observations: formData.observaciones,
+      gdoc_url: formData.gdocUrl || null,
+      source_type: formData.sourceType || (formData.gdocUrl ? 'gdoc' : ''),
       status: computedStatus,
       teaching_team: equipoDocente.map(doc => ({
         id: doc.teacherId || null,
@@ -4042,7 +4523,9 @@ const App = () => {
         metodologia: data.methodology || '',
         evaluacion: data.evaluation || '',
         bibliografia: data.bibliography || '',
-        observaciones: data.observations || ''
+        observaciones: data.observations || '',
+        gdocUrl: data.gdoc_url || '',
+        sourceType: data.source_type || ''
       })
       if (Array.isArray(data.teaching_team) && data.teaching_team.length > 0) {
         setEquipoDocente(data.teaching_team.map((doc, idx) => ({
@@ -4085,8 +4568,32 @@ const App = () => {
         return
       }
       setViewProposal(data)
+      setViewProposalLinkIssue('')
+      setViewProposalGdocInput(data.gdoc_url || '')
+      setViewProposalGdocError('')
+      setViewProposalGdocUpdateAvailable(false)
+      setViewProposalGdocUpdateMessage('')
       if (data.career) {
         setActiveCareer(normalizeCareer(data.career))
+      }
+      if (data.gdoc_url) {
+        const validationRes = await fetch(`http://localhost:8001/proposals/${proposalId}/validate-gdoc`, {
+          method: 'POST'
+        })
+        if (validationRes.ok) {
+          const validation = await validationRes.json()
+          if (validation.status === 'updated') {
+            setViewProposalGdocUpdateAvailable(true)
+            setViewProposalGdocUpdateMessage(validation.message || 'Documento actualizado en Google Docs.')
+            openGdocDiff(proposalId)
+            setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'updated' } }))
+          } else if (validation.status && validation.status !== 'ok') {
+            setViewProposal((prev) => (prev ? { ...prev, gdoc_url: null } : prev))
+            setViewProposalLinkIssue(validation.message || 'El enlace de Google Docs no está disponible.')
+            setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'lost' } }))
+            fetchProposals()
+          }
+        }
       }
     } catch (err) {
       setStatusMsg('Error al cargar propuesta: ' + err.message)
@@ -4320,7 +4827,9 @@ const App = () => {
       metodologia: data.methodology || '',
       evaluacion: data.evaluation || '',
       bibliografia: buildBibliografiaGlobal(data),
-      observaciones: data.observations || ''
+      observaciones: data.observations || '',
+      gdocUrl: data.gdoc_url || importPreview?.gdoc_url || importGdocUrl || '',
+      sourceType: data.gdoc_url || importPreview?.gdoc_url || importGdocUrl ? 'gdoc' : ''
     })
     
     // Cargar equipo docente desde teaching_team array
@@ -4962,12 +5471,7 @@ const App = () => {
                         >
                           Ultima edición{getSortIndicator(completeProposalSort, 'updated_at')}
                         </th>
-                        <th
-                          style={{ width: '90px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
-                          onClick={() => toggleSort(setCompleteProposalSort, 'status')}
-                        >
-                          Estado{getSortIndicator(completeProposalSort, 'status')}
-                        </th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Drive</th>
                         <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>Acciones</th>
                       </tr>
                       <tr style={{ backgroundColor: '#f4f8ff' }}>
@@ -5027,14 +5531,7 @@ const App = () => {
                             placeholder="Buscar"
                           />
                         </th>
-                        <th style={{ padding: '6px' }}>
-                          <input
-                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
-                            value={completeProposalFilters.status}
-                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, status: e.target.value }))}
-                            placeholder="Buscar"
-                          />
-                        </th>
+                        <th style={{ padding: '6px' }} />
                         <th style={{ padding: '6px' }} />
                       </tr>
                     </thead>
@@ -5043,12 +5540,14 @@ const App = () => {
                         <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
                           <td style={{ width: '70px', padding: '10px' }}>#{prop.id}</td>
                           <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
-                          <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
-                          <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
-                          <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
-                          <td style={{ padding: '10px' }}>{prop.study_plan || prop.plan || '-'}</td>
+                          <td style={{ padding: '10px' }}>{renderCapsule(prop.academic_year || '-', 'year')}</td>
+                          <td style={{ padding: '10px' }}>{renderCapsule(prop.year_of_career || '-', 'year')}</td>
+                          <td style={{ padding: '10px' }}>{renderCapsule(prop.quarter || '-', 'quarter')}</td>
+                          <td style={{ padding: '10px' }}>{renderCapsule(prop.study_plan || prop.plan || '-', 'plan')}</td>
                           <td style={{ padding: '10px' }}>{formatDateTime(prop.updated_at || prop.created_at)}</td>
-                          <td style={{ padding: '10px', width: '90px' }}>{prop.status || '-'}</td>
+                          <td style={{ padding: '10px' }}>
+                            {renderDriveCapsule(prop)}
+                          </td>
                           <td style={{ padding: '10px', textAlign: 'center' }}>
                             <button
                               style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
@@ -6091,12 +6590,7 @@ const App = () => {
                       >
                         Ultima edición{getSortIndicator(pendingProposalSort, 'updated_at')}
                       </th>
-                      <th
-                        style={{ width: '90px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
-                        onClick={() => toggleSort(setPendingProposalSort, 'status')}
-                      >
-                        Estado{getSortIndicator(pendingProposalSort, 'status')}
-                      </th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Drive</th>
                       <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>Acciones</th>
                     </tr>
                     <tr style={{ backgroundColor: '#fff6e6' }}>
@@ -6156,14 +6650,7 @@ const App = () => {
                           placeholder="Buscar"
                         />
                       </th>
-                      <th style={{ padding: '6px' }}>
-                        <input
-                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
-                          value={pendingProposalFilters.status}
-                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, status: e.target.value }))}
-                          placeholder="Buscar"
-                        />
-                      </th>
+                      <th style={{ padding: '6px' }} />
                       <th style={{ padding: '6px' }} />
                     </tr>
                   </thead>
@@ -6172,12 +6659,14 @@ const App = () => {
                       <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
                         <td style={{ width: '70px', padding: '10px' }}>#{prop.id}</td>
                         <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
-                        <td style={{ padding: '10px' }}>{prop.academic_year || '-'}</td>
-                        <td style={{ padding: '10px' }}>{prop.year_of_career || '-'}</td>
-                        <td style={{ padding: '10px' }}>{prop.quarter || '-'}</td>
-                        <td style={{ padding: '10px' }}>{prop.study_plan || prop.plan || '-'}</td>
+                        <td style={{ padding: '10px' }}>{renderCapsule(prop.academic_year || '-', 'year')}</td>
+                        <td style={{ padding: '10px' }}>{renderCapsule(prop.year_of_career || '-', 'year')}</td>
+                        <td style={{ padding: '10px' }}>{renderCapsule(prop.quarter || '-', 'quarter')}</td>
+                        <td style={{ padding: '10px' }}>{renderCapsule(prop.study_plan || prop.plan || '-', 'plan')}</td>
                         <td style={{ padding: '10px' }}>{formatDateTime(prop.updated_at || prop.created_at)}</td>
-                        <td style={{ padding: '10px', width: '90px' }}>{prop.status || '-'}</td>
+                        <td style={{ padding: '10px' }}>
+                          {renderDriveCapsule(prop)}
+                        </td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button
                             style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
@@ -6705,7 +7194,7 @@ const App = () => {
                               ) : (item.description || '-')}
                             </td>
                             <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
-                              {item.plan_name || '-'}
+                              {renderCapsule(item.plan_name || '-', 'plan')}
                             </td>
                             <td style={{ padding: '8px' }}>
                               {catalogEditId === item.id ? (
@@ -6841,7 +7330,7 @@ const App = () => {
                               ) : (item.description || '-')}
                             </td>
                             <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
-                              {item.plan_name || '-'}
+                              {renderCapsule(item.plan_name || '-', 'plan')}
                             </td>
                             <td style={{ padding: '8px' }}>
                               {catalogEditId === item.id ? (
@@ -7273,14 +7762,9 @@ const App = () => {
                           ) : (
                             <>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.name || '-'}</td>
-                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.category || '-'}</td>
-                              <td style={{
-                                padding: '8px',
-                                borderRight: '1px solid #ddd',
-                                color: (!teacher.dedication || teacher.dedication === 'Sin Informar') ? '#d32f2f' : undefined,
-                                fontWeight: (!teacher.dedication || teacher.dedication === 'Sin Informar') ? '600' : undefined
-                              }}>
-                                {teacher.dedication || 'Sin Informar'}
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{renderCapsule(teacher.category || '-', 'category')}</td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
+                                {renderCapsule(teacher.dedication || 'Sin Informar', 'dedication')}
                               </td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.email || '-'}</td>
                               <td style={{ padding: '8px' }}>
@@ -7324,7 +7808,7 @@ const App = () => {
         {/* PLAN DE ESTUDIOS */}
         {activeMenu === 'plan' && (
           <div style={styles.section}>
-            <h2>Plan de Estudios</h2>
+            <h2>Planes de Estudio</h2>
             {!activeCareer ? (
               <div style={{ color: '#777', fontStyle: 'italic' }}>Selecciona una carrera activa para crear un plan de estudios.</div>
             ) : (
@@ -7332,7 +7816,6 @@ const App = () => {
                 {/* Lista de planes guardados */}
                 {planMode === 'list' && (
                   <div style={{ marginBottom: '20px' }}>
-                    <h3>Planes de Estudios</h3>
                     <div style={{ color: '#555', marginTop: '-4px', marginBottom: '10px', fontWeight: 600 }}>
                       {activeCareer}
                     </div>
@@ -7935,6 +8418,8 @@ const App = () => {
                         }
                       }
 
+                      const normalizedCorrelatives = normalizeCorrelativeSelections(selectedSubjectForCorrelatives)
+
                       return (
                         <>
                           <div style={{ marginBottom: '12px', padding: '10px', background: '#fff', borderRadius: '6px' }}>
@@ -7954,13 +8439,21 @@ const App = () => {
                                       <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '12px' }}>
                                         <input
                                           type="checkbox"
-                                          defaultChecked={selectedSubjectForCorrelatives.correlatives_to_enroll?.includes(subject.name)}
+                                          checked={normalizedCorrelatives?.correlatives_to_enroll?.includes(subject.name) || false}
                                           onChange={(e) => {
                                             setSelectedSubjectForCorrelatives((prev) => {
-                                              const current = prev.correlatives_to_enroll || []
+                                              const currentEnroll = prev.correlatives_to_enroll || []
+                                              const currentExam = prev.correlatives_to_exam || []
+                                              const nextEnroll = e.target.checked
+                                                ? [...currentEnroll, subject.name]
+                                                : currentEnroll.filter((n) => n !== subject.name)
+                                              const nextExam = e.target.checked
+                                                ? currentExam.filter((n) => n !== subject.name)
+                                                : currentExam
                                               return {
                                                 ...prev,
-                                                correlatives_to_enroll: e.target.checked ? [...current, subject.name] : current.filter((n) => n !== subject.name)
+                                                correlatives_to_enroll: nextEnroll,
+                                                correlatives_to_exam: nextExam
                                               }
                                             })
                                           }}
@@ -7981,13 +8474,21 @@ const App = () => {
                                       <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '12px' }}>
                                         <input
                                           type="checkbox"
-                                          defaultChecked={selectedSubjectForCorrelatives.correlatives_to_exam?.includes(subject.name)}
+                                          checked={normalizedCorrelatives?.correlatives_to_exam?.includes(subject.name) || false}
                                           onChange={(e) => {
                                             setSelectedSubjectForCorrelatives((prev) => {
-                                              const current = prev.correlatives_to_exam || []
+                                              const currentEnroll = prev.correlatives_to_enroll || []
+                                              const currentExam = prev.correlatives_to_exam || []
+                                              const nextExam = e.target.checked
+                                                ? [...currentExam, subject.name]
+                                                : currentExam.filter((n) => n !== subject.name)
+                                              const nextEnroll = e.target.checked
+                                                ? currentEnroll.filter((n) => n !== subject.name)
+                                                : currentEnroll
                                               return {
                                                 ...prev,
-                                                correlatives_to_exam: e.target.checked ? [...current, subject.name] : current.filter((n) => n !== subject.name)
+                                                correlatives_to_enroll: nextEnroll,
+                                                correlatives_to_exam: nextExam
                                               }
                                             })
                                           }}
@@ -8018,8 +8519,8 @@ const App = () => {
                                     s.id === selectedSubjectForCorrelatives.id
                                       ? {
                                           ...s,
-                                          correlatives_to_enroll: selectedSubjectForCorrelatives.correlatives_to_enroll || [],
-                                          correlatives_to_exam: selectedSubjectForCorrelatives.correlatives_to_exam || []
+                                          correlatives_to_enroll: normalizedCorrelatives.correlatives_to_enroll || [],
+                                          correlatives_to_exam: normalizedCorrelatives.correlatives_to_exam || []
                                         }
                                       : s
                                   )
@@ -8236,8 +8737,73 @@ const App = () => {
                 <h2>Resumen de Propuesta #{viewProposal.id}</h2>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button style={{ ...styles.button, background: '#2196F3' }} onClick={() => downloadProposalDocx(viewProposal.id)}>Descargar DOCX</button>
+                  <button
+                    style={{ ...styles.button, background: viewProposal.gdoc_url ? '#4caf50' : '#bbb' }}
+                    onClick={() => openProposalGdocUrl(viewProposal.gdoc_url)}
+                    disabled={!viewProposal.gdoc_url}
+                    title={!viewProposal.gdoc_url ? 'Sin enlace de Google Docs' : 'Abrir en Google Docs'}
+                  >
+                    Abrir en Google Docs
+                  </button>
+                  <button
+                    style={{ ...styles.button, background: viewProposal.gdoc_url ? '#ff9800' : '#bbb' }}
+                    onClick={() => unlinkProposalGdoc(viewProposal.id)}
+                    disabled={!viewProposal.gdoc_url}
+                    title={!viewProposal.gdoc_url ? 'Sin enlace de Google Docs' : 'Desvincular enlace'}
+                  >
+                    Desvincular link
+                  </button>
                   <button style={{ ...styles.button, background: '#999' }} onClick={() => setViewProposal(null)}>Cerrar</button>
                 </div>
+              </div>
+
+              {viewProposalLinkIssue && (
+                <div style={{ marginTop: '12px', padding: '10px', background: '#fff3e0', borderRadius: '6px', border: '1px solid #ffcc80', color: '#b35b00' }}>
+                  {viewProposalLinkIssue}
+                </div>
+              )}
+
+              {(viewProposalGdocUpdateAvailable || viewProposalGdocUpdateMessage) && (
+                <div style={{ marginTop: '12px', padding: '10px', background: '#e8f0fe', borderRadius: '6px', border: '1px solid #c6dafc', color: '#174ea6', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                  <div>{viewProposalGdocUpdateMessage || 'El documento fue actualizado en Google Docs.'}</div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      style={{ ...styles.button, background: '#1a73e8' }}
+                      onClick={() => openGdocDiff(viewProposal.id)}
+                    >
+                      Ver cambios
+                    </button>
+                    <button
+                      style={{ ...styles.button, background: '#1a73e8' }}
+                      onClick={() => syncProposalGdoc(viewProposal.id)}
+                      disabled={viewProposalGdocSyncLoading}
+                    >
+                      {viewProposalGdocSyncLoading ? 'Sincronizando...' : 'Sincronizar todo'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: '#1a3d5c' }}>Vincular Google Docs</div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    style={{ ...styles.input, marginBottom: 0 }}
+                    placeholder="https://docs.google.com/document/d/..."
+                    value={viewProposalGdocInput}
+                    onChange={(e) => setViewProposalGdocInput(e.target.value)}
+                  />
+                  <button
+                    style={{ ...styles.button, background: '#4caf50' }}
+                    onClick={() => linkProposalGdoc(viewProposal.id)}
+                    disabled={viewProposalGdocLoading}
+                  >
+                    {viewProposalGdocLoading ? 'Validando...' : 'Validar y vincular'}
+                  </button>
+                </div>
+                {viewProposalGdocError && (
+                  <div style={{ marginTop: '8px', color: '#b00020' }}>{viewProposalGdocError}</div>
+                )}
               </div>
 
               <div style={{ marginTop: '15px', padding: '12px', background: '#f5f5f5', borderRadius: '6px' }}>
@@ -8331,6 +8897,68 @@ const App = () => {
                 <h3>Observaciones</h3>
                 <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.observations || '-'}</div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {showGdocDiff && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+            <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', width: '95%', maxWidth: '1100px', maxHeight: '85vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                <h2 style={{ margin: 0 }}>Comparar cambios de Google Docs</h2>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button style={{ ...styles.button, background: '#999' }} onClick={() => setShowGdocDiff(false)}>Cerrar</button>
+                </div>
+              </div>
+
+              {gdocDiffLoading && (
+                <div style={{ marginTop: '12px', color: '#555' }}>Cargando comparación...</div>
+              )}
+
+              {!gdocDiffLoading && gdocDiffData && (
+                <div style={{ marginTop: '16px' }}>
+                  {Object.keys(gdocDiffData.changes || {}).length === 0 ? (
+                    <div style={{ color: '#555' }}>No se encontraron cambios para comparar.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {Object.entries(gdocDiffData.changes).map(([key, change]) => (
+                        <div key={key} style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '12px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <strong>{change.label || key}</strong>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <input
+                                type="checkbox"
+                                checked={!!gdocDiffSelection[key]}
+                                onChange={(e) => setGdocDiffSelection((prev) => ({ ...prev, [key]: e.target.checked }))}
+                              />
+                              Aplicar cambio
+                            </label>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div>
+                              <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Tu versión</div>
+                              <pre style={{ background: '#f8fafc', padding: '8px', borderRadius: '4px', whiteSpace: 'pre-wrap' }}>{change.current_display || '-'}</pre>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Última en Google Docs</div>
+                              <pre style={{ background: '#f0f9ff', padding: '8px', borderRadius: '4px', whiteSpace: 'pre-wrap' }}>{change.latest_display || '-'}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: '16px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button style={{ ...styles.button, background: '#1a73e8' }} onClick={applyGdocSelectedChanges}>
+                      Aplicar seleccionados
+                    </button>
+                    <button style={{ ...styles.button, background: '#1a73e8' }} onClick={() => syncProposalGdoc(viewProposal.id)}>
+                      Sincronizar todo
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
