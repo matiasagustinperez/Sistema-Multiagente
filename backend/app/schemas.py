@@ -134,7 +134,7 @@ class ProposalBase(BaseModel):
     gdoc_status: Optional[str] = None
 
 class ProposalCreate(ProposalBase):
-    pass
+    create_in_drive: Optional[bool] = None
 
 class ProposalUpdate(BaseModel):
     title: Optional[str] = None
@@ -170,6 +170,7 @@ class ProposalUpdate(BaseModel):
     study_subject_id: Optional[int] = None
     source_type: Optional[str] = None
     gdoc_url: Optional[str] = None
+    create_in_drive: Optional[bool] = None
 
 class Proposal(ProposalBase):
     id: int

@@ -569,6 +569,82 @@ def unlink_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
     return {"status": "unlinked", "gdoc_url": None}
 
 
+def try_create_gdoc_for_proposal(db: Session, proposal: models.Proposal) -> tuple[bool, str | None]:
+    """
+    Intenta crear un GDoc para una propuesta existente.
+    Retorna True si se crea exitosamente, False si falla (no lanza excepción).
+    """
+    if not proposal:
+        return False, "proposal-not-found"
+    if proposal.gdoc_url:
+        return True, None
+    
+    if not os.path.exists(TEMPLATE_PATH):
+        return False, "template-not-found"
+
+    settings = resolve_drive_settings_for_proposal(db, proposal)
+    if not settings or not settings.root_folder_url:
+        return False, "drive-settings-missing"
+
+    folder_id = extract_drive_folder_id(settings.root_folder_url)
+    if not folder_id:
+        return False, "drive-folder-invalid"
+
+    try:
+        from googleapiclient.http import MediaFileUpload
+        from googleapiclient.errors import HttpError
+        from .docx_export import generate_proposal_docx
+    except ImportError:
+        return False, "drive-dependencies-missing"
+
+    try:
+        drive_service = get_google_drive_service()
+        output_path = generate_proposal_docx(proposal, TEMPLATE_PATH)
+        output_dir = os.path.dirname(output_path)
+        
+        try:
+            filename = build_proposal_docx_filename(proposal)
+            file_title = filename[:-5] if filename.lower().endswith(".docx") else filename
+            media = MediaFileUpload(
+                output_path,
+                mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                resumable=False,
+            )
+
+            created = drive_service.files().create(
+                body={
+                    "name": file_title,
+                    "mimeType": "application/vnd.google-apps.document",
+                    "parents": [folder_id]
+                },
+                media_body=media,
+                fields="id, webViewLink, parents",
+                supportsAllDrives=True,
+            ).execute()
+
+            gdoc_id = created.get("id")
+            if gdoc_id:
+                gdoc_url = f"https://docs.google.com/document/d/{gdoc_id}/edit"
+                # Extract new hash
+                _, _, new_hash, _ = extract_gdoc_payload(gdoc_url)
+                # Update proposal with GDoc info
+                proposal.gdoc_url = gdoc_url
+                proposal.gdoc_hash = new_hash
+                proposal.gdoc_last_synced = datetime.utcnow()
+                proposal.gdoc_last_checked = datetime.utcnow()
+                proposal.gdoc_status = "ok"
+                proposal.source_type = "gdoc"
+                db.add(proposal)
+                db.flush()
+                return True, None
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+    except Exception as exc:
+        return False, str(exc)
+
+    return False, "drive-create-failed"
+
+
 @app.post("/proposals/{proposal_id}/create-gdoc", response_model=schemas.Proposal)
 def create_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
     proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
@@ -1157,16 +1233,16 @@ def get_local_diff(proposal_id: int, db: Session = Depends(get_db)):
     }
 
 
-@app.post("/proposals/{proposal_id}/push-to-gdoc")
-def push_proposal_to_gdoc(
+@app.post("/proposals/{proposal_id}/push-to-gdoc-direct")
+def push_proposal_to_gdoc_direct(
     proposal_id: int,
     changes_to_apply: dict = Body(..., embed=True, description="Dict con los cambios a aplicar: {field: True/False}"),
     db: Session = Depends(get_db),
-    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
-    Aplica cambios locales al GDoc descargando el DOCX actualizado.
-    Los cambios seleccionados se aplican a la propuesta y se genera un DOCX para descargar.
+    Aplica cambios locales directamente al documento de Google Docs.
+    Genera DOCX actualizado y reemplaza el contenido en GDoc preservando la estructura.
+    Actualiza: GDoc + gdoc_hash en BD.
     """
     proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
     if not proposal:
@@ -1178,36 +1254,102 @@ def push_proposal_to_gdoc(
     if not changes_to_apply or not isinstance(changes_to_apply, dict):
         raise HTTPException(status_code=400, detail="changes_to_apply es requerido")
 
+    # Verificar que tengo cambios que aplicar
+    if not any(changes_to_apply.values()):
+        return {
+            "status": "ok",
+            "message": "No hay cambios seleccionados para aplicar",
+            "gdoc_url": proposal.gdoc_url,
+            "updated_fields": []
+        }
+
     # Validar que el template existe
     if not os.path.exists(TEMPLATE_PATH):
         raise HTTPException(status_code=500, detail="Template Propuestas.docx no encontrado")
 
     try:
         from .docx_export import generate_proposal_docx
-    except ImportError:
+        from googleapiclient.http import MediaFileUpload
+        from googleapiclient.errors import HttpError
+    except ImportError as e:
         raise HTTPException(
             status_code=500,
-            detail="Faltan dependencias para generar DOCX. Verifica python-docx",
+            detail=f"Faltan dependencias: {str(e)}",
         )
 
-    # Generar DOCX actualizado con los cambios
-    output_path = generate_proposal_docx(proposal, TEMPLATE_PATH)
-    output_dir = os.path.dirname(output_path)
+    # Extraer ID del documento de GDoc
+    doc_id_match = re.search(r"/d/([\w-]+)", proposal.gdoc_url)
+    if not doc_id_match:
+        raise HTTPException(status_code=400, detail="URL de Google Docs inválida")
+    
+    doc_id = doc_id_match.group(1)
+    drive_service = get_google_drive_service()
 
+    # Registrar qué campos se actualizarán
+    updated_fields = [field for field, apply in changes_to_apply.items() if apply]
+    
     try:
-        filename = build_proposal_docx_filename(proposal)
-        
-        # Programar limpieza del directorio temporal después de enviar el archivo
-        background_tasks.add_task(shutil.rmtree, output_dir, ignore_errors=True)
-        
-        return FileResponse(
-            output_path,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=filename,
+        # Generar DOCX actualizado
+        output_path = generate_proposal_docx(proposal, TEMPLATE_PATH)
+        output_dir = os.path.dirname(output_path)
+
+        try:
+            # Leer el DOCX actualizado como binario
+            with open(output_path, 'rb') as f:
+                docx_content = f.read()
+
+            # Actualizar el contenido del documento en Google Drive
+            # Esto preserva la estructura básica del documento pero reemplaza el contenido
+            media = MediaFileUpload(
+                output_path,
+                mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                resumable=False,
+            )
+
+            try:
+                drive_service.files().update(
+                    fileId=doc_id,
+                    media_body=media,
+                    fields="id, webViewLink"
+                ).execute()
+            except HttpError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Error al actualizar Google Docs: {e.reason if hasattr(e, 'reason') else str(e)}"
+                )
+
+            # Extraer nuevo hash del documento actualizado
+            _, _, new_hash, _ = extract_gdoc_payload(proposal.gdoc_url)
+            
+            # Actualizar BD con el nuevo hash
+            proposal.gdoc_hash = new_hash
+            proposal.gdoc_last_checked = datetime.utcnow()
+            proposal.gdoc_last_synced = proposal.gdoc_last_checked
+            proposal.gdoc_status = "ok"
+            db.add(proposal)
+            db.commit()
+
+            return {
+                "status": "success",
+                "message": f"Se aplicaron {len(updated_fields)} cambios en Google Docs exitosamente",
+                "gdoc_url": proposal.gdoc_url,
+                "updated_fields": updated_fields,
+                "gdoc_hash": proposal.gdoc_hash,
+            }
+
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al aplicar cambios: {str(e)}"
         )
-    except Exception as exc:
-        shutil.rmtree(output_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=f"Error al generar DOCX: {str(exc)}")
+
+
+
 
 
 def sync_teachers_from_existing_proposals() -> None:
@@ -1367,10 +1509,27 @@ def get_or_create_study_term(db: Session, year_id: int, name: str) -> models.Stu
 
 
 def find_subject_by_plan_name(db: Session, plan_id: int, name: str) -> models.StudySubject | None:
-    return db.query(models.StudySubject).join(models.StudyTerm).join(models.StudyYear).filter(
-        models.StudyYear.plan_id == plan_id,
-        models.StudySubject.name.ilike(name),
-    ).first()
+    """
+    Find subject by name within a plan, normalizing accents and case.
+    This allows "Programacion I" to match "Programación I"
+    """
+    if not name:
+        return None
+    
+    # Get all subjects in the plan
+    subjects = db.query(models.StudySubject).join(models.StudyTerm).join(models.StudyYear).filter(
+        models.StudyYear.plan_id == plan_id
+    ).all()
+    
+    # Normalize the search name
+    search_normalized = normalize_header(name)
+    
+    # Find first matching subject (normalized comparison)
+    for subject in subjects:
+        if normalize_header(subject.name) == search_normalized:
+            return subject
+    
+    return None
 
 
 def get_or_create_study_subject(db: Session, plan_id: int, term_id: int, name: str) -> models.StudySubject:
@@ -1447,6 +1606,22 @@ def build_subject_out(db: Session, subject: models.StudySubject) -> dict:
         .filter(models.StudySubjectPrerequisite.subject_id == subject.id)
         .all()
     ]
+    
+    # Get associated proposals
+    proposals = db.query(models.Proposal).filter(
+        models.Proposal.study_subject_id == subject.id
+    ).all()
+    associated_proposals = [
+        {
+            "id": p.id,
+            "title": p.title,
+            "status": p.status,
+            "gdoc_url": p.gdoc_url,
+            "gdoc_status": p.gdoc_status,
+        }
+        for p in proposals
+    ]
+    
     return {
         "id": subject.id,
         "term_id": subject.term_id,
@@ -1464,6 +1639,7 @@ def build_subject_out(db: Session, subject: models.StudySubject) -> dict:
         "specific_competencies": subject.specific_competencies,
         "blocks": subject.blocks or [],
         "prerequisite_ids": prereq_ids,
+        "associated_proposals": associated_proposals,
         "created_at": subject.created_at,
         "updated_at": subject.updated_at,
     }
@@ -2292,6 +2468,7 @@ def update_proposal(proposal_id: int, payload: schemas.ProposalUpdate, db: Sessi
     data = payload.model_dump(exclude_unset=True) if hasattr(payload, 'model_dump') else payload.dict(exclude_unset=True)
     generic_items_raw = data.pop("generic_competencies_items", None)
     specific_items_raw = data.pop("specific_competencies_items", None)
+    create_in_drive = bool(data.pop("create_in_drive", False))
     
     # Convert Pydantic models to dicts for JSON storage
     if 'learning_outcomes' in data and data['learning_outcomes']:
@@ -2350,6 +2527,8 @@ def update_proposal(proposal_id: int, payload: schemas.ProposalUpdate, db: Sessi
         setattr(proposal, key, value)
     db.add(proposal)
     sync_subject_from_proposal(db, proposal)
+    if create_in_drive and not proposal.gdoc_url:
+        try_create_gdoc_for_proposal(db, proposal)
     db.commit()
     db.refresh(proposal)
     return build_proposal_response(db, proposal)
@@ -2955,6 +3134,8 @@ def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_
         generic_items = normalize_competency_items(proposal.generic_competencies_items or [])
         specific_items = normalize_competency_items(proposal.specific_competencies_items or [])
 
+        create_in_drive = bool(getattr(proposal, "create_in_drive", False))
+
         db_proposal = models.Proposal(
             title=proposal.title,
             filename=filename,
@@ -3001,6 +3182,11 @@ def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_
         if specific_items:
             replace_proposal_competencies(db, db_proposal.id, specific_items, "specific")
         sync_subject_from_proposal(db, db_proposal)
+        drive_creation_success = False
+        drive_creation_error = None
+        if create_in_drive and not db_proposal.gdoc_url:
+            drive_creation_success, drive_creation_error = try_create_gdoc_for_proposal(db, db_proposal)
+        
         db.commit()
         db.refresh(db_proposal)
         return {
@@ -3012,6 +3198,10 @@ def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_
             "status": db_proposal.status,
             "created_at": db_proposal.created_at,
             "study_subject_id": db_proposal.study_subject_id,
+            "gdoc_url": db_proposal.gdoc_url,
+            "drive_creation_requested": create_in_drive,
+            "drive_creation_success": drive_creation_success,
+            "drive_creation_error": drive_creation_error,
         }
     except Exception as e:
         db.rollback()
@@ -3062,3 +3252,46 @@ async def import_proposal_docx(file: UploadFile = File(...)):
     
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error importing DOCX: {str(e)}")
+
+
+@app.post("/proposals/{proposal_id}/sync-to-study-plan")
+async def sync_proposal_to_study_plan(proposal_id: int, db: Session = Depends(get_db)):
+    """
+    Force synchronization of a proposal to the study plan.
+    Useful for debugging why a proposal isn't linking to the plan.
+    """
+    db_proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not db_proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    
+    # Log the current state
+    log_message = f"Syncing proposal {proposal_id} to study plan:\n"
+    log_message += f"  - career: {db_proposal.career}\n"
+    log_message += f"  - subject: {db_proposal.subject}\n"
+    log_message += f"  - study_plan: {db_proposal.study_plan}\n"
+    log_message += f"  - year_of_career: {db_proposal.year_of_career}\n"
+    log_message += f"  - quarter: {db_proposal.quarter}\n"
+    print(f"[DEBUG] {log_message}")
+    
+    # Check prerequisites
+    if not db_proposal.career:
+        raise HTTPException(status_code=400, detail="Proposal has no career specified")
+    if not db_proposal.subject:
+        raise HTTPException(status_code=400, detail="Proposal has no subject specified")
+    
+    try:
+        # Perform the sync
+        sync_subject_from_proposal(db, db_proposal)
+        db.commit()
+        db.refresh(db_proposal)
+        
+        return {
+            "success": True,
+            "message": "Proposal synced to study plan",
+            "study_subject_id": db_proposal.study_subject_id,
+            "debug_info": log_message.replace("\n", " | ")
+        }
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] Sync failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")

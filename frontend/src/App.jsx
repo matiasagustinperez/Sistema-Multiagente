@@ -90,6 +90,8 @@ const App = () => {
   const [editingProposalStatus, setEditingProposalStatus] = useState(null)
   const [viewProposal, setViewProposal] = useState(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [createInDriveOnSave, setCreateInDriveOnSave] = useState(false)
+  const [isCreatingInDrive, setIsCreatingInDrive] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   const autosaveTimerRef = useRef(null)
   const informacionGeneralRef = useRef(null)
@@ -833,88 +835,111 @@ const App = () => {
           </thead>
           <tbody>
             {term.subjects.map((subject) => (
-              <tr key={subject.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={{ padding: '4px', fontSize: '11px' }}>{subject.name}</td>
-                <td style={{ padding: '4px' }}>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    {!(year.year === 1 && term.name === '1er Cuatrimestre') && (
+              <React.Fragment key={subject.id}>
+                <tr style={{ borderBottom: '1px solid #eee' }}>
+                  <td style={{ padding: '4px', fontSize: '11px' }}>
+                    {subject.name}
+                    {subject.associated_proposals && subject.associated_proposals.length > 0 && (
+                      <div style={{ marginTop: '2px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                        {subject.associated_proposals.map((prop) => (
+                          <span
+                            key={prop.id}
+                            style={{
+                              fontSize: '10px',
+                              padding: '2px 6px',
+                              background: '#dde7f4',
+                              borderRadius: '3px',
+                              color: '#0066cc'
+                            }}
+                            title={`Propuesta: ${prop.title}`}
+                          >
+                            📋 {prop.title}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: '4px' }}>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      {!(year.year === 1 && term.name === '1er Cuatrimestre') && (
+                        <button
+                          style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                          title="Editar correlativas"
+                          onClick={() => {
+                            setSelectedSubjectForCorrelatives(normalizeCorrelativeSelections(subject))
+                            setCorrelativeMode(true)
+                          }}
+                        >
+                          🔗
+                        </button>
+                      )}
                       <button
                         style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
-                        title="Editar correlativas"
+                        title="Renombrar asignatura"
                         onClick={() => {
-                          setSelectedSubjectForCorrelatives(normalizeCorrelativeSelections(subject))
-                          setCorrelativeMode(true)
+                          const nextName = window.prompt('Nuevo nombre de asignatura', subject.name || '')
+                          if (!nextName || !nextName.trim()) {
+                            return
+                          }
+                          if (hasDuplicateSubjectName(planYears, nextName, subject.id)) {
+                            setPlanError('Ya existe una asignatura con ese nombre en el plan')
+                            setTimeout(() => setPlanError(''), 3000)
+                            return
+                          }
+                          const updatedYears = planYears.map((y) => {
+                            if (y.id === year.id) {
+                              return {
+                                ...y,
+                                terms: y.terms.map((t) => {
+                                  if (t.id === term.id) {
+                                    return {
+                                      ...t,
+                                      subjects: t.subjects.map((s) =>
+                                        s.id === subject.id ? { ...s, name: nextName.trim() } : s
+                                      )
+                                    }
+                                  }
+                                  return t
+                                })
+                              }
+                            }
+                            return y
+                          })
+                          setPlanYears(updatedYears)
                         }}
                       >
-                        🔗
+                        ✏️
                       </button>
-                    )}
-                    <button
-                      style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
-                      title="Renombrar asignatura"
-                      onClick={() => {
-                        const nextName = window.prompt('Nuevo nombre de asignatura', subject.name || '')
-                        if (!nextName || !nextName.trim()) {
-                          return
-                        }
-                        if (hasDuplicateSubjectName(planYears, nextName, subject.id)) {
-                          setPlanError('Ya existe una asignatura con ese nombre en el plan')
-                          setTimeout(() => setPlanError(''), 3000)
-                          return
-                        }
-                        const updatedYears = planYears.map((y) => {
-                          if (y.id === year.id) {
-                            return {
-                              ...y,
-                              terms: y.terms.map((t) => {
-                                if (t.id === term.id) {
-                                  return {
-                                    ...t,
-                                    subjects: t.subjects.map((s) =>
-                                      s.id === subject.id ? { ...s, name: nextName.trim() } : s
-                                    )
+                      <button
+                        style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                        title="Eliminar asignatura"
+                        onClick={() => {
+                          const updatedYears = planYears.map((y) => {
+                            if (y.id === year.id) {
+                              return {
+                                ...y,
+                                terms: y.terms.map((t) => {
+                                  if (t.id === term.id) {
+                                    return {
+                                      ...t,
+                                      subjects: t.subjects.filter((s) => s.id !== subject.id)
+                                    }
                                   }
-                                }
-                                return t
-                              })
+                                  return t
+                                })
+                              }
                             }
-                          }
-                          return y
-                        })
-                        setPlanYears(updatedYears)
-                      }}
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
-                      title="Eliminar asignatura"
-                      onClick={() => {
-                        const updatedYears = planYears.map((y) => {
-                          if (y.id === year.id) {
-                            return {
-                              ...y,
-                              terms: y.terms.map((t) => {
-                                if (t.id === term.id) {
-                                  return {
-                                    ...t,
-                                    subjects: t.subjects.filter((s) => s.id !== subject.id)
-                                  }
-                                }
-                                return t
-                              })
-                            }
-                          }
-                          return y
-                        })
-                        setPlanYears(updatedYears)
-                      }}
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                            return y
+                          })
+                          setPlanYears(updatedYears)
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </React.Fragment>
             ))}
           </tbody>
         </table>
@@ -1030,21 +1055,29 @@ const App = () => {
   }
 
   const getProposalGdocStatus = (proposal) => {
-    const status = gdocStatusById[proposal.id]?.status || proposal.gdoc_status
-    if (status) return status
+    // Si no tiene link de GDoc
     if (!proposal.gdoc_url) {
       return proposal.source_type === 'gdoc' ? 'lost' : 'missing'
     }
+
+    // Confiar SOLO en el status del backend - no comparar timestamps
+    const backendStatus = gdocStatusById[proposal.id]?.status || proposal.gdoc_status
+    if (backendStatus && backendStatus !== 'ok') {
+      return backendStatus
+    }
+
+    // Default: sincronizado (solo confiar en status explícito del backend)
     return 'ok'
   }
 
   const getProposalGdocBadge = (proposal) => {
     const status = getProposalGdocStatus(proposal)
     const stylesByStatus = {
-      ok: { label: 'Con link', background: 'rgba(16, 185, 129, 0.18)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.4)' },
-      missing: { label: 'Sin link', background: 'rgba(107, 114, 128, 0.18)', color: '#374151', border: '1px solid rgba(107, 114, 128, 0.4)' },
+      ok: { label: 'Sincronizado', background: 'rgba(16, 185, 129, 0.18)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.4)' },
+      missing: { label: 'Sin vincular', background: 'rgba(107, 114, 128, 0.18)', color: '#374151', border: '1px solid rgba(107, 114, 128, 0.4)' },
       lost: { label: 'Link perdido', background: 'rgba(239, 68, 68, 0.18)', color: '#b91c1c', border: '1px solid rgba(239, 68, 68, 0.45)' },
-      updated: { label: 'Actualizada', background: 'rgba(59, 130, 246, 0.18)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.45)' }
+      updated: { label: 'Actualizado', background: 'rgba(59, 130, 246, 0.18)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.45)' },
+      unsent: { label: 'Cambios sin enviar', background: 'rgba(251, 191, 36, 0.18)', color: '#b45309', border: '1px solid rgba(251, 191, 36, 0.4)' }
     }
     return stylesByStatus[status] || stylesByStatus.missing
   }
@@ -1667,32 +1700,33 @@ const App = () => {
     try {
       setGdocDiffLoading(true)
       const changesToApply = localDiffSelection
-      const res = await fetch(`http://localhost:8001/proposals/${viewProposal.id}/push-to-gdoc`, {
+      const res = await fetch(`http://localhost:8001/proposals/${viewProposal.id}/push-to-gdoc-direct`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ changes_to_apply: changesToApply })
       })
+      
+      const data = await res.json()
+      
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
-        throw new Error(errorData.detail || `Error ${res.status}`)
+        throw new Error(data.detail || data.message || `Error ${res.status}`)
       }
-      const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      const filename = viewProposal.subject && viewProposal.year_of_career
-        ? `${viewProposal.year_of_career}° - ${viewProposal.subject}.docx`
-        : 'propuesta_actualizada.docx'
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
+      
       closeLocalDiff()
-      setStatusMsg('DOCX actualizado descargado. Reemplaza manualmente en Google Docs.')
+      
+      // Refrescar los datos de la propuesta después del push exitoso
+      await loadProposals()
+      
+      // Construir mensaje de éxito con detalles de los campos actualizados
+      const fieldsText = data.updated_fields && data.updated_fields.length > 0
+        ? ` Campos actualizados: ${data.updated_fields.join(', ')}.`
+        : ''
+      
+      setStatusMsg(`✓ Cambios aplicados a Google Docs correctamente.${fieldsText}`)
       setStatusType('success')
+      
     } catch (err) {
-      setStatusMsg(err.message || 'Error al generar DOCX actualizado')
+      setStatusMsg(err.message || 'Error al aplicar cambios a Google Docs')
       setStatusType('error')
     } finally {
       setGdocDiffLoading(false)
@@ -2430,7 +2464,8 @@ const App = () => {
   // Find subject location in plan (year and term)
   const findSubjectLocation = (career, subjectName) => {
     const subjects = getPlanSubjects(career)
-    const subject = subjects.find(s => s.name.toLowerCase() === subjectName.toLowerCase())
+    const targetName = normalizeText(subjectName)
+    const subject = subjects.find((s) => normalizeText(s.name) === targetName)
     if (subject) {
       return {
         found: true,
@@ -2446,9 +2481,11 @@ const App = () => {
 
   // Find proposals for a subject (return latest modified)
   const findProposalForSubject = (career, subjectName, planName = '') => {
+    const targetName = normalizeText(subjectName)
+    const targetCareer = normalizeText(career)
     const matching = proposals.filter(p => {
-      if (p.career !== career) return false
-      if (!p.subject || p.subject.toLowerCase() !== subjectName.toLowerCase()) return false
+      if (normalizeText(p.career) !== targetCareer) return false
+      if (!p.subject || normalizeText(p.subject) !== targetName) return false
       if (!planName) return true
       const proposalPlan = p.study_plan || p.plan || ''
       return planMatches(proposalPlan, planName, career)
@@ -2936,6 +2973,8 @@ const App = () => {
 
   const resetProposalForm = () => {
     setFormData({ ...emptyFormData, carrera: activeCareer || '' })
+    setCreateInDriveOnSave(false)
+    setIsCreatingInDrive(false)
     setEquipoDocente([{ id: 1, teacherId: null, nombre: '', categoria: 'TITULAR', correo: '' }])
     setEditingProposalId(null)
     setEditingProposalStatus(null)
@@ -4468,12 +4507,14 @@ const App = () => {
       return
     }
 
-    // Ensure subject exists in the plan before saving
-    const subjectEnsured = await ensureSubjectInPlan(careerValue, formData.asignatura, formData.ciclo, formData.cuatrimestre)
-    if (!subjectEnsured && !silent) {
-      setStatusMsg('No se pudo crear la asignatura en el plan')
-      setStatusType('error')
-      return
+    // Only ensure subject in plan for NEW proposals, not for existing ones
+    if (!isEditing) {
+      const subjectEnsured = await ensureSubjectInPlan(careerValue, formData.asignatura, formData.ciclo, formData.cuatrimestre)
+      if (!subjectEnsured && !silent) {
+        setStatusMsg('No se pudo crear la asignatura en el plan')
+        setStatusType('error')
+        return
+      }
     }
 
     // Status logic: preserve "Creada" and "Importada", only compute for new or "EnProceso"
@@ -4483,6 +4524,7 @@ const App = () => {
           : (isProposalReadyToCreate() ? 'Creada' : 'EnProceso'))
       : (isProposalReadyToCreate() ? 'Creada' : 'EnProceso')
 
+    const shouldCreateInDrive = createInDriveOnSave && !formData.gdocUrl
     const payload = {
       title: formData.asignatura,
       career: careerValue,
@@ -4539,6 +4581,7 @@ const App = () => {
       observations: formData.observaciones,
       gdoc_url: formData.gdocUrl || null,
       source_type: formData.sourceType || (formData.gdocUrl ? 'gdoc' : ''),
+      create_in_drive: shouldCreateInDrive,
       status: computedStatus,
       teaching_team: equipoDocente.map(doc => ({
         id: doc.teacherId || null,
@@ -4550,6 +4593,7 @@ const App = () => {
 
     try {
       setIsSaving(true)
+      setIsCreatingInDrive(shouldCreateInDrive)
       const res = await fetch(`http://localhost:8001/proposals${isEditing ? `/${editingProposalId}` : ''}`, {
         method: isEditing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4562,8 +4606,39 @@ const App = () => {
       }
 
       const data = await res.json()
+      const savedProposalId = data?.id || editingProposalId
+      let createdDriveLink = data?.gdoc_url || null
+
+      if (shouldCreateInDrive && !createdDriveLink && savedProposalId) {
+        try {
+          const driveRes = await fetch(`http://localhost:8001/proposals/${savedProposalId}/create-gdoc`, {
+            method: 'POST'
+          })
+          if (driveRes.ok) {
+            const driveData = await driveRes.json()
+            createdDriveLink = driveData?.gdoc_url || createdDriveLink
+          }
+        } catch (driveErr) {
+          console.warn('No se pudo crear en Drive tras guardar', driveErr)
+        }
+      }
+
+      if (createdDriveLink) {
+        setFormData((prev) => ({ ...prev, gdocUrl: createdDriveLink, sourceType: 'gdoc' }))
+        setCreateInDriveOnSave(false)
+      }
       if (!silent) {
-        setStatusMsg(isEditing ? `Propuesta actualizada - ID: ${data.id}` : 'Borrador guardado - ID: ' + data.id)
+        if (shouldCreateInDrive && createdDriveLink) {
+          setStatusMsg(isEditing
+            ? `Propuesta actualizada y vinculada a Drive - ID: ${data.id}`
+            : `Borrador guardado y vinculado a Drive - ID: ${data.id}`)
+        } else if (shouldCreateInDrive && !createdDriveLink) {
+          setStatusMsg(isEditing
+            ? `Propuesta actualizada - ID: ${data.id} (no se pudo vincular en Drive)`
+            : `Borrador guardado - ID: ${data.id} (no se pudo vincular en Drive)`)
+        } else {
+          setStatusMsg(isEditing ? `Propuesta actualizada - ID: ${data.id}` : 'Borrador guardado - ID: ' + data.id)
+        }
         setStatusType('success')
       } else {
         setStatusMsg('Guardado automatico')
@@ -4592,6 +4667,7 @@ const App = () => {
         setStatusType('error')
       }
     } finally {
+      setIsCreatingInDrive(false)
       setIsSaving(false)
     }
   }
@@ -4712,6 +4788,7 @@ const App = () => {
         gdocUrl: data.gdoc_url || '',
         sourceType: data.source_type || ''
       })
+      setCreateInDriveOnSave(!(data.gdoc_url || '').trim())
       if (Array.isArray(data.teaching_team) && data.teaching_team.length > 0) {
         setEquipoDocente(data.teaching_team.map((doc, idx) => ({
           id: Date.now() + idx,
@@ -5014,8 +5091,9 @@ const App = () => {
       bibliografia: buildBibliografiaGlobal(data),
       observaciones: data.observations || '',
       gdocUrl: data.gdoc_url || importPreview?.gdoc_url || importGdocUrl || '',
-      sourceType: data.gdoc_url || importPreview?.gdoc_url || importGdocUrl ? 'gdoc' : ''
+      sourceType: data.gdoc_url || importPreview?.gdoc_url || importGdocUrl ? 'gdoc' : 'docx'
     })
+    setCreateInDriveOnSave(!(data.gdoc_url || importPreview?.gdoc_url || importGdocUrl || '').trim())
     
     // Cargar equipo docente desde teaching_team array
     if (data.teaching_team && Array.isArray(data.teaching_team)) {
@@ -5109,7 +5187,11 @@ const App = () => {
   }
 
   const isDocenteView = viewRole === 'docente'
-  const normalizeText = (value) => String(value || '').trim().toLowerCase()
+  const normalizeText = (value) => {
+    const raw = String(value || '')
+    const noAccents = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    return noAccents.replace(/\s+/g, ' ').trim().toLowerCase()
+  }
   const normalizePlanName = (value) => normalizeText(value).replace(/\s+/g, ' ')
   const extractPlanCode = (value) => {
     const text = normalizeText(value)
@@ -6446,6 +6528,54 @@ const App = () => {
 
               {/* SAVE BUTTONS - STICKY */}
               <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {!formData.gdocUrl && (
+                  <div style={{ background: '#ffffff', border: '1px solid #d9e1e6', borderRadius: '10px', padding: '10px 12px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)', minWidth: '260px' }}>
+                    <div style={{ fontSize: '12px', color: '#445', marginBottom: '6px', fontWeight: 600 }}>Crear en Google Drive al guardar</div>
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', cursor: isSaving ? 'not-allowed' : 'pointer' }}>
+                      <span style={{ fontSize: '12px', color: '#555' }}>{createInDriveOnSave ? 'Activado' : 'Desactivado'}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isSaving) return
+                          setCreateInDriveOnSave((prev) => !prev)
+                        }}
+                        style={{
+                          width: '46px',
+                          height: '24px',
+                          borderRadius: '20px',
+                          border: '1px solid #c7d3df',
+                          background: createInDriveOnSave ? '#2e7d32' : '#cfd8dc',
+                          position: 'relative',
+                          padding: 0,
+                          outline: 'none',
+                          cursor: isSaving ? 'not-allowed' : 'pointer'
+                        }}
+                        title="Activar creación en Drive"
+                        disabled={isSaving}
+                        aria-pressed={createInDriveOnSave}
+                      >
+                        <span
+                          style={{
+                            position: 'absolute',
+                            top: '2px',
+                            left: createInDriveOnSave ? '24px' : '2px',
+                            width: '18px',
+                            height: '18px',
+                            borderRadius: '50%',
+                            background: '#fff',
+                            transition: 'left 0.2s ease'
+                          }}
+                        />
+                      </button>
+                    </label>
+                    {isCreatingInDrive && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: '#0066cc' }}>
+                        ⏳ Guardando y creando documento en Drive...
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Draft button - show when creating new OR editing EnProceso */}
                 {(!editingProposalId || editingProposalStatus === 'EnProceso') && (
                   <button
@@ -6458,10 +6588,10 @@ const App = () => {
                       ...(!canSaveDraft && { opacity: 0.45, cursor: 'not-allowed' })
                     }}
                     onClick={saveProposal}
-                    disabled={!canSaveDraft}
+                    disabled={!canSaveDraft || isSaving}
                     title={canSaveDraft ? 'Guardar borrador (estado: En Proceso)' : 'Completa Carrera y Asignatura'}
                   >
-                    Guardar Borrador
+                    {isSaving ? 'Guardando...' : 'Guardar Borrador'}
                   </button>
                 )}
                 
@@ -6477,7 +6607,7 @@ const App = () => {
                       ...(!canCreateProposal && { opacity: 0.45, cursor: 'not-allowed' })
                     }}
                     onClick={saveProposal}
-                    disabled={!canCreateProposal}
+                    disabled={!canCreateProposal || isSaving}
                     title={canCreateProposal 
                       ? 'Crear propuesta completa (estado: Creada)' 
                       : (() => {
@@ -6488,7 +6618,7 @@ const App = () => {
                         })()
                     }
                   >
-                    Crear Propuesta
+                    {isSaving ? 'Guardando...' : 'Crear Propuesta'}
                   </button>
                 ) : (
                   <div style={{ display: 'flex', gap: '10px' }}>
@@ -6502,10 +6632,10 @@ const App = () => {
                         ...(!canSaveEdits && { opacity: 0.45, cursor: 'not-allowed' })
                       }}
                       onClick={saveProposal}
-                      disabled={!canSaveEdits}
+                      disabled={!canSaveEdits || isSaving}
                       title={canSaveEdits ? 'Guardar como borrador (incompleto)' : 'Completa Carrera y Asignatura'}
                     >
-                      Guardar Borrador
+                      {isSaving ? 'Guardando...' : 'Guardar Borrador'}
                     </button>
                     <button
                       style={{
@@ -6517,10 +6647,10 @@ const App = () => {
                         ...(!canSaveEdits && { opacity: 0.45, cursor: 'not-allowed' })
                       }}
                       onClick={saveProposal}
-                      disabled={!canSaveEdits}
+                      disabled={!canSaveEdits || isSaving}
                       title={canSaveEdits ? 'Guardar propuesta' : 'Completa Carrera y Asignatura'}
                     >
-                      Guardar Propuesta
+                      {isSaving ? 'Guardando...' : 'Guardar Propuesta'}
                     </button>
                   </div>
                 )}
@@ -9249,11 +9379,8 @@ const App = () => {
 
                   <div style={{ marginTop: '16px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                     <button style={{ ...styles.button, background: '#16a34a' }} onClick={pushProposalToGdoc}>
-                      📥 Descargar DOCX actualizado
+                      � Enviar a Google Docs
                     </button>
-                  </div>
-                  <div style={{ marginTop: '8px', color: '#666', fontSize: '12px', textAlign: 'right' }}>
-                    Descarga el DOCX, reemplaza manualmente en Google Docs y guarda los cambios.
                   </div>
                 </div>
               )}
