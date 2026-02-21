@@ -883,7 +883,17 @@ const App = () => {
       el.style.height = 'auto'
       el.style.height = `${el.scrollHeight}px`
     })
-  }, [formData, unitDebug, showComparison, showUnitBibliografiaModal, showTpCommentModal])
+  }, [
+    formData,
+    unitDebug,
+    showComparison,
+    showUnitBibliografiaModal,
+    showTpCommentModal,
+    viewProposal,
+    viewProposalIntelligentSummary,
+    editingSuggestionByResultId,
+    viewProposalExpandedSuggestions,
+  ])
 
   const normalizeCorrelativeSelections = (subject) => {
     if (!subject) {
@@ -11953,6 +11963,8 @@ const App = () => {
                                 <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Qué no cumple</div>
                                 <textarea
                                   style={{ ...styles.textarea, minHeight: '60px', marginBottom: '6px', background: '#fff' }}
+                                  data-autoresize="true"
+                                  onInput={autoResizeTextarea}
                                   value={(editingSuggestionByResultId[result.id]?.what_failed ?? result.what_failed ?? '')}
                                   onChange={(e) => setEditingSuggestionByResultId((prev) => ({
                                     ...prev,
@@ -11976,6 +11988,8 @@ const App = () => {
                                 <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Por qué</div>
                                 <textarea
                                   style={{ ...styles.textarea, minHeight: '60px', marginBottom: '6px', background: '#fff' }}
+                                  data-autoresize="true"
+                                  onInput={autoResizeTextarea}
                                   value={(editingSuggestionByResultId[result.id]?.why_failed ?? result.why_failed ?? '')}
                                   onChange={(e) => setEditingSuggestionByResultId((prev) => ({
                                     ...prev,
@@ -11995,6 +12009,8 @@ const App = () => {
                                 <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Sugerencia</div>
                                 <textarea
                                   style={{ ...styles.textarea, minHeight: '70px', marginBottom: '8px', background: '#fff' }}
+                                  data-autoresize="true"
+                                  onInput={autoResizeTextarea}
                                   value={(editingSuggestionByResultId[result.id]?.suggestion ?? result.suggestion ?? '')}
                                   onChange={(e) => setEditingSuggestionByResultId((prev) => ({
                                     ...prev,
@@ -12016,6 +12032,8 @@ const App = () => {
                                     <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Texto propuesto por IA (opcional)</div>
                                     <textarea
                                       style={{ ...styles.textarea, minHeight: '90px', marginBottom: '8px', background: '#fff', borderColor: '#d6e4ff' }}
+                                      data-autoresize="true"
+                                      onInput={autoResizeTextarea}
                                       value={(editingSuggestionByResultId[result.id]?.proposed_text ?? result.proposed_text ?? '')}
                                       onChange={(e) => setEditingSuggestionByResultId((prev) => ({
                                         ...prev,
