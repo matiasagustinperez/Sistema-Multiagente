@@ -1389,6 +1389,62 @@ def get_openai_client():
     return OpenAI(api_key=key)
 
 
+def model_uses_max_completion_tokens(model: str | None) -> bool:
+    name = str(model or "").strip().lower()
+    if not name:
+        return False
+    normalized = name.replace("_", "-")
+    tokens = [token for token in re.split(r"[^a-z0-9]+", normalized) if token]
+    for token in tokens:
+        if token.startswith(("o1", "o3", "o4", "gpt-5")):
+            return True
+    return normalized.startswith(("o1", "o3", "o4", "gpt-5"))
+
+
+def create_chat_completion_compatible(
+    client: OpenAI,
+    *,
+    model: str,
+    messages: list[dict],
+    temperature: float | int | None = None,
+    max_tokens: int | None = None,
+):
+    kwargs = {
+        "model": model,
+        "messages": messages,
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if max_tokens is not None:
+        if model_uses_max_completion_tokens(model):
+            kwargs["max_completion_tokens"] = int(max_tokens)
+        else:
+            kwargs["max_tokens"] = int(max_tokens)
+
+    try:
+        return client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        message = str(exc)
+        lower_message = message.lower()
+        retriable = False
+        token_param_unsupported = (
+            "unsupported parameter" in lower_message
+            and ("max_tokens" in lower_message or "max_completion_tokens" in lower_message)
+        )
+        if token_param_unsupported and "max_tokens" in kwargs:
+            kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+            retriable = True
+        elif token_param_unsupported and "max_completion_tokens" in kwargs:
+            kwargs["max_tokens"] = kwargs.pop("max_completion_tokens")
+            retriable = True
+        if "Unsupported parameter: 'temperature'" in message and "temperature" in kwargs:
+            kwargs.pop("temperature", None)
+            retriable = True
+        if retriable:
+            return client.chat.completions.create(**kwargs)
+        raise
+
+
 INTELLIGENT_TOPIC_ALIASES = {
     "equipo docente": "teaching_team",
     "equipo_docente": "teaching_team",
@@ -1744,7 +1800,8 @@ def force_intelligent_feedback_spanish(data: dict, client: OpenAI) -> dict:
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
     try:
-        translation = client.chat.completions.create(
+        translation = create_chat_completion_compatible(
+            client,
             model=os.getenv("OPENAI_MODEL_FAST", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -1812,7 +1869,8 @@ def evaluate_control_with_llm(
         + "Evalúa si cumple estrictamente la regla."
     )
     client = get_openai_client()
-    response = client.chat.completions.create(
+    response = create_chat_completion_compatible(
+        client,
         model=config["model"],
         messages=[
             {"role": "system", "content": system_prompt},
@@ -2926,7 +2984,15 @@ def suggest_for_proposal(proposal_id: int = Form(...), prompt_context: str = For
         system_prompt = "Eres un asistente que ayuda a redactar la Fundamentación de una propuesta docente, usando la evidencia asociada. Devuelve un párrafo sugerido." 
         user_prompt = f"Evidencias:\n{evidence_texts}\n\nContexto adicional:{prompt_context or ''}\n\nGenera una sugerencia concisa para la Fundamentación."
         client = get_openai_client()
-        resp = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"system","content":system_prompt},{"role":"user","content":user_prompt}], max_tokens=300)
+        resp = create_chat_completion_compatible(
+            client,
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=300,
+        )
         suggestion = resp.choices[0].message.content.strip()
         return {"suggestion": suggestion, "evidence_used": matches}
     except Exception as e:
@@ -2940,7 +3006,8 @@ def ai_generate(payload: AiPrompt):
             raise HTTPException(status_code=400, detail="Prompt is required")
         system_prompt = "Eres un asistente que redacta contenido academico en espanol, claro y conciso."
         client = get_openai_client()
-        resp = client.chat.completions.create(
+        resp = create_chat_completion_compatible(
+            client,
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -2964,7 +3031,8 @@ def ai_reformulate(payload: AiPrompt):
         system_prompt = "Eres un asistente que reformula textos academicos manteniendo el significado."
         user_prompt = f"Reformula el siguiente texto, manteniendo el significado:\n\n{payload.prompt}"
         client = get_openai_client()
-        resp = client.chat.completions.create(
+        resp = create_chat_completion_compatible(
+            client,
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},

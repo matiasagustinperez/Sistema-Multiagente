@@ -2,7 +2,12 @@ import React, { useState, useEffect, useRef } from 'react'
 import logoMacau from '../Logo MACAU.png'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8011').replace(/\/$/, '')
-const LEGACY_API_BASE_URL = 'http://localhost:8001'
+const LEGACY_API_BASE_URLS = [
+  'http://localhost:8001',
+  'http://127.0.0.1:8001',
+  'http://127.0.0.1:8011',
+  'http://localhost:8011'
+]
 
 const careerOptions = [
   'Ingeniería en Sistemas',
@@ -13,12 +18,21 @@ const careerOptions = [
 const App = () => {
   useEffect(() => {
     const nativeFetch = window.fetch.bind(window)
+    const replaceLegacyApiBase = (url) => {
+      let nextUrl = url
+      LEGACY_API_BASE_URLS.forEach((legacyBase) => {
+        if (legacyBase && nextUrl.includes(legacyBase)) {
+          nextUrl = nextUrl.replace(legacyBase, API_BASE_URL)
+        }
+      })
+      return nextUrl
+    }
     window.fetch = (input, init) => {
       if (typeof input === 'string') {
-        return nativeFetch(input.replace(LEGACY_API_BASE_URL, API_BASE_URL), init)
+        return nativeFetch(replaceLegacyApiBase(input), init)
       }
       if (input instanceof Request) {
-        const nextUrl = input.url.replace(LEGACY_API_BASE_URL, API_BASE_URL)
+        const nextUrl = replaceLegacyApiBase(input.url)
         if (nextUrl !== input.url) {
           const nextRequest = new Request(nextUrl, input)
           return nativeFetch(nextRequest, init)
