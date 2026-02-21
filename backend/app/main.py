@@ -17,6 +17,7 @@ import unicodedata
 import re
 import hashlib
 import json
+import ast
 from datetime import datetime
 from io import BytesIO
 import requests
@@ -1401,6 +1402,18 @@ def model_uses_max_completion_tokens(model: str | None) -> bool:
     return normalized.startswith(("o1", "o3", "o4", "gpt-5"))
 
 
+def model_restricts_temperature_to_default(model: str | None) -> bool:
+    name = str(model or "").strip().lower()
+    if not name:
+        return False
+    normalized = name.replace("_", "-")
+    tokens = [token for token in re.split(r"[^a-z0-9]+", normalized) if token]
+    for token in tokens:
+        if token.startswith(("o1", "o3", "o4", "gpt-5")):
+            return True
+    return normalized.startswith(("o1", "o3", "o4", "gpt-5"))
+
+
 def create_chat_completion_compatible(
     client: OpenAI,
     *,
@@ -1414,7 +1427,15 @@ def create_chat_completion_compatible(
         "messages": messages,
     }
     if temperature is not None:
-        kwargs["temperature"] = temperature
+        if model_restricts_temperature_to_default(model):
+            try:
+                temp_value = float(temperature)
+            except Exception:
+                temp_value = None
+            if temp_value is not None and abs(temp_value - 1.0) < 1e-9:
+                kwargs["temperature"] = 1
+        else:
+            kwargs["temperature"] = temperature
     if max_tokens is not None:
         if model_uses_max_completion_tokens(model):
             kwargs["max_completion_tokens"] = int(max_tokens)
@@ -1437,7 +1458,13 @@ def create_chat_completion_compatible(
         elif token_param_unsupported and "max_completion_tokens" in kwargs:
             kwargs["max_tokens"] = kwargs.pop("max_completion_tokens")
             retriable = True
-        if "Unsupported parameter: 'temperature'" in message and "temperature" in kwargs:
+        temperature_unsupported = "unsupported parameter: 'temperature'" in lower_message
+        temperature_value_unsupported = (
+            "unsupported value" in lower_message
+            and "temperature" in lower_message
+            and "default (1)" in lower_message
+        )
+        if (temperature_unsupported or temperature_value_unsupported) and "temperature" in kwargs:
             kwargs.pop("temperature", None)
             retriable = True
         if retriable:
@@ -1741,19 +1768,57 @@ def build_associated_topic_payloads(proposal: models.Proposal, associated_topics
 
 def parse_llm_json_response(content: str) -> dict:
     raw = (content or "").strip()
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?", "", raw).strip()
-        raw = re.sub(r"```$", "", raw).strip()
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
+    raw = re.sub(r"^```(?:json)?", "", raw, flags=re.IGNORECASE).strip()
+    raw = re.sub(r"```$", "", raw).strip()
+
+    def try_parse(candidate: str):
+        text = str(candidate or "").strip()
+        if not text:
+            return None
+        for parser in (
+            lambda v: json.loads(v),
+            lambda v: json.loads(re.sub(r",\s*([}\]])", r"\1", v)),
+        ):
+            try:
+                parsed = parser(text)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                continue
+        normalized_quotes = (
+            text.replace("“", '"')
+            .replace("”", '"')
+            .replace("’", "'")
+            .replace("‘", "'")
+        )
+        try:
+            parsed = ast.literal_eval(normalized_quotes)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return None
+        return None
+
+    parsed = try_parse(raw)
+    if parsed is not None:
+        return parsed
+
     match = re.search(r"\{[\s\S]*\}", raw)
     if match:
-        try:
-            return json.loads(match.group(0))
-        except Exception:
-            pass
+        parsed = try_parse(match.group(0))
+        if parsed is not None:
+            return parsed
+
+    if not raw:
+        return {
+            "pass": False,
+            "what_failed": "No se pudo interpretar respuesta JSON del modelo.",
+            "why_failed": "El modelo devolvió una respuesta vacía.",
+            "suggestion": "Reintentar con más tokens o con otro modo/modelo.",
+            "proposed_text": "",
+            "summary": "Respuesta vacía del modelo",
+        }
+
     return {
         "pass": False,
         "what_failed": "No se pudo interpretar respuesta JSON del modelo.",
@@ -1879,7 +1944,32 @@ def evaluate_control_with_llm(
         temperature=config["temperature"],
         max_tokens=config["max_tokens"],
     )
-    content = (response.choices[0].message.content or "").strip()
+    response_choice = response.choices[0]
+    finish_reason = str(getattr(response_choice, "finish_reason", "") or "").lower()
+    content = (response_choice.message.content or "").strip()
+    retried_for_length = False
+    used_max_tokens = int(config["max_tokens"])
+
+    if not content and finish_reason == "length":
+        retry_tokens = min(max(used_max_tokens + 300, used_max_tokens * 2), 4000)
+        if retry_tokens > used_max_tokens:
+            retry_response = create_chat_completion_compatible(
+                client,
+                model=config["model"],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=config["temperature"],
+                max_tokens=retry_tokens,
+            )
+            response = retry_response
+            response_choice = retry_response.choices[0]
+            finish_reason = str(getattr(response_choice, "finish_reason", "") or "").lower()
+            content = (response_choice.message.content or "").strip()
+            retried_for_length = True
+            used_max_tokens = retry_tokens
+
     data = parse_llm_json_response(content)
     data = force_intelligent_feedback_spanish(data, client)
     passed = bool(data.get("pass") or data.get("passed") or data.get("ok"))
@@ -1894,6 +1984,11 @@ def evaluate_control_with_llm(
             **(data if isinstance(data, dict) else {"data": data}),
             "requested_mode": selected_mode,
             "effective_mode": effective_mode,
+            "finish_reason": finish_reason,
+            "retried_for_length": retried_for_length,
+            "used_max_tokens": used_max_tokens,
+            "model": str(config.get("model") or ""),
+            "raw_content": content[:3000],
             "associated_topics": normalize_associated_topics(getattr(control, "associated_topics", None), control.topic),
         },
     }

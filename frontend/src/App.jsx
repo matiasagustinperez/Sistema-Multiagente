@@ -5850,6 +5850,12 @@ const App = () => {
 
     const startIntelligentRunProgressPoller = ({ proposalId: pollProposalId, controlIds, startedAtIso }) => {
       clearIntelligentRunProgressPoller()
+      const parseBackendDate = (value) => {
+        const raw = String(value || '').trim()
+        if (!raw) return NaN
+        const hasTz = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)
+        return Date.parse(hasTz ? raw : `${raw}Z`)
+      }
       const startedAtMs = startedAtIso ? Date.parse(startedAtIso) : Date.now()
       const safeStartedAtMs = Number.isFinite(startedAtMs) ? startedAtMs : Date.now()
       const selectedControlIds = new Set((Array.isArray(controlIds) ? controlIds : []).map((value) => Number(value)))
@@ -5873,7 +5879,7 @@ const App = () => {
             if (!selectedControlIds.has(controlId)) return
             const checkedAtRaw = row?.checked_at
             if (!checkedAtRaw) return
-            const checkedAtMs = Date.parse(checkedAtRaw)
+            const checkedAtMs = parseBackendDate(checkedAtRaw)
             if (!Number.isFinite(checkedAtMs)) return
             if (checkedAtMs + 250 >= safeStartedAtMs) {
               completed += 1
