@@ -2971,6 +2971,9 @@ def get_teacher_usage(teacher_id: int, career: str = "", db: Session = Depends(g
             "subject": proposal.subject,
             "career": proposal.career,
             "title": proposal.title,
+            "quarter": proposal.quarter,
+            "year_of_career": proposal.year_of_career,
+            "academic_year": proposal.academic_year,
         }
         for proposal in proposals
     ]

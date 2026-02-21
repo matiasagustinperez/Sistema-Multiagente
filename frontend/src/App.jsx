@@ -184,6 +184,11 @@ const App = () => {
   })
   const [teacherEditId, setTeacherEditId] = useState(null)
   const [teacherEditForm, setTeacherEditForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+  const [teacherViewMode, setTeacherViewMode] = useState(() => {
+    if (typeof window === 'undefined') return 'table'
+    const saved = window.localStorage.getItem('teacherViewMode')
+    return saved === 'cards' ? 'cards' : 'table'
+  })
   const [docenteAutocompleteId, setDocenteAutocompleteId] = useState(null)
   const [completeProposalFilters, setCompleteProposalFilters] = useState({
     id: '',
@@ -211,7 +216,8 @@ const App = () => {
     name: '',
     category: '',
     dedication: '',
-    email: ''
+    email: '',
+    subject_count: ''
   })
   const [teacherTableSort, setTeacherTableSort] = useState({ key: '', direction: 'asc' })
   const [genericCompetencyFilters, setGenericCompetencyFilters] = useState({ code: '', description: '', plan: '' })
@@ -542,6 +548,10 @@ const App = () => {
       localStorage.removeItem('activeCareer')
     }
   }, [activeCareer])
+
+  useEffect(() => {
+    localStorage.setItem('teacherViewMode', teacherViewMode)
+  }, [teacherViewMode])
 
   useEffect(() => {
     setSelectedTeacherId(null)
@@ -5275,6 +5285,22 @@ const App = () => {
     : filteredByPlan
   const completeProposals = filteredProposals.filter(isProposalComplete)
   const inProcessProposals = filteredProposals.filter(isProposalInProcess)
+  const totalProposalsHome = completeProposals.length + inProcessProposals.length
+  const proposalsCreatedPct = totalProposalsHome > 0
+    ? Math.round((completeProposals.length / totalProposalsHome) * 100)
+    : 0
+  const subjectStatsHome = getSubjectStatistics(selectedPlanFilterId)
+  const subjectsWithProposalPct = subjectStatsHome.total > 0
+    ? Math.round((subjectStatsHome.withProposals / subjectStatsHome.total) * 100)
+    : 0
+  const teachersCompleteCount = teacherCatalogItems.filter((teacher) => {
+    const dedication = String(teacher?.dedication || '').trim().toLowerCase()
+    return !!dedication && dedication !== 'sin informar'
+  }).length
+  const teachersIncompleteCount = Math.max(teacherCatalogItems.length - teachersCompleteCount, 0)
+  const teachersCompletePct = teacherCatalogItems.length > 0
+    ? Math.round((teachersCompleteCount / teacherCatalogItems.length) * 100)
+    : 0
   const proposalTableGetters = {
     id: (p) => p.id ?? '',
     subject: (p) => p.subject ?? '',
@@ -5295,14 +5321,101 @@ const App = () => {
     pendingProposalSort,
     proposalTableGetters
   )
+  const teacherSubjectSetsById = {}
+  const teacherSubjectSetsByName = {}
+  filteredByCareer.forEach((proposal) => {
+    if (!Array.isArray(proposal?.teaching_team)) return
+    const subjectKey = normalizeText(proposal.subject || '')
+    if (!subjectKey) return
+    proposal.teaching_team.forEach((doc) => {
+      const idKey = doc?.id != null ? String(doc.id) : ''
+      const nameKey = normalizeText(doc?.name || '')
+      if (idKey) {
+        if (!teacherSubjectSetsById[idKey]) teacherSubjectSetsById[idKey] = new Set()
+        teacherSubjectSetsById[idKey].add(subjectKey)
+      }
+      if (nameKey) {
+        if (!teacherSubjectSetsByName[nameKey]) teacherSubjectSetsByName[nameKey] = new Set()
+        teacherSubjectSetsByName[nameKey].add(subjectKey)
+      }
+    })
+  })
+  const getTeacherSubjectCount = (teacher) => {
+    const idKey = teacher?.id != null ? String(teacher.id) : ''
+    const nameKey = normalizeText(teacher?.name || '')
+    const byId = idKey ? teacherSubjectSetsById[idKey] : null
+    const byName = nameKey ? teacherSubjectSetsByName[nameKey] : null
+    if (byId) return byId.size
+    return byName ? byName.size : 0
+  }
+  const parseTeacherYearValue = (value) => {
+    const text = String(value || '').trim()
+    if (!text) return Number.MAX_SAFE_INTEGER
+    const match = text.match(/\d+/)
+    return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER
+  }
+  const getTeacherUsageQuarterKey = (value) => {
+    const normalized = normalizeText(value)
+    if (!normalized) return 'other'
+    if (normalized.includes('anual')) return 'annual'
+    if (normalized.includes('1er') || normalized.includes('1ro') || normalized.includes('primer')) return 'first'
+    if (normalized.includes('2do') || normalized.includes('segundo')) return 'second'
+    return 'other'
+  }
+  const teacherUsageRows = teacherUsageInfo.items.length
+    ? teacherUsageInfo.items.map((row) => ({
+        ...row,
+        yearValue: parseTeacherYearValue(row.year_of_career || row.academic_year),
+        quarterKey: getTeacherUsageQuarterKey(row.quarter)
+      }))
+    : []
+  const sortTeacherUsageRows = (rows) => [...rows].sort((a, b) => {
+    if (a.yearValue !== b.yearValue) return a.yearValue - b.yearValue
+    return String(a.subject || '').localeCompare(String(b.subject || ''), 'es', { sensitivity: 'base' })
+  })
+  const teacherUsageAnnualRows = sortTeacherUsageRows(teacherUsageRows.filter((row) => row.quarterKey === 'annual'))
+  const teacherUsageFirstRows = sortTeacherUsageRows(teacherUsageRows.filter((row) => row.quarterKey === 'first'))
+  const teacherUsageSecondRows = sortTeacherUsageRows(teacherUsageRows.filter((row) => row.quarterKey === 'second'))
+  const teacherUsageOtherRows = sortTeacherUsageRows(teacherUsageRows.filter((row) => row.quarterKey === 'other'))
+  const renderTeacherUsageTable = (rows, title) => {
+    if (!rows.length) return null
+    return (
+      <div style={{ border: '1px solid #dfe8f6', borderRadius: '6px', overflow: 'hidden', background: '#fff' }}>
+        <div style={{ background: '#eef4ff', color: '#1f2d3d', fontWeight: 700, fontSize: '12px', padding: '8px 10px', borderBottom: '1px solid #dfe8f6' }}>
+          {title}
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+          <thead>
+            <tr style={{ background: '#f8fbff' }}>
+              <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid #edf1f7' }}>Año</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid #edf1f7' }}>Asignatura</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, idx) => (
+              <tr key={`${title}-${row.id}-${idx}`} style={{ borderBottom: idx === rows.length - 1 ? 'none' : '1px solid #f0f2f6' }}>
+                <td style={{ padding: '6px 8px', width: '64px' }}>{row.year_of_career || '-'}</td>
+                <td style={{ padding: '6px 8px' }}>#{row.id}{row.subject ? ` - ${row.subject}` : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+  const teacherCatalogItemsWithSubjectCount = teacherCatalogItems.map((teacher) => ({
+    ...teacher,
+    subject_count: getTeacherSubjectCount(teacher)
+  }))
   const teacherTableGetters = {
     name: (t) => t.name ?? '',
     category: (t) => t.category ?? '',
     dedication: (t) => t.dedication ?? '',
-    email: (t) => t.email ?? ''
+    email: (t) => t.email ?? '',
+    subject_count: (t) => t.subject_count ?? 0
   }
   const teacherCatalogFiltered = applyTableSort(
-    applyTableFilters(teacherCatalogItems, teacherTableFilters, teacherTableGetters),
+    applyTableFilters(teacherCatalogItemsWithSubjectCount, teacherTableFilters, teacherTableGetters),
     teacherTableSort,
     teacherTableGetters
   )
@@ -5554,23 +5667,35 @@ const App = () => {
             <p>Integra catalogos de docentes y competencias, valida duplicados, y asiste con IA para redactar, reformular y estructurar contenidos clave con criterios consistentes.</p>
             <p>El resultado es un repositorio ordenado, auditable y listo para exportar, que facilita el trabajo coordinado de las catedras y mejora la trazabilidad ante CONEAU.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginTop: '20px' }}>
-              <div style={{ border: '1px solid #d0d0d0', borderRadius: '10px', padding: '16px', background: '#f8f9fb' }}>
+              <div style={{ border: '1px solid #d0d0d0', borderRadius: '10px', padding: '16px', background: '#f8f9fb', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
                 <div style={{ fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '24px' }}>📘</span> Propuestas creadas
+                  <span style={{ fontSize: '24px' }}>📘</span> Propuestas
                 </div>
-                <div style={{ fontSize: '40px', fontWeight: 800 }}>{completeProposals.length}</div>
-              </div>
-              <div style={{ border: '1px solid #ffd59e', borderRadius: '10px', padding: '16px', background: '#fff7ea' }}>
-                <div style={{ fontSize: '16px', color: '#7a4b00', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '24px' }}>⏳</span> Propuestas en proceso
+                <div style={{ marginTop: '10px' }}>
+                  <div style={{ fontSize: '32px', fontWeight: 800 }}>{totalProposalsHome}</div>
+                  <div style={{ fontSize: '12px', color: '#888', marginTop: '8px' }}>
+                    <div>✅ Creadas: {completeProposals.length}</div>
+                    <div>⏳ En proceso: {inProcessProposals.length}</div>
+                  </div>
                 </div>
-                <div style={{ fontSize: '40px', fontWeight: 800, color: '#b35b00' }}>{inProcessProposals.length}</div>
+                <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#4b5563' }}>
+                  {proposalsCreatedPct}% creadas
+                </div>
               </div>
-              <div style={{ border: '1px solid #cde7d6', borderRadius: '10px', padding: '16px', background: '#f1fbf4' }}>
+              <div style={{ border: '1px solid #cde7d6', borderRadius: '10px', padding: '16px', background: '#f1fbf4', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
                 <div style={{ fontSize: '16px', color: '#2b6a3b', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
                   <span style={{ fontSize: '24px' }}>👩‍🏫</span> Docentes
                 </div>
-                <div style={{ fontSize: '40px', fontWeight: 800, color: '#2b6a3b' }}>{teacherCatalogItems.length}</div>
+                <div style={{ marginTop: '10px' }}>
+                  <div style={{ fontSize: '32px', fontWeight: 800, color: '#2b6a3b' }}>{teacherCatalogItems.length}</div>
+                  <div style={{ fontSize: '12px', color: '#2b6a3b', marginTop: '8px' }}>
+                    <div>✅ Con datos completos: {teachersCompleteCount}</div>
+                    <div>⚠️ Con datos incompletos: {teachersIncompleteCount}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#2b6a3b' }}>
+                  {teachersCompletePct}% completos
+                </div>
               </div>
               <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', padding: '16px', background: '#fafafa' }}>
                 <div style={{ fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
@@ -5578,16 +5703,19 @@ const App = () => {
                 </div>
                 <div style={{ fontSize: '40px', fontWeight: 800 }}>0</div>
               </div>
-              <div style={{ border: '1px solid #d4a5d4', borderRadius: '10px', padding: '16px', background: '#f9f1f9' }}>
+              <div style={{ border: '1px solid #d4a5d4', borderRadius: '10px', padding: '16px', background: '#f9f1f9', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
                 <div style={{ fontSize: '16px', color: '#6b2c6b', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
                   <span style={{ fontSize: '24px' }}>📚</span> Asignaturas
                 </div>
                 <div style={{ marginTop: '12px' }}>
-                  <div style={{ fontSize: '32px', fontWeight: 800, color: '#6b2c6b' }}>{getSubjectStatistics(selectedPlanFilterId).total}</div>
+                  <div style={{ fontSize: '32px', fontWeight: 800, color: '#6b2c6b' }}>{subjectStatsHome.total}</div>
                   <div style={{ fontSize: '12px', color: '#888', marginTop: '8px' }}>
-                    <div>✅ Con propuesta: {getSubjectStatistics(selectedPlanFilterId).withProposals}</div>
-                    <div>❌ Sin propuesta: {getSubjectStatistics(selectedPlanFilterId).withoutProposals}</div>
+                    <div>✅ Con propuesta: {subjectStatsHome.withProposals}</div>
+                    <div>❌ Sin propuesta: {subjectStatsHome.withoutProposals}</div>
                   </div>
+                </div>
+                <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#6b2c6b' }}>
+                  {subjectsWithProposalPct}% con propuesta
                 </div>
               </div>
             </div>
@@ -7817,13 +7945,30 @@ const App = () => {
                   <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
                     Total: {teacherUsageInfo.items.length || teacherUsageInfo.ids.length}
                   </div>
-                  <div style={{ display: 'grid', gap: '6px' }}>
-                    {(teacherUsageInfo.items.length ? teacherUsageInfo.items : teacherUsageInfo.ids.map((id) => ({ id }))).map((row, idx) => (
-                      <div key={`${row.id}-${idx}`}>
-                        #{row.id}{row.subject ? ` - ${row.subject}` : ''}{row.career ? ` (${row.career})` : ''}
+                  {teacherUsageInfo.items.length ? (
+                    <div style={{ display: 'grid', gap: '10px' }}>
+                      {renderTeacherUsageTable(teacherUsageAnnualRows, 'Anual')}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        {renderTeacherUsageTable(teacherUsageFirstRows, '1er Cuatrimestre') || (
+                          <div style={{ border: '1px dashed #d5deea', borderRadius: '6px', padding: '10px', color: '#8a98ad', fontSize: '12px' }}>
+                            Sin asignaturas en 1er cuatrimestre
+                          </div>
+                        )}
+                        {renderTeacherUsageTable(teacherUsageSecondRows, '2do Cuatrimestre') || (
+                          <div style={{ border: '1px dashed #d5deea', borderRadius: '6px', padding: '10px', color: '#8a98ad', fontSize: '12px' }}>
+                            Sin asignaturas en 2do cuatrimestre
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                      {renderTeacherUsageTable(teacherUsageOtherRows, 'Otros')}
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '6px' }}>
+                      {teacherUsageInfo.ids.map((id) => (
+                        <div key={id}>#{id}</div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -7892,7 +8037,7 @@ const App = () => {
                   <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.5fr 2fr', gap: '12px' }}>
                     <input
                       style={styles.input}
-                      placeholder="Nombre"
+                      placeholder="Apellido y Nombre"
                       value={teacherForm.name}
                       onChange={(e) => setTeacherForm(prev => ({ ...prev, name: e.target.value.toUpperCase() }))}
                     />
@@ -7935,21 +8080,63 @@ const App = () => {
                 <div style={{ marginTop: '12px', marginBottom: '12px', color: '#555' }}>
                   Docentes de la carrera {activeCareer}. Los que dicen "Sin Informar" deben completar dedicación.
                 </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                  <label style={{ fontSize: '13px', color: '#4d4d4d', fontWeight: 600 }}>Vista:</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <span style={{ fontSize: '12px', color: teacherViewMode === 'table' ? '#1f2d3d' : '#7a8793', fontWeight: teacherViewMode === 'table' ? 700 : 500 }}>
+                      Tabla
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setTeacherViewMode((prev) => (prev === 'table' ? 'cards' : 'table'))}
+                      style={{
+                        width: '46px',
+                        height: '24px',
+                        borderRadius: '20px',
+                        border: '1px solid #c7d3df',
+                        background: teacherViewMode === 'cards' ? '#2e7d32' : '#cfd8dc',
+                        position: 'relative',
+                        padding: 0,
+                        outline: 'none',
+                        cursor: 'pointer'
+                      }}
+                      title="Cambiar vista Tabla/Tarjetas"
+                      aria-pressed={teacherViewMode === 'cards'}
+                    >
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: '2px',
+                          left: teacherViewMode === 'cards' ? '24px' : '2px',
+                          width: '18px',
+                          height: '18px',
+                          borderRadius: '50%',
+                          background: '#fff',
+                          transition: 'left 0.2s ease'
+                        }}
+                      />
+                    </button>
+                    <span style={{ fontSize: '12px', color: teacherViewMode === 'cards' ? '#1f2d3d' : '#7a8793', fontWeight: teacherViewMode === 'cards' ? 700 : 500 }}>
+                      Tarjetas
+                    </span>
+                  </label>
+                </div>
                 {teacherCatalogLoading ? (
                   <div style={{ color: '#555' }}>Cargando docentes...</div>
                 ) : teacherCatalogError ? (
                   <div style={{ color: '#b00020' }}>{teacherCatalogError}</div>
                 ) : teacherCatalogItems.length === 0 ? (
                   <div style={{ color: '#777', fontStyle: 'italic' }}>No hay docentes cargados.</div>
-                ) : (
+                ) : teacherViewMode === 'table' ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #ddd' }}>
                     <thead>
                       <tr style={{ background: '#0066cc', color: '#fff', borderBottom: '2px solid #ddd' }}>
+                        <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd' }}>ID</th>
                         <th
                           style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
                           onClick={() => toggleSort(setTeacherTableSort, 'name')}
                         >
-                          Nombre{getSortIndicator(teacherTableSort, 'name')}
+                          Apellido y Nombre{getSortIndicator(teacherTableSort, 'name')}
                         </th>
                         <th
                           style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
@@ -7969,9 +8156,16 @@ const App = () => {
                         >
                           Email{getSortIndicator(teacherTableSort, 'email')}
                         </th>
+                        <th
+                          style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setTeacherTableSort, 'subject_count')}
+                        >
+                          Cant. asignaturas{getSortIndicator(teacherTableSort, 'subject_count')}
+                        </th>
                         <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold' }}>Acciones</th>
                       </tr>
                       <tr style={{ background: '#eaf3ff' }}>
+                        <th style={{ padding: '6px', borderRight: '1px solid #eee' }} />
                         <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
                           <input
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
@@ -8004,6 +8198,14 @@ const App = () => {
                             placeholder="Buscar"
                           />
                         </th>
+                        <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                          <input
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }}
+                            value={teacherTableFilters.subject_count}
+                            onChange={(e) => setTeacherTableFilters(prev => ({ ...prev, subject_count: e.target.value }))}
+                            placeholder="Buscar"
+                          />
+                        </th>
                         <th style={{ padding: '6px' }} />
                       </tr>
                     </thead>
@@ -8012,6 +8214,7 @@ const App = () => {
                         <tr key={teacher.id ?? idx} style={{ borderBottom: '1px solid #eee', background: idx % 2 === 0 ? '#fff' : '#f9f9f9' }}>
                           {teacherEditId === teacher.id ? (
                             <>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.id ?? idx + 1}</td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
                                 <input
                                   style={styles.input}
@@ -8055,6 +8258,7 @@ const App = () => {
                                   onChange={(e) => setTeacherEditForm(prev => ({ ...prev, email: e.target.value }))}
                                 />
                               </td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{getTeacherSubjectCount(teacher)}</td>
                               <td style={{ padding: '8px' }}>
                                 <div style={{ display: 'inline-flex', gap: '6px' }}>
                                   <button
@@ -8076,12 +8280,14 @@ const App = () => {
                             </>
                           ) : (
                             <>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.id ?? idx + 1}</td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.name || '-'}</td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{renderCapsule(teacher.category || '-', 'category')}</td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
                                 {renderCapsule(teacher.dedication || 'Sin Informar', 'dedication')}
                               </td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.email || '-'}</td>
+                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{getTeacherSubjectCount(teacher)}</td>
                               <td style={{ padding: '8px' }}>
                                 <div style={{ display: 'inline-flex', gap: '6px' }}>
                                   <button
@@ -8113,6 +8319,109 @@ const App = () => {
                       ))}
                     </tbody>
                   </table>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+                    {teacherCatalogFiltered.map((teacher, idx) => (
+                      <div key={teacher.id ?? idx} style={{
+                        border: '1px solid rgba(0, 102, 204, 0.22)',
+                        borderRadius: '10px',
+                        background: '#fff',
+                        padding: '14px',
+                        boxShadow: '0 1px 4px rgba(0, 102, 204, 0.08)'
+                      }}>
+                        {teacherEditId === teacher.id ? (
+                          <>
+                            <div style={{ color: '#666', fontSize: '12px', marginBottom: '8px' }}>ID: {teacher.id ?? idx + 1}</div>
+                            <input
+                              style={{ ...styles.input, marginBottom: '8px' }}
+                              placeholder="Apellido y Nombre"
+                              value={teacherEditForm.name}
+                              onChange={(e) => setTeacherEditForm(prev => ({ ...prev, name: e.target.value.toUpperCase() }))}
+                            />
+                            <input
+                              style={{ ...styles.input, marginBottom: '8px' }}
+                              placeholder="Correo"
+                              value={teacherEditForm.email}
+                              onChange={(e) => setTeacherEditForm(prev => ({ ...prev, email: e.target.value }))}
+                            />
+                            <select
+                              style={{ ...styles.input, marginBottom: '8px' }}
+                              value={teacherEditForm.dedication}
+                              onChange={(e) => setTeacherEditForm(prev => ({ ...prev, dedication: e.target.value }))}
+                            >
+                              <option>Sin Informar</option>
+                              <option>Simple</option>
+                              <option>Parcial</option>
+                              <option>Parcial + Simple</option>
+                              <option>Exclusivo</option>
+                            </select>
+                            <select
+                              style={{ ...styles.input, marginBottom: '8px' }}
+                              value={teacherEditForm.category}
+                              onChange={(e) => setTeacherEditForm(prev => ({ ...prev, category: e.target.value }))}
+                            >
+                              <option>TITULAR</option>
+                              <option>ASOCIADO</option>
+                              <option>ADJUNTO</option>
+                              <option>JTP</option>
+                              <option>AYUDANTE 1º</option>
+                            </select>
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                              <button
+                                style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', marginRight: 0 }}
+                                onClick={() => saveTeacherEdit(teacher)}
+                              >
+                                Guardar
+                              </button>
+                              <button
+                                style={{ ...styles.button, background: '#999', color: '#fff', marginRight: 0 }}
+                                onClick={cancelTeacherEdit}
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ color: '#666', fontSize: '12px', marginBottom: '6px' }}>ID: {teacher.id ?? idx + 1}</div>
+                            <div style={{ fontSize: '18px', fontWeight: 700, marginBottom: '10px', color: '#1f2d3d' }}>
+                              {teacher.name || '-'}
+                            </div>
+                            <div style={{ marginBottom: '6px' }}><strong>Correo:</strong> {teacher.email || '-'}</div>
+                            <div style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <strong>Dedicación:</strong> {renderCapsule(teacher.dedication || 'Sin Informar', 'dedication')}
+                            </div>
+                            <div style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <strong>Cargo:</strong> {renderCapsule(teacher.category || '-', 'category')}
+                            </div>
+                            <div style={{ marginBottom: '10px' }}>
+                              <strong>Cantidad de asignaturas:</strong> {getTeacherSubjectCount(teacher)}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              <button
+                                style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', marginRight: 0 }}
+                                onClick={() => loadTeacherUsage(teacher)}
+                              >
+                                Ver
+                              </button>
+                              <button
+                                style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', marginRight: 0 }}
+                                onClick={() => startTeacherEdit(teacher)}
+                              >
+                                Editar
+                              </button>
+                              <button
+                                style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', marginRight: 0 }}
+                                onClick={() => openDeleteTeacherModal(teacher)}
+                              >
+                                Eliminar
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
 
               </>
