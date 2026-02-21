@@ -133,6 +133,7 @@ class ProposalBase(BaseModel):
     gdoc_last_checked: Optional[datetime] = None
     gdoc_last_synced: Optional[datetime] = None
     gdoc_status: Optional[str] = None
+    intelligent_status: Optional[str] = None
 
 class ProposalCreate(ProposalBase):
     create_in_drive: Optional[bool] = None
@@ -172,6 +173,7 @@ class ProposalUpdate(BaseModel):
     source_type: Optional[str] = None
     gdoc_url: Optional[str] = None
     create_in_drive: Optional[bool] = None
+    intelligent_status: Optional[str] = None
 
 class Proposal(ProposalBase):
     id: int
@@ -218,6 +220,7 @@ class ProposalOut(BaseModel):
     gdoc_last_checked: Optional[datetime] = None
     gdoc_status: Optional[str] = None
     gdoc_last_synced: Optional[datetime] = None
+    intelligent_status: Optional[str] = None
     status: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -358,6 +361,87 @@ class DriveSettingsUpdate(BaseModel):
 class DriveSettingsOut(DriveSettingsBase):
     id: int
     created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class IntelligentControlBase(BaseModel):
+    topic: str
+    name: str
+    instruction: str
+    is_active: Optional[bool] = True
+    sort_order: Optional[int] = None
+
+
+class IntelligentControlCreate(IntelligentControlBase):
+    pass
+
+
+class IntelligentControlUpdate(BaseModel):
+    topic: Optional[str] = None
+    name: Optional[str] = None
+    instruction: Optional[str] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class IntelligentControlOut(IntelligentControlBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class IntelligentControlRunRequest(BaseModel):
+    control_ids: Optional[List[int]] = None
+    mode: Optional[str] = "delfin"
+
+
+class IntelligentControlSettingsUpdate(BaseModel):
+    director_last_mode: Optional[str] = None
+    docente_mode: Optional[str] = None
+
+
+class IntelligentControlSettingsOut(BaseModel):
+    director_last_mode: str
+    docente_mode: str
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProposalIntelligentResultUpdate(BaseModel):
+    what_failed: Optional[str] = None
+    why_failed: Optional[str] = None
+    suggestion: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class ProposalIntelligentControlResultOut(BaseModel):
+    id: int
+    proposal_id: int
+    control_id: int
+    control_topic: str
+    control_name: str
+    passed: bool
+    what_failed: Optional[str] = None
+    why_failed: Optional[str] = None
+    suggestion: Optional[str] = None
+    summary: Optional[str] = None
+    checked_at: Optional[datetime] = None
+
+
+class ProposalIntelligentControlsSummary(BaseModel):
+    proposal_id: int
+    intelligent_status: str
+    total_controls: int
+    passed_controls: int
+    failed_controls: int
+    results: List[ProposalIntelligentControlResultOut] = []
     updated_at: Optional[datetime] = None
 
     class Config:

@@ -49,6 +49,7 @@ class Proposal(Base):
     gdoc_last_checked = Column(DateTime(timezone=True), nullable=True)
     gdoc_last_synced = Column(DateTime(timezone=True), nullable=True)
     gdoc_status = Column(String(20), nullable=True)
+    intelligent_status = Column(String(30), nullable=True)
     status = Column(String(50), nullable=True)  # EnProceso, Importada, Creada
     
     study_subject_id = Column(Integer, ForeignKey("study_subjects.id"), nullable=True)
@@ -254,4 +255,41 @@ class DriveSettings(Base):
     root_folder_url = Column(String(1000), nullable=True)
     pdf_folder_url = Column(String(1000), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class IntelligentControl(Base):
+    __tablename__ = "intelligent_controls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    topic = Column(String(100), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    instruction = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    sort_order = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ProposalIntelligentControlResult(Base):
+    __tablename__ = "proposal_intelligent_control_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    proposal_id = Column(Integer, ForeignKey("proposals.id"), nullable=False, index=True)
+    control_id = Column(Integer, ForeignKey("intelligent_controls.id"), nullable=False, index=True)
+    passed = Column(Boolean, nullable=False, default=False)
+    what_failed = Column(Text, nullable=True)
+    why_failed = Column(Text, nullable=True)
+    suggestion = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    raw_response = Column(JSON, nullable=True)
+    checked_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class IntelligentControlSettings(Base):
+    __tablename__ = "intelligent_control_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    director_last_mode = Column(String(20), nullable=False, default="delfin")
+    docente_mode = Column(String(20), nullable=False, default="guepardo")
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

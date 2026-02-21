@@ -1389,6 +1389,274 @@ def get_openai_client():
     return OpenAI(api_key=key)
 
 
+INTELLIGENT_TOPIC_ALIASES = {
+    "equipo docente": "teaching_team",
+    "equipo_docente": "teaching_team",
+    "docentes": "teaching_team",
+    "fundamentacion": "fundamentals",
+    "fundamentación": "fundamentals",
+    "bibliografia": "bibliography",
+    "bibliografía": "bibliography",
+    "contenidos minimos": "minimum_content",
+    "contenidos mínimos": "minimum_content",
+    "contenidos": "minimum_content",
+    "resultados de aprendizaje": "learning_outcomes",
+    "objetivos": "learning_outcomes",
+    "unidades": "units",
+    "trabajos practicos": "practicals",
+    "trabajos prácticos": "practicals",
+    "metodologia": "methodology",
+    "metodología": "methodology",
+    "evaluacion": "evaluation",
+    "evaluación": "evaluation",
+}
+
+
+def normalize_intelligent_mode(value: str | None, default: str = "delfin") -> str:
+    mode = normalize_header(value or default)
+    if mode not in {"guepardo", "delfin", "ballena"}:
+        return default
+    return mode
+
+
+def get_or_create_intelligent_settings(db: Session) -> models.IntelligentControlSettings:
+    settings = db.query(models.IntelligentControlSettings).order_by(models.IntelligentControlSettings.id.asc()).first()
+    if settings:
+        changed = False
+        if not settings.director_last_mode:
+            settings.director_last_mode = "delfin"
+            changed = True
+        if not settings.docente_mode:
+            settings.docente_mode = "guepardo"
+            changed = True
+        if changed:
+            db.add(settings)
+            db.commit()
+            db.refresh(settings)
+        return settings
+
+    settings = models.IntelligentControlSettings(
+        director_last_mode="delfin",
+        docente_mode="guepardo",
+    )
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+def normalize_intelligent_topic(topic: str | None) -> str:
+    raw = normalize_header(topic or "")
+    if not raw:
+        return "minimum_content"
+    return INTELLIGENT_TOPIC_ALIASES.get(raw, raw.replace(" ", "_"))
+
+
+def build_topic_payload(proposal: models.Proposal, topic: str) -> dict:
+    normalized = normalize_intelligent_topic(topic)
+    if normalized == "teaching_team":
+        team = proposal.teaching_team or []
+        return {
+            "topic": normalized,
+            "content": team,
+            "has_content": bool(team),
+        }
+    if normalized == "fundamentals":
+        payload = {
+            "importancia": proposal.fundamentals_part1 or "",
+            "perfil_profesional": proposal.fundamentals_part2 or "",
+        }
+        return {
+            "topic": normalized,
+            "content": payload,
+            "has_content": bool(payload["importancia"].strip() or payload["perfil_profesional"].strip()),
+        }
+    if normalized == "minimum_content":
+        text = proposal.minimum_content or ""
+        return {"topic": normalized, "content": text, "has_content": bool(text.strip())}
+    if normalized == "learning_outcomes":
+        outcomes = proposal.learning_outcomes or []
+        return {"topic": normalized, "content": outcomes, "has_content": bool(outcomes)}
+    if normalized == "units":
+        units = proposal.units or []
+        return {"topic": normalized, "content": units, "has_content": bool(units)}
+    if normalized == "practicals":
+        practicals = proposal.practicals or []
+        return {"topic": normalized, "content": practicals, "has_content": bool(practicals)}
+    if normalized == "methodology":
+        text = proposal.methodology or ""
+        return {"topic": normalized, "content": text, "has_content": bool(text.strip())}
+    if normalized == "evaluation":
+        text = proposal.evaluation or ""
+        return {"topic": normalized, "content": text, "has_content": bool(text.strip())}
+    if normalized == "bibliography":
+        text = proposal.bibliography or ""
+        return {"topic": normalized, "content": text, "has_content": bool(text.strip())}
+
+    text = proposal.observations or ""
+    return {"topic": normalized, "content": text, "has_content": bool(text.strip())}
+
+
+def parse_llm_json_response(content: str) -> dict:
+    raw = (content or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?", "", raw).strip()
+        raw = re.sub(r"```$", "", raw).strip()
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    match = re.search(r"\{[\s\S]*\}", raw)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            pass
+    return {
+        "pass": False,
+        "what_failed": "No se pudo interpretar respuesta JSON del modelo.",
+        "why_failed": raw[:1500],
+        "suggestion": "Revisar manualmente este tópico y volver a ejecutar el control.",
+        "summary": "Respuesta no estructurada del modelo",
+    }
+
+
+def evaluate_control_with_llm(control: models.IntelligentControl, proposal: models.Proposal, topic_payload: dict, mode: str = "delfin") -> dict:
+    selected_mode = normalize_header(mode or "delfin")
+    if selected_mode not in {"guepardo", "delfin", "ballena"}:
+        selected_mode = "delfin"
+
+    mode_settings = {
+        "guepardo": {
+            "model": os.getenv("OPENAI_MODEL_FAST", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+            "temperature": 0.35,
+            "max_tokens": 360,
+        },
+        "delfin": {
+            "model": os.getenv("OPENAI_MODEL_BALANCED", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+            "temperature": 0.2,
+            "max_tokens": 500,
+        },
+        "ballena": {
+            "model": os.getenv("OPENAI_MODEL_PRECISE", os.getenv("OPENAI_MODEL", "gpt-4o")),
+            "temperature": 0.1,
+            "max_tokens": 700,
+        },
+    }
+    config = mode_settings[selected_mode]
+
+    system_prompt = (
+        "Eres un evaluador académico estricto de programas analíticos universitarios. "
+        "Debes responder SOLO JSON válido con claves: "
+        "pass (boolean), what_failed (string), why_failed (string), suggestion (string), summary (string)."
+    )
+    user_prompt = (
+        f"Control: {control.name}\n"
+        f"Tópico: {control.topic}\n"
+        f"Regla de control:\n{control.instruction}\n\n"
+        f"Datos de la propuesta (JSON):\n{json.dumps(topic_payload.get('content'), ensure_ascii=False, indent=2)}\n\n"
+        "Evalúa si cumple estrictamente la regla."
+    )
+    client = get_openai_client()
+    response = client.chat.completions.create(
+        model=config["model"],
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=config["temperature"],
+        max_tokens=config["max_tokens"],
+    )
+    content = (response.choices[0].message.content or "").strip()
+    data = parse_llm_json_response(content)
+    passed = bool(data.get("pass") or data.get("passed") or data.get("ok"))
+    return {
+        "pass": passed,
+        "what_failed": str(data.get("what_failed") or "").strip(),
+        "why_failed": str(data.get("why_failed") or "").strip(),
+        "suggestion": str(data.get("suggestion") or "").strip(),
+        "summary": str(data.get("summary") or "").strip(),
+        "raw_response": data,
+    }
+
+
+def compute_intelligent_status(active_controls: list[models.IntelligentControl], results_by_control_id: dict[int, models.ProposalIntelligentControlResult]) -> str:
+    if not active_controls:
+        return "Sin ejecutar"
+    if not results_by_control_id:
+        return "Sin ejecutar"
+    for control in active_controls:
+        result = results_by_control_id.get(control.id)
+        if not result:
+            return "Con sugerencias"
+        if not result.passed:
+            return "Con sugerencias"
+    return "Validada"
+
+
+def build_intelligent_summary(db: Session, proposal: models.Proposal) -> dict:
+    active_controls = db.query(models.IntelligentControl).filter(models.IntelligentControl.is_active == True).order_by(
+        models.IntelligentControl.topic.asc(),
+        models.IntelligentControl.sort_order.asc().nulls_last(),
+        models.IntelligentControl.id.asc(),
+    ).all()
+
+    control_ids = [control.id for control in active_controls]
+    results = []
+    if control_ids:
+        results = db.query(models.ProposalIntelligentControlResult).filter(
+            models.ProposalIntelligentControlResult.proposal_id == proposal.id,
+            models.ProposalIntelligentControlResult.control_id.in_(control_ids),
+        ).all()
+
+    results_by_control_id = {row.control_id: row for row in results}
+    status = compute_intelligent_status(active_controls, results_by_control_id)
+    proposal.intelligent_status = status
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+
+    result_items = []
+    passed_controls = 0
+    failed_controls = 0
+    last_updated = None
+
+    controls_by_id = {control.id: control for control in active_controls}
+    for control in active_controls:
+        row = results_by_control_id.get(control.id)
+        if not row:
+            continue
+        if row.passed:
+            passed_controls += 1
+        else:
+            failed_controls += 1
+        if row.checked_at and (last_updated is None or row.checked_at > last_updated):
+            last_updated = row.checked_at
+        result_items.append({
+            "id": row.id,
+            "proposal_id": row.proposal_id,
+            "control_id": row.control_id,
+            "control_topic": controls_by_id[row.control_id].topic,
+            "control_name": controls_by_id[row.control_id].name,
+            "passed": row.passed,
+            "what_failed": row.what_failed,
+            "why_failed": row.why_failed,
+            "suggestion": row.suggestion,
+            "summary": row.summary,
+            "checked_at": row.checked_at,
+        })
+
+    return {
+        "proposal_id": proposal.id,
+        "intelligent_status": status,
+        "total_controls": len(active_controls),
+        "passed_controls": passed_controls,
+        "failed_controls": failed_controls,
+        "results": result_items,
+        "updated_at": last_updated,
+    }
+
+
 LEVEL_LABELS = {
     0: "Nulo",
     1: "Bajo",
@@ -2457,6 +2725,196 @@ def get_proposal(proposal_id: int, db: Session = Depends(get_db)):
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
     return build_proposal_response(db, proposal)
+
+
+@app.get("/intelligent-controls", response_model=list[schemas.IntelligentControlOut])
+def list_intelligent_controls(topic: str = "", db: Session = Depends(get_db)):
+    query = db.query(models.IntelligentControl)
+    if topic:
+        query = query.filter(models.IntelligentControl.topic == normalize_intelligent_topic(topic))
+    return query.order_by(
+        models.IntelligentControl.topic.asc(),
+        models.IntelligentControl.sort_order.asc(),
+        models.IntelligentControl.id.asc(),
+    ).all()
+
+
+@app.get("/intelligent-controls/settings", response_model=schemas.IntelligentControlSettingsOut)
+def get_intelligent_control_settings(db: Session = Depends(get_db)):
+    settings = get_or_create_intelligent_settings(db)
+    return settings
+
+
+@app.patch("/intelligent-controls/settings", response_model=schemas.IntelligentControlSettingsOut)
+def update_intelligent_control_settings(payload: schemas.IntelligentControlSettingsUpdate, db: Session = Depends(get_db)):
+    settings = get_or_create_intelligent_settings(db)
+    data = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+
+    if "director_last_mode" in data and data["director_last_mode"] is not None:
+        settings.director_last_mode = normalize_intelligent_mode(data["director_last_mode"], default="delfin")
+    if "docente_mode" in data and data["docente_mode"] is not None:
+        settings.docente_mode = normalize_intelligent_mode(data["docente_mode"], default="guepardo")
+
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+@app.post("/intelligent-controls", response_model=schemas.IntelligentControlOut)
+def create_intelligent_control(payload: schemas.IntelligentControlCreate, db: Session = Depends(get_db)):
+    control = models.IntelligentControl(
+        topic=normalize_intelligent_topic(payload.topic),
+        name=payload.name.strip(),
+        instruction=payload.instruction.strip(),
+        is_active=bool(payload.is_active) if payload.is_active is not None else True,
+        sort_order=payload.sort_order,
+    )
+    db.add(control)
+    db.commit()
+    db.refresh(control)
+    return control
+
+
+@app.patch("/intelligent-controls/{control_id}", response_model=schemas.IntelligentControlOut)
+def update_intelligent_control(control_id: int, payload: schemas.IntelligentControlUpdate, db: Session = Depends(get_db)):
+    control = db.query(models.IntelligentControl).filter(models.IntelligentControl.id == control_id).first()
+    if not control:
+        raise HTTPException(status_code=404, detail="Control not found")
+
+    data = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+    if "topic" in data:
+        data["topic"] = normalize_intelligent_topic(data["topic"])
+    if "name" in data and data["name"] is not None:
+        data["name"] = str(data["name"]).strip()
+    if "instruction" in data and data["instruction"] is not None:
+        data["instruction"] = str(data["instruction"]).strip()
+
+    for key, value in data.items():
+        setattr(control, key, value)
+
+    db.add(control)
+    db.commit()
+    db.refresh(control)
+    return control
+
+
+@app.delete("/intelligent-controls/{control_id}")
+def delete_intelligent_control(control_id: int, db: Session = Depends(get_db)):
+    control = db.query(models.IntelligentControl).filter(models.IntelligentControl.id == control_id).first()
+    if not control:
+        raise HTTPException(status_code=404, detail="Control not found")
+    db.query(models.ProposalIntelligentControlResult).filter(
+        models.ProposalIntelligentControlResult.control_id == control_id
+    ).delete()
+    db.delete(control)
+    db.commit()
+    return {"status": "deleted", "id": control_id}
+
+
+@app.get("/proposals/{proposal_id}/intelligent-controls/results", response_model=schemas.ProposalIntelligentControlsSummary)
+def get_intelligent_control_results(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return build_intelligent_summary(db, proposal)
+
+
+@app.post("/proposals/{proposal_id}/intelligent-controls/run", response_model=schemas.ProposalIntelligentControlsSummary)
+def run_intelligent_controls(
+    proposal_id: int,
+    payload: schemas.IntelligentControlRunRequest = Body(default=None),
+    db: Session = Depends(get_db),
+):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    query = db.query(models.IntelligentControl).filter(models.IntelligentControl.is_active == True)
+    requested_ids = []
+    if payload and payload.control_ids:
+        requested_ids = [int(value) for value in payload.control_ids if value is not None]
+        if requested_ids:
+            query = query.filter(models.IntelligentControl.id.in_(requested_ids))
+
+    controls = query.order_by(
+        models.IntelligentControl.topic.asc(),
+        models.IntelligentControl.sort_order.asc(),
+        models.IntelligentControl.id.asc(),
+    ).all()
+
+    selected_mode = normalize_intelligent_mode((payload.mode if payload else "delfin") or "delfin", default="delfin")
+
+    if not controls:
+        return build_intelligent_summary(db, proposal)
+
+    for control in controls:
+        topic_payload = build_topic_payload(proposal, control.topic)
+        if not topic_payload.get("has_content"):
+            llm_result = {
+                "pass": False,
+                "what_failed": f"El tópico '{control.topic}' no tiene contenido suficiente en la propuesta.",
+                "why_failed": "No hay datos para aplicar el control inteligente.",
+                "suggestion": "Completar este tópico en la propuesta y volver a ejecutar el control.",
+                "summary": "Control no ejecutable por falta de contenido",
+                "raw_response": {"reason": "missing-topic-content"},
+            }
+        else:
+            try:
+                llm_result = evaluate_control_with_llm(control, proposal, topic_payload, mode=selected_mode)
+            except Exception as exc:
+                llm_result = {
+                    "pass": False,
+                    "what_failed": "No se pudo evaluar el control con el modelo.",
+                    "why_failed": str(exc),
+                    "suggestion": "Reintentar el control o revisar la configuración del modelo.",
+                    "summary": "Error al ejecutar control inteligente",
+                    "raw_response": {"error": str(exc)},
+                }
+
+        existing = db.query(models.ProposalIntelligentControlResult).filter(
+            models.ProposalIntelligentControlResult.proposal_id == proposal.id,
+            models.ProposalIntelligentControlResult.control_id == control.id,
+        ).first()
+        if not existing:
+            existing = models.ProposalIntelligentControlResult(
+                proposal_id=proposal.id,
+                control_id=control.id,
+            )
+        existing.passed = bool(llm_result.get("pass"))
+        existing.what_failed = llm_result.get("what_failed")
+        existing.why_failed = llm_result.get("why_failed")
+        existing.suggestion = llm_result.get("suggestion")
+        existing.summary = llm_result.get("summary")
+        existing.raw_response = llm_result.get("raw_response")
+        existing.checked_at = datetime.utcnow()
+        db.add(existing)
+
+    db.commit()
+    return build_intelligent_summary(db, proposal)
+
+
+@app.patch("/proposals/{proposal_id}/intelligent-controls/results/{result_id}")
+def update_intelligent_result(
+    proposal_id: int,
+    result_id: int,
+    payload: schemas.ProposalIntelligentResultUpdate,
+    db: Session = Depends(get_db),
+):
+    result = db.query(models.ProposalIntelligentControlResult).filter(
+        models.ProposalIntelligentControlResult.id == result_id,
+        models.ProposalIntelligentControlResult.proposal_id == proposal_id,
+    ).first()
+    if not result:
+        raise HTTPException(status_code=404, detail="Resultado no encontrado")
+
+    data = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+    for key, value in data.items():
+        setattr(result, key, value)
+    result.checked_at = datetime.utcnow()
+    db.add(result)
+    db.commit()
+    return {"status": "updated", "id": result.id}
 
 
 @app.patch("/proposals/{proposal_id}", response_model=schemas.Proposal)

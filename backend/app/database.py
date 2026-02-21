@@ -22,6 +22,8 @@ def init_db():
     ensure_study_plans_columns()
     ensure_competencies_columns()
     ensure_drive_settings_columns()
+    ensure_intelligent_controls_columns()
+    ensure_intelligent_settings_columns()
 
 
 def ensure_proposals_columns():
@@ -137,6 +139,62 @@ def ensure_drive_settings_columns():
             """))
             conn.execute(text("CREATE INDEX idx_drive_settings_career ON drive_settings(career)"))
             conn.execute(text("CREATE INDEX idx_drive_settings_plan ON drive_settings(plan_name)"))
+            conn.commit()
+
+
+def ensure_intelligent_controls_columns():
+    """Add missing intelligent control related columns (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(proposals)"))
+        columns = {row[1] for row in result}
+        if "intelligent_status" not in columns:
+            conn.execute(text("ALTER TABLE proposals ADD COLUMN intelligent_status VARCHAR(30)"))
+            conn.commit()
+
+
+def ensure_intelligent_settings_columns():
+    """Ensure intelligent control settings table and columns (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        result = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='intelligent_control_settings'"
+        ))
+        table_exists = result.fetchone() is not None
+
+        if not table_exists:
+            conn.execute(text("""
+                CREATE TABLE intelligent_control_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    director_last_mode VARCHAR(20) NOT NULL DEFAULT 'delfin',
+                    docente_mode VARCHAR(20) NOT NULL DEFAULT 'guepardo',
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            conn.execute(text("""
+                INSERT INTO intelligent_control_settings (director_last_mode, docente_mode)
+                VALUES ('delfin', 'guepardo')
+            """))
+            conn.commit()
+            return
+
+        columns_result = conn.execute(text("PRAGMA table_info(intelligent_control_settings)"))
+        columns = {row[1] for row in columns_result}
+        if "director_last_mode" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN director_last_mode VARCHAR(20) NOT NULL DEFAULT 'delfin'"))
+            conn.commit()
+        if "docente_mode" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN docente_mode VARCHAR(20) NOT NULL DEFAULT 'guepardo'"))
+            conn.commit()
+
+        count = conn.execute(text("SELECT COUNT(*) FROM intelligent_control_settings")).scalar() or 0
+        if count == 0:
+            conn.execute(text("""
+                INSERT INTO intelligent_control_settings (director_last_mode, docente_mode)
+                VALUES ('delfin', 'guepardo')
+            """))
             conn.commit()
 
 def get_db():

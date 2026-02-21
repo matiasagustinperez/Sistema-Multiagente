@@ -233,8 +233,42 @@ const App = () => {
   const [controlOnlyWithErrors, setControlOnlyWithErrors] = useState(false)
   const [controlFailureFilter, setControlFailureFilter] = useState('all')
   const [controlSubjectFilter, setControlSubjectFilter] = useState('')
+  const [intelligentNameFilter, setIntelligentNameFilter] = useState('')
+  const [intelligentQuickStatusFilter, setIntelligentQuickStatusFilter] = useState('all')
+  const [intelligentIaStatusFilter, setIntelligentIaStatusFilter] = useState('all')
   const [controlProposalDetailsById, setControlProposalDetailsById] = useState({})
   const [controlDetailsLoading, setControlDetailsLoading] = useState(false)
+  const [controlPanelMode, setControlPanelMode] = useState('quick')
+  const [intelligentControls, setIntelligentControls] = useState([])
+  const [intelligentControlsLoading, setIntelligentControlsLoading] = useState(false)
+  const [intelligentControlsError, setIntelligentControlsError] = useState('')
+  const [intelligentControlDraft, setIntelligentControlDraft] = useState({ topic: 'teaching_team', name: '', instruction: '', is_active: true })
+  const [editingIntelligentControlId, setEditingIntelligentControlId] = useState(null)
+  const [editingIntelligentControlDraft, setEditingIntelligentControlDraft] = useState({ topic: '', name: '', instruction: '', is_active: true })
+  const [intelligentResultsByProposal, setIntelligentResultsByProposal] = useState({})
+  const [intelligentResultsLoading, setIntelligentResultsLoading] = useState(false)
+  const [runningIntelligentByProposal, setRunningIntelligentByProposal] = useState({})
+  const [intelligentRunMode, setIntelligentRunMode] = useState('delfin')
+  const [docenteIntelligentRunMode, setDocenteIntelligentRunMode] = useState('guepardo')
+  const [intelligentModeSettingsLoading, setIntelligentModeSettingsLoading] = useState(false)
+  const [showIntelligentRunModal, setShowIntelligentRunModal] = useState(false)
+  const [intelligentRunModalData, setIntelligentRunModalData] = useState(null)
+  const intelligentRunAbortRef = useRef({})
+  const intelligentConfigCardRef = useRef(null)
+  const [selectedIntelligentProposalIds, setSelectedIntelligentProposalIds] = useState([])
+  const [batchIntelligentRun, setBatchIntelligentRun] = useState({
+    isRunning: false,
+    total: 0,
+    completed: 0,
+    currentProposalId: null,
+    items: {}
+  })
+  const batchIntelligentAbortRef = useRef({ cancelled: false })
+  const batchProgressIntervalsRef = useRef({})
+  const [docenteControlActivation, setDocenteControlActivation] = useState({})
+  const [viewProposalIntelligentSummary, setViewProposalIntelligentSummary] = useState(null)
+  const [viewProposalIntelligentLoading, setViewProposalIntelligentLoading] = useState(false)
+  const [editingSuggestionByResultId, setEditingSuggestionByResultId] = useState({})
   const [competencyPlanMappedByCareer, setCompetencyPlanMappedByCareer] = useState({})
   const variantPaletteRegistry = useRef({
     year: { index: 0, map: {} },
@@ -596,10 +630,23 @@ const App = () => {
   }, [viewRole])
 
   useEffect(() => {
+    if (activeMenu !== 'control-propuestas' || controlPanelMode !== 'intelligent') {
+      setSelectedIntelligentProposalIds([])
+      setBatchIntelligentRun({
+        isRunning: false,
+        total: 0,
+        completed: 0,
+        currentProposalId: null,
+        items: {}
+      })
+    }
+  }, [activeMenu, controlPanelMode])
+
+  useEffect(() => {
     if (viewRole !== 'docente') {
       return
     }
-    const allowedMenus = ['propuestas', 'resoluciones']
+    const allowedMenus = ['propuestas', 'control-propuestas', 'resoluciones']
     if (!allowedMenus.includes(activeMenu)) {
       setActiveMenu('propuestas')
     }
@@ -610,6 +657,14 @@ const App = () => {
       setProposalsMode(null)
     }
   }, [viewRole, activeMenu, proposalsMode, editingProposalId])
+
+  useEffect(() => {
+    if (viewRole !== 'docente') {
+      setDocenteControlActivation({})
+      return
+    }
+    setDocenteControlActivation({})
+  }, [viewRole, activeCareer, selectedTeacherId, selectedTeacherName])
 
   useEffect(() => {
     if (!activeCareer) {
@@ -4980,11 +5035,20 @@ const App = () => {
         return
       }
       setViewProposal(data)
+      setViewProposalIntelligentSummary(null)
+      setViewProposalIntelligentLoading(true)
       setViewProposalLinkIssue('')
       setViewProposalGdocInput(data.gdoc_url || '')
       setViewProposalGdocError('')
       setViewProposalGdocUpdateAvailable(false)
       setViewProposalGdocUpdateMessage('')
+      fetchProposalIntelligentSummary(proposalId)
+        .then((summary) => {
+          if (summary) {
+            setViewProposalIntelligentSummary(summary)
+          }
+        })
+        .finally(() => setViewProposalIntelligentLoading(false))
       if (data.career) {
         setActiveCareer(normalizeCareer(data.career))
       }
@@ -5434,6 +5498,536 @@ const App = () => {
         ? filteredByPlan.filter((proposal) => proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName))
         : [])
     : filteredByPlan
+  const intelligentTopicOptions = [
+    { value: 'teaching_team', label: 'Equipo docente' },
+    { value: 'fundamentals', label: 'Fundamentación' },
+    { value: 'minimum_content', label: 'Contenidos mínimos' },
+    { value: 'learning_outcomes', label: 'Resultados de aprendizaje' },
+    { value: 'units', label: 'Unidades' },
+    { value: 'practicals', label: 'Trabajos prácticos' },
+    { value: 'methodology', label: 'Metodología' },
+    { value: 'evaluation', label: 'Evaluación' },
+    { value: 'bibliography', label: 'Bibliografía' }
+  ]
+  const getIntelligentTopicLabel = (topic) => {
+    const found = intelligentTopicOptions.find((item) => item.value === topic)
+    return found ? found.label : topic
+  }
+  const isControlActiveForCurrentView = (control) => {
+    if (!control) return false
+    if (!isDocenteView) return !!control.is_active
+    if (Object.prototype.hasOwnProperty.call(docenteControlActivation, control.id)) {
+      return !!docenteControlActivation[control.id]
+    }
+    return !!control.is_active
+  }
+  const activeControlIdsForCurrentView = intelligentControls
+    .filter((control) => isControlActiveForCurrentView(control))
+    .map((control) => control.id)
+  const intelligentModeOptions = [
+    { key: 'guepardo', icon: '🐆', title: 'Guepardo', desc: 'Más rápido, menos preciso' },
+    { key: 'delfin', icon: '🐬', title: 'Delfín', desc: 'Equilibrado' },
+    { key: 'ballena', icon: '🐋', title: 'Ballena', desc: 'Más lento, más preciso' }
+  ]
+  const effectiveIntelligentRunMode = isDocenteView ? docenteIntelligentRunMode : intelligentRunMode
+  const effectiveIntelligentRunModeLabel = intelligentModeOptions.find((mode) => mode.key === effectiveIntelligentRunMode)?.title || 'Delfín'
+  const normalizeIntelligentMode = (mode, fallback = 'delfin') => {
+    const normalized = String(mode || '').trim().toLowerCase()
+    return ['guepardo', 'delfin', 'ballena'].includes(normalized) ? normalized : fallback
+  }
+  const fetchIntelligentModeSettings = async () => {
+    try {
+      setIntelligentModeSettingsLoading(true)
+      const res = await fetch('http://localhost:8001/intelligent-controls/settings')
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'No se pudieron cargar los modos IA' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      setIntelligentRunMode(normalizeIntelligentMode(data?.director_last_mode, 'delfin'))
+      setDocenteIntelligentRunMode(normalizeIntelligentMode(data?.docente_mode, 'guepardo'))
+    } catch (err) {
+      setStatusMsg(err.message || 'No se pudieron cargar los modos IA persistidos')
+      setStatusType('error')
+    } finally {
+      setIntelligentModeSettingsLoading(false)
+    }
+  }
+  const saveIntelligentModeSettings = async (payload) => {
+    const res = await fetch('http://localhost:8001/intelligent-controls/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'No se pudo guardar la configuración de modos IA' }))
+      throw new Error(errorData.detail || `Error ${res.status}`)
+    }
+    return res.json()
+  }
+  const computeScopedIntelligentStatus = (summary) => {
+    if (!summary) return 'Sin ejecutar'
+    const scopedIds = new Set(activeControlIdsForCurrentView)
+    if (scopedIds.size === 0) return 'Sin ejecutar'
+    const resultsById = new Map((summary.results || []).map((item) => [item.control_id, item]))
+    let hasFailed = false
+    let hasMissing = false
+    let hasAnyResult = false
+    for (const id of scopedIds) {
+      const result = resultsById.get(id)
+      if (!result) {
+        hasMissing = true
+        continue
+      }
+      hasAnyResult = true
+      if (!result.passed) {
+        hasFailed = true
+      }
+    }
+    if (!hasAnyResult) return 'Sin ejecutar'
+    return (hasFailed || hasMissing) ? 'Con sugerencias' : 'Validada'
+  }
+  const getScopedResultCounts = (summary) => {
+    const scopedIds = new Set(activeControlIdsForCurrentView)
+    if (!summary || scopedIds.size === 0) {
+      return { total: 0, failed: 0 }
+    }
+    const scopedResults = (summary.results || []).filter((item) => scopedIds.has(item.control_id))
+    return {
+      total: scopedIds.size,
+      failed: scopedResults.filter((item) => !item.passed).length
+    }
+  }
+  const fetchIntelligentControls = async () => {
+    try {
+      setIntelligentControlsLoading(true)
+      setIntelligentControlsError('')
+      const res = await fetch('http://localhost:8001/intelligent-controls')
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error al cargar controles inteligentes' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      setIntelligentControls(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setIntelligentControlsError(err.message || 'No se pudieron cargar los controles inteligentes')
+    } finally {
+      setIntelligentControlsLoading(false)
+    }
+  }
+  const fetchProposalIntelligentSummary = async (proposalId) => {
+    if (!proposalId) return null
+    try {
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/intelligent-controls/results`)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Error al obtener resultados inteligentes' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      return data
+    } catch {
+      return null
+    }
+  }
+  const refreshIntelligentSummaries = async (proposalIds, { silent = false } = {}) => {
+    const ids = (proposalIds || []).filter((id) => id != null)
+    if (!ids.length) {
+      return
+    }
+    try {
+      if (!silent) {
+        setIntelligentResultsLoading(true)
+      }
+      const summaries = await Promise.all(ids.map((id) => fetchProposalIntelligentSummary(id)))
+      setIntelligentResultsByProposal((prev) => {
+        const next = { ...prev }
+        summaries.forEach((summary) => {
+          if (summary?.proposal_id != null) {
+            next[summary.proposal_id] = summary
+          }
+        })
+        return next
+      })
+    } finally {
+      if (!silent) {
+        setIntelligentResultsLoading(false)
+      }
+    }
+  }
+  const runIntelligentControlsForProposal = async (proposalId, options = {}) => {
+    if (!proposalId) return
+    const {
+      withModal = true,
+      suppressStatus = false,
+      rethrow = false,
+      refreshAfter = true
+    } = options
+    if (activeControlIdsForCurrentView.length === 0) {
+      if (!suppressStatus) {
+        setStatusMsg('No hay controles activos para ejecutar en el entorno actual')
+        setStatusType('info')
+      }
+      return
+    }
+    const proposal = controlRowsWithProposal.find((row) => row.proposal?.id === proposalId)?.proposal
+    const controller = new AbortController()
+    intelligentRunAbortRef.current[proposalId] = controller
+    try {
+      setRunningIntelligentByProposal((prev) => ({ ...prev, [proposalId]: true }))
+      if (withModal) {
+        setShowIntelligentRunModal(true)
+        setIntelligentRunModalData({
+          proposalId,
+          subject: proposal?.subject || `#${proposalId}`,
+          mode: effectiveIntelligentRunMode,
+          controlsCount: activeControlIdsForCurrentView.length,
+          startedAt: new Date().toISOString()
+        })
+      }
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/intelligent-controls/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: effectiveIntelligentRunMode, control_ids: activeControlIdsForCurrentView }),
+        signal: controller.signal
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'No se pudo ejecutar el control inteligente' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const data = await res.json()
+      setIntelligentResultsByProposal((prev) => ({ ...prev, [proposalId]: data }))
+      if (!suppressStatus) {
+        setStatusMsg(`Control inteligente ejecutado en propuesta #${proposalId}`)
+        setStatusType('success')
+      }
+      if (refreshAfter) {
+        fetchProposals()
+      }
+      if (viewProposal?.id === proposalId) {
+        setViewProposalIntelligentSummary(data)
+      }
+      return data
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        if (!suppressStatus) {
+          setStatusMsg(`Ejecución inteligente cancelada en propuesta #${proposalId}`)
+          setStatusType('info')
+        }
+        if (rethrow) throw err
+        return
+      }
+      if (!suppressStatus) {
+        setStatusMsg(err.message || 'Error al ejecutar control inteligente')
+        setStatusType('error')
+      }
+      if (rethrow) throw err
+    } finally {
+      delete intelligentRunAbortRef.current[proposalId]
+      if (withModal) {
+        setShowIntelligentRunModal(false)
+        setIntelligentRunModalData(null)
+      }
+      setRunningIntelligentByProposal((prev) => ({ ...prev, [proposalId]: false }))
+    }
+  }
+  const goToIntelligentConfigForDirector = () => {
+    if (isDocenteView) {
+      setStatusMsg('No hay controles activos. Solicita al directivo activar controles IA.')
+      setStatusType('info')
+      return
+    }
+    setControlPanelMode('config')
+    setStatusMsg('No hay controles activos. Te llevamos a Configuración IA para activarlos.')
+    setStatusType('info')
+    setTimeout(() => {
+      intelligentConfigCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 100)
+  }
+  const cancelIntelligentRun = (proposalId) => {
+    if (!proposalId) return
+    const controller = intelligentRunAbortRef.current[proposalId]
+    if (controller) {
+      controller.abort()
+    }
+    setShowIntelligentRunModal(false)
+    setIntelligentRunModalData(null)
+  }
+  const startBatchIntelligentRun = async () => {
+    const proposalIds = selectedIntelligentProposalIds.filter((id) => id != null)
+    if (!proposalIds.length) {
+      setStatusMsg('Selecciona al menos una propuesta para ejecutar control inteligente')
+      setStatusType('info')
+      return
+    }
+    if (!activeControlIdsForCurrentView.length) {
+      setStatusMsg('No hay controles activos para ejecutar en el entorno actual')
+      setStatusType('info')
+      return
+    }
+
+    const proposalById = controlRowsWithProposal.reduce((acc, row) => {
+      if (row.proposal?.id != null) {
+        acc[row.proposal.id] = row.proposal
+      }
+      return acc
+    }, {})
+
+    const initialItems = proposalIds.reduce((acc, proposalId) => {
+      const subject = proposalById[proposalId]?.subject || `#${proposalId}`
+      acc[proposalId] = {
+        proposalId,
+        subject,
+        status: 'pendiente',
+        evaluatedControls: 0,
+        totalControls: activeControlIdsForCurrentView.length,
+        error: ''
+      }
+      return acc
+    }, {})
+
+    batchIntelligentAbortRef.current = { cancelled: false }
+    setBatchIntelligentRun({
+      isRunning: true,
+      total: proposalIds.length,
+      completed: 0,
+      currentProposalId: null,
+      items: initialItems
+    })
+
+    let completed = 0
+    for (const proposalId of proposalIds) {
+      if (batchIntelligentAbortRef.current.cancelled) {
+        break
+      }
+
+      setBatchIntelligentRun((prev) => ({
+        ...prev,
+        currentProposalId: proposalId,
+        items: {
+          ...prev.items,
+          [proposalId]: {
+            ...prev.items[proposalId],
+            status: 'ejecutando',
+            evaluatedControls: 0,
+            error: ''
+          }
+        }
+      }))
+      startBatchProgressTicker(proposalId, activeControlIdsForCurrentView.length, effectiveIntelligentRunMode)
+
+      try {
+        const summary = await runIntelligentControlsForProposal(proposalId, {
+          withModal: false,
+          suppressStatus: true,
+          rethrow: true,
+          refreshAfter: false
+        })
+        clearBatchProgressTicker(proposalId)
+        const scoped = getScopedResultCounts(summary)
+        completed += 1
+        setBatchIntelligentRun((prev) => ({
+          ...prev,
+          completed,
+          items: {
+            ...prev.items,
+            [proposalId]: {
+              ...prev.items[proposalId],
+              status: 'completado',
+              evaluatedControls: scoped.total,
+              totalControls: scoped.total,
+              error: ''
+            }
+          }
+        }))
+      } catch (err) {
+        clearBatchProgressTicker(proposalId)
+        const aborted = err?.name === 'AbortError'
+        completed += 1
+        setBatchIntelligentRun((prev) => ({
+          ...prev,
+          completed,
+          items: {
+            ...prev.items,
+            [proposalId]: {
+              ...prev.items[proposalId],
+              status: aborted ? 'cancelado' : 'error',
+              error: aborted ? 'Cancelado por usuario' : (err?.message || 'Error en ejecución')
+            }
+          }
+        }))
+        if (aborted) {
+          break
+        }
+      }
+    }
+
+    Object.keys(batchProgressIntervalsRef.current).forEach((key) => {
+      clearBatchProgressTicker(Number(key))
+    })
+
+    setBatchIntelligentRun((prev) => ({
+      ...prev,
+      isRunning: false,
+      currentProposalId: null
+    }))
+    fetchProposals()
+    setStatusMsg('Ejecución por lote finalizada')
+    setStatusType('success')
+  }
+  const cancelBatchIntelligentRun = () => {
+    batchIntelligentAbortRef.current = { cancelled: true }
+    const currentProposalId = batchIntelligentRun.currentProposalId
+    if (currentProposalId) {
+      const controller = intelligentRunAbortRef.current[currentProposalId]
+      if (controller) {
+        controller.abort()
+      }
+    }
+  }
+  const clearBatchProgressTicker = (proposalId) => {
+    const ticker = batchProgressIntervalsRef.current[proposalId]
+    if (ticker) {
+      clearInterval(ticker)
+      delete batchProgressIntervalsRef.current[proposalId]
+    }
+  }
+  const startBatchProgressTicker = (proposalId, totalControls, mode) => {
+    clearBatchProgressTicker(proposalId)
+    const safeTotal = Math.max(Number(totalControls) || 0, 0)
+    if (safeTotal <= 1) {
+      return
+    }
+    const stepMs = mode === 'guepardo' ? 700 : mode === 'ballena' ? 1700 : 1100
+    batchProgressIntervalsRef.current[proposalId] = setInterval(() => {
+      setBatchIntelligentRun((prev) => {
+        const item = prev.items?.[proposalId]
+        if (!item || item.status !== 'ejecutando') {
+          return prev
+        }
+        const maxPreview = Math.max(safeTotal - 1, 0)
+        const nextValue = Math.min((item.evaluatedControls || 0) + 1, maxPreview)
+        if (nextValue === item.evaluatedControls) {
+          return prev
+        }
+        return {
+          ...prev,
+          items: {
+            ...prev.items,
+            [proposalId]: {
+              ...item,
+              evaluatedControls: nextValue,
+              totalControls: safeTotal
+            }
+          }
+        }
+      })
+    }, stepMs)
+  }
+  useEffect(() => {
+    return () => {
+      Object.values(batchProgressIntervalsRef.current).forEach((ticker) => clearInterval(ticker))
+      batchProgressIntervalsRef.current = {}
+    }
+  }, [])
+  const saveIntelligentSuggestionEdits = async (proposalId, resultId) => {
+    const draft = editingSuggestionByResultId[resultId]
+    if (!draft) return
+    try {
+      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/intelligent-controls/results/${resultId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          what_failed: draft.what_failed,
+          why_failed: draft.why_failed,
+          suggestion: draft.suggestion,
+          summary: draft.summary
+        })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'No se pudieron guardar los cambios de sugerencia' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      const summary = await fetchProposalIntelligentSummary(proposalId)
+      if (summary) {
+        setIntelligentResultsByProposal((prev) => ({ ...prev, [proposalId]: summary }))
+        if (viewProposal?.id === proposalId) {
+          setViewProposalIntelligentSummary(summary)
+        }
+      }
+      setStatusMsg('Sugerencia actualizada correctamente')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'No se pudieron guardar cambios en sugerencias')
+      setStatusType('error')
+    }
+  }
+  const createIntelligentControl = async () => {
+    if (!isNonEmptyText(intelligentControlDraft.name) || !isNonEmptyText(intelligentControlDraft.instruction)) {
+      setIntelligentControlsError('Nombre e instrucción son obligatorios para crear un control.')
+      return
+    }
+    try {
+      setIntelligentControlsError('')
+      const res = await fetch('http://localhost:8001/intelligent-controls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(intelligentControlDraft)
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'No se pudo crear el control' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      setIntelligentControlDraft({ topic: 'teaching_team', name: '', instruction: '', is_active: true })
+      await fetchIntelligentControls()
+    } catch (err) {
+      setIntelligentControlsError(err.message || 'No se pudo crear el control')
+    }
+  }
+  const updateIntelligentControl = async (controlId, payload) => {
+    const res = await fetch(`http://localhost:8001/intelligent-controls/${controlId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'No se pudo actualizar el control' }))
+      throw new Error(errorData.detail || `Error ${res.status}`)
+    }
+    return res.json()
+  }
+  const deleteIntelligentControl = async (controlId) => {
+    if (!window.confirm('¿Eliminar este control inteligente?')) {
+      return
+    }
+    try {
+      const res = await fetch(`http://localhost:8001/intelligent-controls/${controlId}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'No se pudo eliminar el control' }))
+        throw new Error(errorData.detail || `Error ${res.status}`)
+      }
+      await fetchIntelligentControls()
+    } catch (err) {
+      setIntelligentControlsError(err.message || 'No se pudo eliminar el control')
+    }
+  }
+  useEffect(() => {
+    if (activeMenu !== 'control-propuestas') {
+      return
+    }
+    fetchIntelligentControls()
+    fetchIntelligentModeSettings()
+  }, [activeMenu])
+  useEffect(() => {
+    if (activeMenu !== 'control-propuestas' || controlPanelMode !== 'intelligent') {
+      return
+    }
+    const ids = controlProposalCandidates.map((proposal) => proposal?.id).filter((id) => id != null)
+    const idsToFetch = ids.filter((id) => !intelligentResultsByProposal[id])
+    if (!idsToFetch.length) {
+      return
+    }
+    refreshIntelligentSummaries(idsToFetch, { silent: true })
+  }, [activeMenu, controlPanelMode, controlProposalCandidates, intelligentResultsByProposal])
   useEffect(() => {
     if (activeMenu !== 'control-propuestas') {
       setControlDetailsLoading(false)
@@ -5672,6 +6266,73 @@ const App = () => {
     totals[column.key] = controlChecklistRows.reduce((sum, row) => sum + (row.checks[column.key].ok ? 1 : 0), 0)
     return totals
   }, {})
+  const controlRowsWithProposal = controlChecklistRows.filter((row) => !row.missingProposal && row.proposal?.id != null)
+  const intelligentRowsBase = controlChecklistRows
+  const getIntelligentQuickStatus = (row) => (row.rowTotal === controlChecklistColumns.length ? 'Completa' : 'Incompleta')
+  const getIntelligentIaStatus = (row) => {
+    if (row.missingProposal) return 'Sin propuesta'
+    const summary = intelligentResultsByProposal[row.proposal.id]
+    return computeScopedIntelligentStatus(summary)
+  }
+  const intelligentQuickStatusOptions = Array.from(new Set(intelligentRowsBase.map((row) => getIntelligentQuickStatus(row))))
+  const intelligentIaStatusOptions = Array.from(new Set(intelligentRowsBase.map((row) => getIntelligentIaStatus(row))))
+  const normalizedIntelligentNameFilter = normalizeText(intelligentNameFilter)
+  const intelligentRowsForTable = intelligentRowsBase.filter((row) => {
+    if (normalizedIntelligentNameFilter) {
+      const subjectText = normalizeText(row.proposal?.subject || '')
+      const idText = normalizeText(row.missingProposal ? 'sin propuesta' : String(row.proposal?.id || ''))
+      if (!subjectText.includes(normalizedIntelligentNameFilter) && !idText.includes(normalizedIntelligentNameFilter)) {
+        return false
+      }
+    }
+    if (intelligentQuickStatusFilter !== 'all' && getIntelligentQuickStatus(row) !== intelligentQuickStatusFilter) {
+      return false
+    }
+    if (intelligentIaStatusFilter !== 'all' && getIntelligentIaStatus(row) !== intelligentIaStatusFilter) {
+      return false
+    }
+    return true
+  })
+  const selectableIntelligentProposalIds = intelligentRowsForTable
+    .filter((row) => !row.missingProposal && row.proposal?.id != null)
+    .map((row) => row.proposal.id)
+  const selectableIntelligentProposalSet = new Set(selectableIntelligentProposalIds)
+  const selectedIntelligentVisibleIds = selectedIntelligentProposalIds.filter((id) => selectableIntelligentProposalSet.has(id))
+  const areAllIntelligentRowsSelected = selectableIntelligentProposalIds.length > 0 && selectedIntelligentVisibleIds.length === selectableIntelligentProposalIds.length
+  const hasAnyIntelligentSelection = selectedIntelligentVisibleIds.length > 0
+  const batchCompletionPct = batchIntelligentRun.total > 0
+    ? Math.round((batchIntelligentRun.completed / batchIntelligentRun.total) * 100)
+    : 0
+  const intelligentRowsGrouped = intelligentRowsForTable.reduce((acc, row) => {
+    const groupKey = `${row.yearLabel}-${row.quarterLabel}`
+    if (!acc[groupKey]) {
+      acc[groupKey] = {
+        key: groupKey,
+        title: `Año ${row.yearLabel} - ${row.quarterLabel}`,
+        rows: []
+      }
+    }
+    acc[groupKey].rows.push(row)
+    return acc
+  }, {})
+  const intelligentRowGroups = Object.values(intelligentRowsGrouped)
+  const intelligentValidatedCount = controlRowsWithProposal.filter((row) => {
+    const summary = intelligentResultsByProposal[row.proposal.id]
+    const scopedStatus = computeScopedIntelligentStatus(summary)
+    return scopedStatus === 'Validada'
+  }).length
+  const intelligentSuggestedCount = controlRowsWithProposal.filter((row) => {
+    const summary = intelligentResultsByProposal[row.proposal.id]
+    const scopedStatus = computeScopedIntelligentStatus(summary)
+    return scopedStatus === 'Con sugerencias'
+  }).length
+  useEffect(() => {
+    setSelectedIntelligentProposalIds((prev) => {
+      const next = prev.filter((id) => selectableIntelligentProposalSet.has(id))
+      const same = next.length === prev.length && next.every((id, idx) => id === prev[idx])
+      return same ? prev : next
+    })
+  }, [controlChecklistRows])
   const filteredProposals = isDocenteView
     ? (hasSelectedTeacher
         ? filteredByPlan.filter((proposal) => proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName))
@@ -8982,129 +9643,783 @@ const App = () => {
             ) : (
               <>
                 <div style={{ marginBottom: '12px', color: '#555' }}>
-                  Checklist automático por asignatura ({selectedPlanName ? `Plan: ${selectedPlanName}` : 'Todos los planes'}).
+                  Panel de control por asignatura ({selectedPlanName ? `Plan: ${selectedPlanName}` : 'Todos los planes'}).
                 </div>
-                {controlDetailsLoading && (
-                  <div style={{ marginBottom: '10px', color: '#355070', fontSize: '12px' }}>
-                    Cargando detalles completos de propuestas para validar checklist...
-                  </div>
-                )}
-                <div style={{
-                  marginBottom: '12px',
-                  padding: '10px',
-                  border: '1px solid #d8e2f0',
-                  borderRadius: '8px',
-                  background: '#f8fbff',
-                  display: 'grid',
-                  gridTemplateColumns: '1.2fr 1fr auto',
-                  gap: '10px',
-                  alignItems: 'center'
-                }}>
-                  <input
-                    style={{ ...styles.input, marginBottom: 0 }}
-                    placeholder="Buscar por ID o asignatura"
-                    value={controlSubjectFilter}
-                    onChange={(e) => setControlSubjectFilter(e.target.value)}
-                  />
-                  <select
-                    style={{ ...styles.input, marginBottom: 0 }}
-                    value={controlFailureFilter}
-                    onChange={(e) => setControlFailureFilter(e.target.value)}
-                  >
-                    <option value="all">Todos los criterios</option>
-                    {controlChecklistColumns.map((column) => (
-                      <option key={`control-filter-${column.key}`} value={column.key}>
-                        Falla en: {column.label}
-                      </option>
-                    ))}
-                  </select>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#355070', whiteSpace: 'nowrap' }}>
-                    <input
-                      type="checkbox"
-                      checked={controlOnlyWithErrors}
-                      onChange={(e) => setControlOnlyWithErrors(e.target.checked)}
-                    />
-                    Solo con errores
-                  </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(220px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                  {[
+                    { key: 'quick', icon: '⚡', title: 'Control rápido', subtitle: `${controlChecklistRows.length} asignaturas`, description: 'Chequeos automáticos de completitud por campo.' },
+                    { key: 'intelligent', icon: '🧠', title: 'Control inteligente', subtitle: `Validadas: ${intelligentValidatedCount} · Con sugerencias: ${intelligentSuggestedCount}`, description: 'Evaluación LLM por tópico y sugerencias accionables.' },
+                    { key: 'config', icon: '⚙️', title: 'Configuración IA', subtitle: `${intelligentControls.length} controles`, description: 'Alta, edición, activación y baja de reglas inteligentes.' }
+                  ].map((card) => (
+                    <button
+                      key={`control-card-${card.key}`}
+                      ref={card.key === 'config' ? intelligentConfigCardRef : null}
+                      onClick={() => setControlPanelMode(card.key)}
+                      style={{
+                        textAlign: 'left',
+                        border: controlPanelMode === card.key ? '2px solid #1a73e8' : '1px solid #d7deea',
+                        background: controlPanelMode === card.key ? '#eef5ff' : '#fff',
+                        borderRadius: '8px',
+                        padding: '14px',
+                        minHeight: '108px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#1a3d5c', marginBottom: '4px', fontSize: '18px' }}>
+                        <span style={{ fontSize: '21px', lineHeight: 1 }}>{card.icon}</span>
+                        <span>{card.title}</span>
+                      </div>
+                      <div style={{ color: '#607d8b', fontSize: '12px' }}>{card.subtitle}</div>
+                      <div style={{ color: '#4f6476', fontSize: '12px', marginTop: '6px' }}>{card.description}</div>
+                    </button>
+                  ))}
                 </div>
-                {controlChecklistRows.length === 0 ? (
-                  <div style={{ color: '#777', fontStyle: 'italic' }}>
-                    No hay asignaturas para la combinación de filtros actual.
-                  </div>
-                ) : (
-                  <div style={{ border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', background: '#fff' }}>
-                    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '70vh' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1400px' }}>
-                        <thead>
-                          <tr style={{ background: '#0066cc', color: '#fff' }}>
-                            <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>ID</th>
-                            <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>Asignatura</th>
-                            {controlChecklistColumns.map((column) => (
-                              <th key={`control-head-${column.key}`} style={{ padding: '8px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.25)', minWidth: '95px', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>
-                                {column.label}
-                              </th>
-                            ))}
-                            <th style={{ padding: '8px', textAlign: 'center', background: '#004d99', minWidth: '90px', position: 'sticky', top: 0, zIndex: 4 }}>Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {controlRowGroups.map((group, groupIdx) => (
-                            <React.Fragment key={group.key}>
-                              <tr style={{ background: '#e3f2fd', borderTop: groupIdx === 0 ? 'none' : '2px solid #90caf9' }}>
-                                <td colSpan={controlChecklistColumns.length + 3} style={{ padding: '8px 12px', fontWeight: 700, color: '#1565c0' }}>
-                                  📚 {group.title}
+
+                {controlPanelMode === 'quick' && (
+                  <>
+                    {controlDetailsLoading && (
+                      <div style={{ marginBottom: '10px', color: '#355070', fontSize: '12px' }}>
+                        Cargando detalles completos de propuestas para validar checklist...
+                      </div>
+                    )}
+                    <div style={{
+                      marginBottom: '12px',
+                      padding: '10px',
+                      border: '1px solid #d8e2f0',
+                      borderRadius: '8px',
+                      background: '#f8fbff',
+                      display: 'grid',
+                      gridTemplateColumns: '1.2fr 1fr auto',
+                      gap: '10px',
+                      alignItems: 'center'
+                    }}>
+                      <input
+                        style={{ ...styles.input, marginBottom: 0 }}
+                        placeholder="Buscar por ID o asignatura"
+                        value={controlSubjectFilter}
+                        onChange={(e) => setControlSubjectFilter(e.target.value)}
+                      />
+                      <select
+                        style={{ ...styles.input, marginBottom: 0 }}
+                        value={controlFailureFilter}
+                        onChange={(e) => setControlFailureFilter(e.target.value)}
+                      >
+                        <option value="all">Todos los criterios</option>
+                        {controlChecklistColumns.map((column) => (
+                          <option key={`control-filter-${column.key}`} value={column.key}>
+                            Falla en: {column.label}
+                          </option>
+                        ))}
+                      </select>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#355070', whiteSpace: 'nowrap' }}>
+                        <input
+                          type="checkbox"
+                          checked={controlOnlyWithErrors}
+                          onChange={(e) => setControlOnlyWithErrors(e.target.checked)}
+                        />
+                        Solo con errores
+                      </label>
+                    </div>
+                    {controlChecklistRows.length === 0 ? (
+                      <div style={{ color: '#777', fontStyle: 'italic' }}>
+                        No hay asignaturas para la combinación de filtros actual.
+                      </div>
+                    ) : (
+                      <div style={{ border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', background: '#fff' }}>
+                        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '70vh' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1400px' }}>
+                            <thead>
+                              <tr style={{ background: '#0066cc', color: '#fff' }}>
+                                <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>ID</th>
+                                <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>Asignatura</th>
+                                {controlChecklistColumns.map((column) => (
+                                  <th key={`control-head-${column.key}`} style={{ padding: '8px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.25)', minWidth: '95px', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>
+                                    {column.label}
+                                  </th>
+                                ))}
+                                <th style={{ padding: '8px', textAlign: 'center', background: '#004d99', minWidth: '90px', position: 'sticky', top: 0, zIndex: 4 }}>Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {controlRowGroups.map((group, groupIdx) => (
+                                <React.Fragment key={group.key}>
+                                  <tr style={{ background: '#e3f2fd', borderTop: groupIdx === 0 ? 'none' : '2px solid #90caf9' }}>
+                                    <td colSpan={controlChecklistColumns.length + 3} style={{ padding: '8px 12px', fontWeight: 700, color: '#1565c0' }}>
+                                      📚 {group.title}
+                                    </td>
+                                  </tr>
+                                  {group.rows.map((row, idx) => (
+                                    <tr key={row.rowKey} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #eee' }}>
+                                      <td style={{ padding: '8px', borderRight: '1px solid #eee' }}>
+                                        {row.missingProposal ? 'Sin propuesta' : `#${row.proposal.id}`}
+                                      </td>
+                                      <td style={{ padding: '8px', borderRight: '1px solid #eee', fontWeight: 600 }}>{row.proposal.subject || '-'}</td>
+                                      {controlChecklistColumns.map((column) => {
+                                        const check = row.checks[column.key]
+                                        return (
+                                          <td
+                                            key={`control-cell-${row.rowKey}-${column.key}`}
+                                            title={!check.ok ? check.reason : ''}
+                                            style={{
+                                              padding: '8px',
+                                              textAlign: 'center',
+                                              borderRight: '1px solid #eee',
+                                              background: check.ok ? 'rgba(56, 142, 60, 0.08)' : 'rgba(211, 47, 47, 0.1)',
+                                              color: check.ok ? '#1b5e20' : '#b00020',
+                                              fontWeight: 700,
+                                              cursor: check.ok ? 'default' : 'help'
+                                            }}
+                                          >
+                                            {check.ok ? '✓' : '✗'}
+                                          </td>
+                                        )
+                                      })}
+                                      <td style={{ padding: '8px', textAlign: 'center', fontWeight: 700, background: '#f3f7ff', color: '#1a3d5c' }}>
+                                        {row.rowTotalLabel}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </React.Fragment>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr style={{ background: '#eef4ff', borderTop: '2px solid #c6d8ff' }}>
+                                <td colSpan={2} style={{ padding: '8px', fontWeight: 700, color: '#1a3d5c' }}>
+                                  Totales por criterio
+                                </td>
+                                {controlChecklistColumns.map((column) => (
+                                  <td key={`control-total-${column.key}`} style={{ padding: '8px', textAlign: 'center', fontWeight: 700, color: '#1a3d5c' }}>
+                                    {controlColumnTotals[column.key]}/{controlChecklistRows.length}
+                                  </td>
+                                ))}
+                                <td style={{ padding: '8px', textAlign: 'center', fontWeight: 700, color: '#1a3d5c', background: '#dfe9ff' }}>
+                                  {controlChecklistRows.reduce((sum, row) => sum + row.rowTotal, 0)}/{controlChecklistRows.length * controlChecklistColumns.length}
                                 </td>
                               </tr>
-                              {group.rows.map((row, idx) => (
-                                <tr key={row.rowKey} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #eee' }}>
-                                  <td style={{ padding: '8px', borderRight: '1px solid #eee' }}>
-                                    {row.missingProposal ? 'Sin propuesta' : `#${row.proposal.id}`}
-                                  </td>
-                                  <td style={{ padding: '8px', borderRight: '1px solid #eee', fontWeight: 600 }}>{row.proposal.subject || '-'}</td>
-                                  {controlChecklistColumns.map((column) => {
-                                    const check = row.checks[column.key]
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {controlPanelMode === 'intelligent' && (
+                  <>
+                    <div style={{ marginBottom: '8px', minHeight: '18px', color: '#355070', fontSize: '12px' }}>
+                      {intelligentResultsLoading ? 'Actualizando estado de controles inteligentes...' : ''}
+                    </div>
+                    <div style={{ marginBottom: '10px', padding: '10px', border: '1px solid #d8e2f0', borderRadius: '8px', background: '#f8fbff' }}>
+                      <div style={{ fontWeight: 700, color: '#355070', marginBottom: '8px' }}>Modo de ejecución IA</div>
+                      <div style={{ color: '#607d8b', fontSize: '12px', marginBottom: '8px' }}>
+                        Controles activos en este entorno: {activeControlIdsForCurrentView.length}
+                      </div>
+                      {isDocenteView && (
+                        <div style={{ color: '#607d8b', fontSize: '12px', marginBottom: '8px' }}>
+                          Dirección definió el modo para docentes: <strong>{effectiveIntelligentRunModeLabel}</strong>.
+                        </div>
+                      )}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(170px, 1fr))', gap: '8px' }}>
+                        {intelligentModeOptions.map((mode) => (
+                          <button
+                            key={`run-mode-${mode.key}`}
+                            onClick={() => {
+                              if (isDocenteView) return
+                              setIntelligentRunMode(mode.key)
+                              saveIntelligentModeSettings({ director_last_mode: mode.key }).catch((err) => {
+                                setStatusMsg(err.message || 'No se pudo guardar el modo IA del directivo')
+                                setStatusType('error')
+                              })
+                            }}
+                            disabled={isDocenteView}
+                            title={isDocenteView ? `Modo fijado por Dirección: ${effectiveIntelligentRunModeLabel}` : ''}
+                            style={{
+                              textAlign: 'left',
+                              border: effectiveIntelligentRunMode === mode.key ? '2px solid #1a73e8' : '1px solid #d0d8e6',
+                              background: effectiveIntelligentRunMode === mode.key ? '#eaf2ff' : '#fff',
+                              borderRadius: '8px',
+                              padding: '10px',
+                              cursor: isDocenteView ? 'not-allowed' : 'pointer',
+                              minHeight: '72px',
+                              opacity: isDocenteView ? 0.8 : 1
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>{mode.icon} {mode.title}</div>
+                            <div style={{ color: '#607d8b', fontSize: '12px' }}>{mode.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{
+                      marginBottom: '10px',
+                      padding: '10px',
+                      border: '1px solid #d8e2f0',
+                      borderRadius: '8px',
+                      background: '#f8fbff',
+                      display: 'grid',
+                      gridTemplateColumns: '1.4fr 1fr 1fr',
+                      gap: '10px',
+                      alignItems: 'center'
+                    }}>
+                      <input
+                        style={{ ...styles.input, marginBottom: 0 }}
+                        placeholder="Filtrar por nombre o ID"
+                        value={intelligentNameFilter}
+                        onChange={(e) => setIntelligentNameFilter(e.target.value)}
+                      />
+                      <select
+                        style={{ ...styles.input, marginBottom: 0 }}
+                        value={intelligentQuickStatusFilter}
+                        onChange={(e) => setIntelligentQuickStatusFilter(e.target.value)}
+                      >
+                        <option value="all">Estado rápido (todos)</option>
+                        {intelligentQuickStatusOptions.map((status) => (
+                          <option key={`int-quick-status-${status}`} value={status}>{status}</option>
+                        ))}
+                      </select>
+                      <select
+                        style={{ ...styles.input, marginBottom: 0 }}
+                        value={intelligentIaStatusFilter}
+                        onChange={(e) => setIntelligentIaStatusFilter(e.target.value)}
+                      >
+                        <option value="all">Estado IA (todos)</option>
+                        {intelligentIaStatusOptions.map((status) => (
+                          <option key={`int-ia-status-${status}`} value={status}>{status}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {intelligentRowsForTable.length === 0 ? (
+                      <div style={{ color: '#777', fontStyle: 'italic' }}>
+                        No hay propuestas para los filtros seleccionados.
+                      </div>
+                    ) : (
+                      <div style={{ border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', background: '#fff' }}>
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
+                            <thead>
+                              <tr style={{ background: '#1a73e8', color: '#fff' }}>
+                                <th style={{ padding: '8px', textAlign: 'center', width: '52px' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={areAllIntelligentRowsSelected}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedIntelligentProposalIds(selectableIntelligentProposalIds)
+                                      } else {
+                                        setSelectedIntelligentProposalIds([])
+                                      }
+                                    }}
+                                    disabled={!selectableIntelligentProposalIds.length || batchIntelligentRun.isRunning}
+                                  />
+                                </th>
+                                <th style={{ padding: '8px', textAlign: 'left' }}>Propuesta</th>
+                                <th style={{ padding: '8px', textAlign: 'left' }}>Asignatura</th>
+                                <th style={{ padding: '8px', textAlign: 'center' }}>Estado rápido</th>
+                                <th style={{ padding: '8px', textAlign: 'center' }}>Estado IA</th>
+                                <th style={{ padding: '8px', textAlign: 'center' }}>Resultado</th>
+                                <th style={{ padding: '8px', textAlign: 'center' }}>Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligentRowGroups.map((group, groupIdx) => (
+                                <React.Fragment key={`intelligent-group-${group.key}`}>
+                                  <tr style={{ background: '#e8f1ff', borderTop: groupIdx === 0 ? 'none' : '2px solid #d2e3ff' }}>
+                                    <td colSpan={7} style={{ padding: '8px 12px', fontWeight: 700, color: '#1a5fb4' }}>
+                                      🗂️ {group.title}
+                                    </td>
+                                  </tr>
+                                  {group.rows.map((row, idx) => {
+                                    const proposalId = row.missingProposal ? null : row.proposal.id
+                                    const isSelected = !!proposalId && selectedIntelligentProposalIds.includes(proposalId)
+                                    const summary = proposalId ? intelligentResultsByProposal[proposalId] : null
+                                    const quickStatus = getIntelligentQuickStatus(row)
+                                    const scopedCounts = getScopedResultCounts(summary)
+                                    const status = getIntelligentIaStatus(row)
+                                    const failed = scopedCounts.failed
+                                    const total = scopedCounts.total
+                                    const batchItem = proposalId ? batchIntelligentRun.items?.[proposalId] : null
+                                    const runDisabled = !proposalId || batchIntelligentRun.isRunning || !activeControlIdsForCurrentView.length || !!runningIntelligentByProposal[proposalId]
+                                    const hasSuggestions = !!proposalId && failed > 0
+                                    const viewDisabled = !proposalId || batchIntelligentRun.isRunning || !hasSuggestions
                                     return (
-                                      <td
-                                        key={`control-cell-${row.rowKey}-${column.key}`}
-                                        title={!check.ok ? check.reason : ''}
-                                        style={{
-                                          padding: '8px',
-                                          textAlign: 'center',
-                                          borderRight: '1px solid #eee',
-                                          background: check.ok ? 'rgba(56, 142, 60, 0.08)' : 'rgba(211, 47, 47, 0.1)',
-                                          color: check.ok ? '#1b5e20' : '#b00020',
-                                          fontWeight: 700,
-                                          cursor: check.ok ? 'default' : 'help'
-                                        }}
-                                      >
-                                        {check.ok ? '✓' : '✗'}
-                                      </td>
+                                      <tr key={`intelligent-row-${row.rowKey}`} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #eee' }}>
+                                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                                          {proposalId ? (
+                                            <input
+                                              type="checkbox"
+                                              checked={isSelected}
+                                              onChange={(e) => {
+                                                setSelectedIntelligentProposalIds((prev) => {
+                                                  if (e.target.checked) {
+                                                    return prev.includes(proposalId) ? prev : [...prev, proposalId]
+                                                  }
+                                                  return prev.filter((id) => id !== proposalId)
+                                                })
+                                              }}
+                                              disabled={batchIntelligentRun.isRunning}
+                                            />
+                                          ) : '-'}
+                                        </td>
+                                        <td style={{ padding: '8px' }}>{row.missingProposal ? 'Sin propuesta' : `#${proposalId}`}</td>
+                                        <td style={{ padding: '8px', fontWeight: 600 }}>{row.proposal.subject || '-'}</td>
+                                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                                          <span style={{
+                                            display: 'inline-block',
+                                            padding: '4px 10px',
+                                            borderRadius: '999px',
+                                            background: quickStatus === 'Completa' ? 'rgba(56, 142, 60, 0.15)' : 'rgba(211, 47, 47, 0.15)',
+                                            color: quickStatus === 'Completa' ? '#1b5e20' : '#b00020',
+                                            fontWeight: 700,
+                                            fontSize: '12px'
+                                          }}>{quickStatus}</span>
+                                        </td>
+                                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                                          <span style={{
+                                            display: 'inline-block',
+                                            padding: '4px 10px',
+                                            borderRadius: '999px',
+                                            background: status === 'Validada'
+                                              ? 'rgba(56, 142, 60, 0.15)'
+                                              : status === 'Con sugerencias'
+                                              ? 'rgba(255, 152, 0, 0.2)'
+                                              : status === 'Sin propuesta'
+                                              ? 'rgba(189, 189, 189, 0.25)'
+                                              : 'rgba(96, 125, 139, 0.2)',
+                                            color: status === 'Validada'
+                                              ? '#1b5e20'
+                                              : status === 'Con sugerencias'
+                                              ? '#8d5100'
+                                              : status === 'Sin propuesta'
+                                              ? '#616161'
+                                              : '#455a64',
+                                            fontWeight: 700,
+                                            fontSize: '12px'
+                                          }}>{status}</span>
+                                        </td>
+                                        <td style={{ padding: '8px', textAlign: 'center', fontWeight: 600 }}>{row.missingProposal ? '-' : (total ? `${total - failed}/${total}` : '-')}</td>
+                                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                                          <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '6px', alignItems: 'center' }}>
+                                            {batchItem && (
+                                              <div style={{ fontSize: '11px', color: '#5b6b7a' }}>
+                                                {batchItem.status === 'ejecutando' && `Procesando ${batchItem.evaluatedControls}/${batchItem.totalControls || total || 0}`}
+                                                {batchItem.status === 'completado' && `Completado ${batchItem.evaluatedControls}/${batchItem.totalControls || total || 0}`}
+                                                {batchItem.status === 'error' && 'Error'}
+                                                {batchItem.status === 'cancelado' && 'Cancelado'}
+                                                {batchItem.status === 'pendiente' && 'Pendiente'}
+                                              </div>
+                                            )}
+                                            <div style={{ display: 'inline-flex', gap: '8px' }}>
+                                            <button
+                                              style={{
+                                                ...styles.button,
+                                                background: runDisabled ? '#b7c1cc' : '#5c6bc0',
+                                                color: runDisabled ? '#6b7280' : '#fff',
+                                                padding: '6px 10px',
+                                                cursor: runDisabled ? 'not-allowed' : 'pointer',
+                                                opacity: runDisabled ? 0.7 : 1
+                                              }}
+                                              onClick={() => {
+                                                if (!proposalId) return
+                                                if (!activeControlIdsForCurrentView.length) {
+                                                  goToIntelligentConfigForDirector()
+                                                  return
+                                                }
+                                                runIntelligentControlsForProposal(proposalId)
+                                              }}
+                                              disabled={!proposalId || batchIntelligentRun.isRunning || !!runningIntelligentByProposal[proposalId]}
+                                              title={!proposalId
+                                                ? 'La asignatura no tiene propuesta cargada.'
+                                                : !activeControlIdsForCurrentView.length
+                                                ? (isDocenteView ? 'No hay controles activos. Solicita activación al directivo.' : 'No hay controles activos. Haz click para ir a Configuración IA.')
+                                                : ''}
+                                            >
+                                              {!proposalId
+                                                ? 'Sin propuesta'
+                                                : !activeControlIdsForCurrentView.length
+                                                ? 'Sin controles activos'
+                                                : (runningIntelligentByProposal[proposalId] ? 'Ejecutando...' : 'Ejecutar IA')}
+                                            </button>
+                                            <button
+                                              style={{
+                                                ...styles.button,
+                                                background: viewDisabled ? '#c3ccd5' : '#607d8b',
+                                                color: viewDisabled ? '#6b7280' : '#fff',
+                                                padding: '6px 10px',
+                                                cursor: viewDisabled ? 'not-allowed' : 'pointer',
+                                                opacity: viewDisabled ? 0.7 : 1
+                                              }}
+                                              onClick={() => proposalId && openProposalView(proposalId)}
+                                              disabled={viewDisabled}
+                                              title={!proposalId
+                                                ? 'La asignatura no tiene propuesta cargada.'
+                                                : batchIntelligentRun.isRunning
+                                                ? 'Espera a que termine la ejecución por lote.'
+                                                : !hasSuggestions
+                                                ? 'No hay sugerencias para mostrar.'
+                                                : ''}
+                                            >
+                                              {hasSuggestions ? 'Ver sugerencias' : 'Sin sugerencias'}
+                                            </button>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
                                     )
                                   })}
-                                  <td style={{ padding: '8px', textAlign: 'center', fontWeight: 700, background: '#f3f7ff', color: '#1a3d5c' }}>
-                                    {row.rowTotalLabel}
-                                  </td>
-                                </tr>
+                                </React.Fragment>
                               ))}
-                            </React.Fragment>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr style={{ background: '#eef4ff', borderTop: '2px solid #c6d8ff' }}>
-                            <td colSpan={2} style={{ padding: '8px', fontWeight: 700, color: '#1a3d5c' }}>
-                              Totales por criterio
-                            </td>
-                            {controlChecklistColumns.map((column) => (
-                              <td key={`control-total-${column.key}`} style={{ padding: '8px', textAlign: 'center', fontWeight: 700, color: '#1a3d5c' }}>
-                                {controlColumnTotals[column.key]}/{controlChecklistRows.length}
-                              </td>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {controlPanelMode === 'config' && (
+                  <div style={{ display: 'grid', gap: '12px' }}>
+                    {!isDocenteView && (
+                      <div style={{ border: '1px solid #d8e2f0', borderRadius: '8px', padding: '12px', background: '#f8fbff' }}>
+                        <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '10px' }}>Nuevo control inteligente</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr auto', gap: '10px', marginBottom: '10px' }}>
+                          <select
+                            style={{ ...styles.input, marginBottom: 0 }}
+                            value={intelligentControlDraft.topic}
+                            onChange={(e) => setIntelligentControlDraft((prev) => ({ ...prev, topic: e.target.value }))}
+                          >
+                            {intelligentTopicOptions.map((topic) => (
+                              <option key={`topic-opt-${topic.value}`} value={topic.value}>{topic.label}</option>
                             ))}
-                            <td style={{ padding: '8px', textAlign: 'center', fontWeight: 700, color: '#1a3d5c', background: '#dfe9ff' }}>
-                              {controlChecklistRows.reduce((sum, row) => sum + row.rowTotal, 0)}/{controlChecklistRows.length * controlChecklistColumns.length}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
+                          </select>
+                          <input
+                            style={{ ...styles.input, marginBottom: 0 }}
+                            placeholder="Nombre del control"
+                            value={intelligentControlDraft.name}
+                            onChange={(e) => setIntelligentControlDraft((prev) => ({ ...prev, name: e.target.value }))}
+                          />
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#355070' }}>
+                            <input
+                              type="checkbox"
+                              checked={!!intelligentControlDraft.is_active}
+                              onChange={(e) => setIntelligentControlDraft((prev) => ({ ...prev, is_active: e.target.checked }))}
+                            />
+                            Activo
+                          </label>
+                        </div>
+                        <textarea
+                          style={{ ...styles.textarea, minHeight: '90px', marginBottom: '10px' }}
+                          placeholder="Regla/instrucción exacta para evaluar con LLM"
+                          value={intelligentControlDraft.instruction}
+                          onChange={(e) => setIntelligentControlDraft((prev) => ({ ...prev, instruction: e.target.value }))}
+                        />
+                        <button style={{ ...styles.button, background: '#4caf50' }} onClick={createIntelligentControl}>Agregar control</button>
+                        {intelligentControlsError && (
+                          <div style={{ marginTop: '8px', color: '#b00020', fontSize: '13px' }}>{intelligentControlsError}</div>
+                        )}
+                      </div>
+                    )}
+                    {isDocenteView && (
+                      <div style={{ border: '1px solid #d8e2f0', borderRadius: '8px', padding: '10px 12px', background: '#f8fbff', color: '#355070', fontSize: '13px' }}>
+                        En vista docente puedes ver los controles definidos por Dirección y activarlos/desactivarlos solo para tu entorno actual.
+                      </div>
+                    )}
+                    {!isDocenteView && (
+                      <div style={{ border: '1px solid #d8e2f0', borderRadius: '8px', padding: '10px 12px', background: '#f8fbff' }}>
+                        <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '8px' }}>Modo de ejecución permitido para docente</div>
+                        {intelligentModeSettingsLoading && (
+                          <div style={{ color: '#607d8b', fontSize: '12px', marginBottom: '8px' }}>Cargando configuración persistida...</div>
+                        )}
+                        <div style={{ color: '#607d8b', fontSize: '12px', marginBottom: '8px' }}>
+                          Esta configuración define el modo que se aplicará automáticamente cuando un docente ejecute controles IA.
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(150px, 1fr))', gap: '8px' }}>
+                          {intelligentModeOptions.map((mode) => (
+                            <button
+                              key={`docente-mode-${mode.key}`}
+                              onClick={() => {
+                                setDocenteIntelligentRunMode(mode.key)
+                                saveIntelligentModeSettings({ docente_mode: mode.key }).catch((err) => {
+                                  setStatusMsg(err.message || 'No se pudo guardar el modo docente')
+                                  setStatusType('error')
+                                })
+                              }}
+                              style={{
+                                textAlign: 'left',
+                                border: docenteIntelligentRunMode === mode.key ? '2px solid #1a73e8' : '1px solid #d0d8e6',
+                                background: docenteIntelligentRunMode === mode.key ? '#eaf2ff' : '#fff',
+                                borderRadius: '8px',
+                                padding: '10px',
+                                cursor: 'pointer',
+                                minHeight: '72px'
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>{mode.icon} {mode.title}</div>
+                              <div style={{ color: '#607d8b', fontSize: '12px' }}>{mode.desc}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ border: '1px solid #ddd', borderRadius: '8px', background: '#fff', overflow: 'hidden' }}>
+                      <div style={{ padding: '10px 12px', background: '#eef4ff', fontWeight: 700, color: '#1a3d5c' }}>
+                        Controles configurados
+                      </div>
+                      {intelligentControlsLoading ? (
+                        <div style={{ padding: '12px', color: '#607d8b' }}>Cargando controles...</div>
+                      ) : intelligentControls.length === 0 ? (
+                        <div style={{ padding: '12px', color: '#607d8b' }}>No hay controles configurados.</div>
+                      ) : (
+                        <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+                          {intelligentControls.map((control) => {
+                            const isEditing = editingIntelligentControlId === control.id
+                            const rowDraft = isEditing ? editingIntelligentControlDraft : control
+                            return (
+                              <div
+                                key={`int-control-${control.id}`}
+                                style={{
+                                  padding: '10px 12px',
+                                  borderBottom: '1px solid #f0f0f0',
+                                  background: control.is_active ? '#fff' : '#f8f9fb',
+                                  opacity: control.is_active ? 1 : 0.6
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
+                                  <div style={{ fontWeight: 700, color: '#1a3d5c' }}>{getIntelligentTopicLabel(control.topic)} · {control.name}</div>
+                                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#355070' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={!!(isEditing ? rowDraft.is_active : isControlActiveForCurrentView(control))}
+                                      onChange={async (e) => {
+                                        if (isEditing) {
+                                          setEditingIntelligentControlDraft((prev) => ({ ...prev, is_active: e.target.checked }))
+                                          return
+                                        }
+                                        if (isDocenteView) {
+                                          setDocenteControlActivation((prev) => ({ ...prev, [control.id]: e.target.checked }))
+                                          return
+                                        }
+                                        try {
+                                          await updateIntelligentControl(control.id, { is_active: e.target.checked })
+                                          fetchIntelligentControls()
+                                        } catch (err) {
+                                          setIntelligentControlsError(err.message || 'No se pudo actualizar el control')
+                                        }
+                                      }}
+                                    />
+                                    Activo
+                                  </label>
+                                </div>
+                                {isEditing ? (
+                                  <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '10px', marginBottom: '8px' }}>
+                                      <select
+                                        style={{ ...styles.input, marginBottom: 0 }}
+                                        value={rowDraft.topic}
+                                        onChange={(e) => setEditingIntelligentControlDraft((prev) => ({ ...prev, topic: e.target.value }))}
+                                      >
+                                        {intelligentTopicOptions.map((topic) => (
+                                          <option key={`edit-topic-${topic.value}`} value={topic.value}>{topic.label}</option>
+                                        ))}
+                                      </select>
+                                      <input
+                                        style={{ ...styles.input, marginBottom: 0 }}
+                                        value={rowDraft.name}
+                                        onChange={(e) => setEditingIntelligentControlDraft((prev) => ({ ...prev, name: e.target.value }))}
+                                      />
+                                    </div>
+                                    <textarea
+                                      style={{ ...styles.textarea, minHeight: '75px', marginBottom: '8px' }}
+                                      value={rowDraft.instruction}
+                                      onChange={(e) => setEditingIntelligentControlDraft((prev) => ({ ...prev, instruction: e.target.value }))}
+                                    />
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                      <button
+                                        style={{ ...styles.button, background: '#4caf50', padding: '6px 10px' }}
+                                        onClick={async () => {
+                                          try {
+                                            await updateIntelligentControl(control.id, rowDraft)
+                                            setEditingIntelligentControlId(null)
+                                            fetchIntelligentControls()
+                                          } catch (err) {
+                                            setIntelligentControlsError(err.message || 'No se pudo guardar el control')
+                                          }
+                                        }}
+                                      >Guardar</button>
+                                      <button
+                                        style={{ ...styles.button, background: '#9e9e9e', padding: '6px 10px' }}
+                                        onClick={() => setEditingIntelligentControlId(null)}
+                                      >Cancelar</button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div style={{ color: '#455a64', fontSize: '13px', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{control.instruction}</div>
+                                    {!isDocenteView && (
+                                      <div style={{ display: 'flex', gap: '8px' }}>
+                                        <button
+                                          style={{ ...styles.button, background: '#546e7a', padding: '6px 10px' }}
+                                          onClick={() => {
+                                            setEditingIntelligentControlId(control.id)
+                                            setEditingIntelligentControlDraft({
+                                              topic: control.topic,
+                                              name: control.name,
+                                              instruction: control.instruction,
+                                              is_active: !!control.is_active
+                                            })
+                                          }}
+                                        >Editar</button>
+                                        <button
+                                          style={{ ...styles.button, background: '#e53935', padding: '6px 10px' }}
+                                          onClick={() => deleteIntelligentControl(control.id)}
+                                        >Eliminar</button>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {controlPanelMode === 'intelligent' && hasAnyIntelligentSelection && (
+                  <div style={{
+                    position: 'fixed',
+                    right: '22px',
+                    bottom: '20px',
+                    width: 'min(460px, calc(100vw - 36px))',
+                    background: '#ffffff',
+                    border: '1px solid #d8e2f0',
+                    borderRadius: '10px',
+                    boxShadow: '0 12px 30px rgba(24,39,75,0.2)',
+                    padding: '12px',
+                    zIndex: 1250
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c' }}>🧠 Ejecutar control inteligente</div>
+                      <div style={{ fontSize: '12px', color: '#607d8b' }}>Seleccionadas: {selectedIntelligentVisibleIds.length}</div>
+                    </div>
+                    {isDocenteView && (
+                      <div style={{ fontSize: '12px', color: '#607d8b', marginBottom: '8px' }}>
+                        Modo docente definido por Dirección: <strong>{effectiveIntelligentRunModeLabel}</strong>.
+                      </div>
+                    )}
+                    {!activeControlIdsForCurrentView.length && (
+                      <div style={{
+                        marginBottom: '8px',
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        border: '1px solid #ffcc80',
+                        background: '#fff8e1',
+                        color: '#8d5100',
+                        fontSize: '12px',
+                        fontWeight: 700
+                      }}>
+                        Sin controles activos para el entorno actual.
+                      </div>
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(88px, 1fr))', gap: '6px', marginBottom: '8px' }}>
+                      {[
+                        { key: 'guepardo', label: 'Guepardo' },
+                        { key: 'delfin', label: 'Delfín' },
+                        { key: 'ballena', label: 'Ballena' }
+                      ].map((mode) => (
+                        <button
+                          key={`batch-mode-${mode.key}`}
+                          onClick={() => {
+                            if (isDocenteView) return
+                            setIntelligentRunMode(mode.key)
+                            saveIntelligentModeSettings({ director_last_mode: mode.key }).catch((err) => {
+                              setStatusMsg(err.message || 'No se pudo guardar el modo IA del directivo')
+                              setStatusType('error')
+                            })
+                          }}
+                          disabled={batchIntelligentRun.isRunning || !activeControlIdsForCurrentView.length || isDocenteView}
+                          title={isDocenteView ? `Modo fijado por Dirección: ${effectiveIntelligentRunModeLabel}` : ''}
+                          style={{
+                            border: effectiveIntelligentRunMode === mode.key ? '2px solid #1a73e8' : '1px solid #d0d8e6',
+                            background: effectiveIntelligentRunMode === mode.key ? '#eaf2ff' : '#fff',
+                            borderRadius: '8px',
+                            padding: '7px 8px',
+                            fontWeight: 700,
+                            color: '#1a3d5c',
+                            cursor: (batchIntelligentRun.isRunning || !activeControlIdsForCurrentView.length || isDocenteView) ? 'not-allowed' : 'pointer',
+                            opacity: (batchIntelligentRun.isRunning || !activeControlIdsForCurrentView.length || isDocenteView) ? 0.45 : 1,
+                            filter: (batchIntelligentRun.isRunning || !activeControlIdsForCurrentView.length || isDocenteView) ? 'grayscale(0.25)' : 'none'
+                          }}
+                        >
+                          {mode.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {batchIntelligentRun.total > 0 && (
+                      <div style={{ marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#4f6476', marginBottom: '4px' }}>
+                          <span>Progreso por propuestas</span>
+                          <span>{batchIntelligentRun.completed}/{batchIntelligentRun.total} ({batchCompletionPct}%)</span>
+                        </div>
+                        <div style={{ height: '8px', borderRadius: '999px', background: '#edf2fb', overflow: 'hidden' }}>
+                          <div style={{ width: `${batchCompletionPct}%`, height: '100%', background: '#1a73e8', transition: 'width 0.25s ease' }} />
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                      {(() => {
+                        const noActiveControls = !activeControlIdsForCurrentView.length
+                        const canGuideToConfig = noActiveControls && !isDocenteView
+                        const disableMainAction = batchIntelligentRun.isRunning || !selectedIntelligentVisibleIds.length || (noActiveControls && isDocenteView)
+                        return (
+                      <button
+                        style={{
+                          ...styles.button,
+                          background: (disableMainAction || noActiveControls) ? '#9fb3d1' : '#1a73e8',
+                          marginRight: 0,
+                          cursor: (disableMainAction || canGuideToConfig) ? (canGuideToConfig ? 'pointer' : 'not-allowed') : 'pointer',
+                          opacity: (disableMainAction || noActiveControls) ? 0.65 : 1
+                        }}
+                        onClick={() => {
+                          if (noActiveControls) {
+                            goToIntelligentConfigForDirector()
+                            return
+                          }
+                          startBatchIntelligentRun()
+                        }}
+                        disabled={disableMainAction && !canGuideToConfig}
+                        title={noActiveControls
+                          ? (isDocenteView
+                            ? 'No hay controles activos. Solicita activación al directivo.'
+                            : 'No hay controles activos. Haz click para ir a Configuración IA.')
+                          : ''}
+                      >
+                        {batchIntelligentRun.isRunning
+                          ? 'Ejecutando lote...'
+                          : !activeControlIdsForCurrentView.length
+                          ? 'Sin controles activos'
+                          : 'Ejecutar control inteligente'}
+                      </button>
+                        )
+                      })()}
+                      {batchIntelligentRun.isRunning ? (
+                        <button
+                          style={{ ...styles.button, background: '#78909c', marginRight: 0 }}
+                          onClick={cancelBatchIntelligentRun}
+                        >
+                          Cancelar lote
+                        </button>
+                      ) : (
+                        <button
+                          style={{ ...styles.button, background: '#ffb300', color: '#3e2723', marginRight: 0 }}
+                          onClick={() => setSelectedIntelligentProposalIds([])}
+                        >
+                          Limpiar selección
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -10107,6 +11422,129 @@ const App = () => {
                   </div>
                 </div>
               )}
+
+              <div style={{ marginTop: '12px', padding: '12px', background: '#f9fbff', borderRadius: '6px', border: '1px solid #d9e7ff' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ fontWeight: 700, color: '#1a3d5c' }}>Sugerencias de control inteligente</div>
+                  {viewProposal?.id && (
+                    <button
+                      style={{ ...styles.button, background: '#5c6bc0' }}
+                      onClick={() => runIntelligentControlsForProposal(viewProposal.id)}
+                      disabled={!!runningIntelligentByProposal[viewProposal.id]}
+                    >
+                      {runningIntelligentByProposal[viewProposal.id] ? 'Ejecutando...' : 'Ejecutar control inteligente'}
+                    </button>
+                  )}
+                </div>
+                {viewProposalIntelligentLoading ? (
+                  <div style={{ color: '#607d8b', fontSize: '13px' }}>Cargando resultados inteligentes...</div>
+                ) : !viewProposalIntelligentSummary || !Array.isArray(viewProposalIntelligentSummary.results) || viewProposalIntelligentSummary.results.length === 0 ? (
+                  <div style={{ color: '#607d8b', fontSize: '13px' }}>Aún no hay resultados. Ejecuta el control inteligente para ver sugerencias.</div>
+                ) : (
+                  <div style={{ display: 'grid', gap: '8px' }}>
+                    <div style={{ fontSize: '12px', color: '#355070', fontWeight: 600 }}>
+                      Estado: {viewProposalIntelligentSummary.intelligent_status || 'Sin ejecutar'} • Fallas: {viewProposalIntelligentSummary.failed_controls || 0}
+                    </div>
+                    {viewProposalIntelligentSummary.results
+                      .filter((result) => !result.passed)
+                      .map((result) => (
+                        <div key={`view-proposal-suggestion-${result.id}`} style={{ border: '1px solid #ffd6d6', background: '#fff8f8', borderRadius: '6px', padding: '8px 10px' }}>
+                          <div style={{ fontWeight: 700, color: '#ad1457', marginBottom: '4px' }}>
+                            {getIntelligentTopicLabel(result.control_topic)} · {result.control_name}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Qué no cumple</div>
+                          <textarea
+                            style={{ ...styles.textarea, minHeight: '60px', marginBottom: '6px', background: '#fff' }}
+                            value={(editingSuggestionByResultId[result.id]?.what_failed ?? result.what_failed ?? '')}
+                            onChange={(e) => setEditingSuggestionByResultId((prev) => ({
+                              ...prev,
+                              [result.id]: {
+                                ...{
+                                  what_failed: result.what_failed ?? '',
+                                  why_failed: result.why_failed ?? '',
+                                  suggestion: result.suggestion ?? '',
+                                  summary: result.summary ?? ''
+                                },
+                                ...prev[result.id],
+                                why_failed: prev[result.id]?.why_failed ?? result.why_failed ?? '',
+                                suggestion: prev[result.id]?.suggestion ?? result.suggestion ?? '',
+                                summary: prev[result.id]?.summary ?? result.summary ?? '',
+                                what_failed: e.target.value
+                              }
+                            }))}
+                          />
+                          <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Por qué</div>
+                          <textarea
+                            style={{ ...styles.textarea, minHeight: '60px', marginBottom: '6px', background: '#fff' }}
+                            value={(editingSuggestionByResultId[result.id]?.why_failed ?? result.why_failed ?? '')}
+                            onChange={(e) => setEditingSuggestionByResultId((prev) => ({
+                              ...prev,
+                              [result.id]: {
+                                ...{
+                                  what_failed: result.what_failed ?? '',
+                                  why_failed: result.why_failed ?? '',
+                                  suggestion: result.suggestion ?? '',
+                                  summary: result.summary ?? ''
+                                },
+                                ...prev[result.id],
+                                why_failed: e.target.value
+                              }
+                            }))}
+                          />
+                          <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Sugerencia</div>
+                          <textarea
+                            style={{ ...styles.textarea, minHeight: '70px', marginBottom: '8px', background: '#fff' }}
+                            value={(editingSuggestionByResultId[result.id]?.suggestion ?? result.suggestion ?? '')}
+                            onChange={(e) => setEditingSuggestionByResultId((prev) => ({
+                              ...prev,
+                              [result.id]: {
+                                ...{
+                                  what_failed: result.what_failed ?? '',
+                                  why_failed: result.why_failed ?? '',
+                                  suggestion: result.suggestion ?? '',
+                                  summary: result.summary ?? ''
+                                },
+                                ...prev[result.id],
+                                suggestion: e.target.value
+                              }
+                            }))}
+                          />
+                          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                              style={{ ...styles.button, background: '#2e7d32', padding: '6px 10px' }}
+                              onClick={() => saveIntelligentSuggestionEdits(viewProposal.id, result.id)}
+                            >
+                              Guardar sugerencia
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                      {showIntelligentRunModal && intelligentRunModalData && (
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300 }}>
+                          <div style={{ width: 'min(560px, 92vw)', background: '#fff', borderRadius: '10px', padding: '20px', boxShadow: '0 18px 46px rgba(0,0,0,0.24)' }}>
+                            <h3 style={{ marginTop: 0, marginBottom: '10px', color: '#1a3d5c' }}>🧠 Ejecutando control inteligente</h3>
+                            <div style={{ color: '#445', marginBottom: '10px' }}>
+                              Evaluando propuesta <strong>#{intelligentRunModalData.proposalId}</strong> ({intelligentRunModalData.subject}) en modo{' '}
+                              <strong>{intelligentRunModalData.mode === 'guepardo' ? 'Guepardo' : intelligentRunModalData.mode === 'ballena' ? 'Ballena' : 'Delfín'}</strong>.
+                            </div>
+                            <div style={{ padding: '10px 12px', background: '#f3f7ff', border: '1px solid #dbe7ff', borderRadius: '8px', color: '#355070', fontSize: '13px', marginBottom: '14px' }}>
+                              Este proceso puede tardar unos segundos. Puedes cancelar para detener la espera del cliente.
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                              <button
+                                style={{ ...styles.button, background: '#78909c' }}
+                                onClick={() => cancelIntelligentRun(intelligentRunModalData.proposalId)}
+                              >
+                                Cerrar y cancelar
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                  </div>
+                )}
+              </div>
 
               <div style={{ marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
                 <div style={{ fontWeight: 600, marginBottom: '8px', color: '#1a3d5c' }}>Vincular Google Docs</div>
