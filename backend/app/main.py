@@ -883,6 +883,90 @@ def apply_extracted_payload_to_proposal(db: Session, proposal: models.Proposal, 
     def has_items(value) -> bool:
         return isinstance(value, list) and len(value) > 0
 
+    def normalize_learning_outcomes_for_storage(items) -> list[dict]:
+        normalized: list[dict] = []
+        for idx, item in enumerate(items or []):
+            if isinstance(item, dict):
+                description = str(item.get("description") or item.get("descripcion") or "").strip()
+                observable_verb = str(item.get("observable_verb") or item.get("verbo_observable") or "").strip()
+            else:
+                description = str(item or "").strip()
+                observable_verb = ""
+            if not description:
+                continue
+            normalized.append({
+                "id": idx + 1,
+                "description": description,
+                "observable_verb": observable_verb,
+            })
+        return normalized
+
+    def normalize_units_for_storage(items) -> list[dict]:
+        normalized: list[dict] = []
+        for idx, item in enumerate(items or []):
+            if not isinstance(item, dict):
+                continue
+            name = str(
+                item.get("name")
+                or item.get("nombre")
+                or item.get("title")
+                or item.get("titulo")
+                or ""
+            ).strip()
+            content = str(item.get("content") or item.get("contenidos") or item.get("contents") or "").strip()
+            bibliography_basic = str(
+                item.get("bibliography_basic")
+                or item.get("bib_basica")
+                or item.get("bib_basic")
+                or item.get("bibliografia_basica")
+                or ""
+            ).strip()
+            bibliography_complementary = str(
+                item.get("bibliography_complementary")
+                or item.get("bib_complementaria")
+                or item.get("bib_comp")
+                or item.get("bibliografia_complementaria")
+                or ""
+            ).strip()
+            if not (name or content or bibliography_basic or bibliography_complementary):
+                continue
+            normalized.append(
+                {
+                    "id": idx + 1,
+                    "name": name,
+                    "content": content,
+                    "bibliography_basic": bibliography_basic,
+                    "bibliography_complementary": bibliography_complementary,
+                }
+            )
+        return normalized
+
+    def normalize_practicals_for_storage(items) -> list[dict]:
+        normalized: list[dict] = []
+        for idx, item in enumerate(items or []):
+            if not isinstance(item, dict):
+                continue
+            number = str(item.get("number") or item.get("numero") or idx + 1).strip()
+            name = str(item.get("name") or item.get("nombre") or "").strip()
+            objective = str(item.get("objective") or item.get("objetivo") or "").strip()
+            activities = str(item.get("activities") or item.get("actividades") or "").strip()
+            materials = str(item.get("materials") or item.get("materiales") or "").strip()
+            scope = str(item.get("scope") or item.get("ambito") or "").strip()
+            if not (name or objective or activities or materials or scope):
+                continue
+            normalized.append(
+                {
+                    "id": idx + 1,
+                    "number": number,
+                    "name": name,
+                    "objective": objective,
+                    "activities": activities,
+                    "materials": materials,
+                    "scope": scope,
+                }
+            )
+        return normalized
+
     proposal.career = payload.get("career") or proposal.career
     proposal.subject = payload.get("subject") or proposal.subject
     proposal.study_plan = payload.get("study_plan") or proposal.study_plan
@@ -924,15 +1008,23 @@ def apply_extracted_payload_to_proposal(db: Session, proposal: models.Proposal, 
     if has_text(observations):
         proposal.observations = observations
 
-    learning_outcomes = payload.get("learning_outcomes")
+    learning_outcomes = normalize_learning_outcomes_for_storage(payload.get("learning_outcomes"))
     if has_items(learning_outcomes):
         proposal.learning_outcomes = learning_outcomes
 
-    units = payload.get("units")
+    units = normalize_units_for_storage(payload.get("units"))
     if has_items(units):
-        proposal.units = units
+        has_rich_unit_data = any(
+            bool((unit.get("content") or "").strip())
+            or bool((unit.get("bibliography_basic") or "").strip())
+            or bool((unit.get("bibliography_complementary") or "").strip())
+            for unit in units
+        )
+        existing_units = proposal.units or []
+        if has_rich_unit_data or not existing_units:
+            proposal.units = units
 
-    practicals = payload.get("practicals")
+    practicals = normalize_practicals_for_storage(payload.get("practicals"))
     if has_items(practicals):
         proposal.practicals = practicals
 

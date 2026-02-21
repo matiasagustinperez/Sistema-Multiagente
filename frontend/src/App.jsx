@@ -5582,9 +5582,10 @@ const App = () => {
     }
     return !!control.is_active
   }
-  const activeControlIdsForCurrentView = intelligentControls
+  const getActiveControlIdsForView = (controls = []) => (controls || [])
     .filter((control) => isControlActiveForCurrentView(control))
     .map((control) => control.id)
+  const activeControlIdsForCurrentView = getActiveControlIdsForView(intelligentControls)
   const intelligentModeOptions = [
     { key: 'guepardo', icon: '🐆', title: 'Guepardo', desc: 'Más rápido, menos preciso' },
     { key: 'delfin', icon: '🐬', title: 'Delfín', desc: 'Equilibrado' },
@@ -5770,9 +5771,12 @@ const App = () => {
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
       const data = await res.json()
-      setIntelligentControls(Array.isArray(data) ? data : [])
+      const list = Array.isArray(data) ? data : []
+      setIntelligentControls(list)
+      return list
     } catch (err) {
       setIntelligentControlsError(err.message || 'No se pudieron cargar los controles inteligentes')
+      return []
     } finally {
       setIntelligentControlsLoading(false)
     }
@@ -5825,7 +5829,12 @@ const App = () => {
       refreshAfter = true,
       onProgress = null
     } = options
-    if (activeControlIdsForCurrentView.length === 0) {
+    let controlIdsForRun = activeControlIdsForCurrentView
+    if (controlIdsForRun.length === 0) {
+      const freshControls = await fetchIntelligentControls()
+      controlIdsForRun = getActiveControlIdsForView(freshControls)
+    }
+    if (controlIdsForRun.length === 0) {
       if (!suppressStatus) {
         setStatusMsg('No hay controles activos para ejecutar en el entorno actual')
         setStatusType('info')
@@ -5833,7 +5842,7 @@ const App = () => {
       return
     }
     const proposal = controlRowsWithProposal.find((row) => row.proposal?.id === proposalId)?.proposal
-    const activeIdsSet = new Set(activeControlIdsForCurrentView)
+    const activeIdsSet = new Set(controlIdsForRun)
     const modalControls = intelligentControls
       .filter((control) => activeIdsSet.has(control.id))
       .sort((a, b) => {
@@ -5928,7 +5937,7 @@ const App = () => {
           proposalId,
           subject: proposal?.subject || `#${proposalId}`,
           mode: effectiveIntelligentRunMode,
-          controlsCount: modalControls.length || activeControlIdsForCurrentView.length,
+          controlsCount: modalControls.length || controlIdsForRun.length,
           controls: modalControls,
           completedControls: 0,
           status: 'running',
@@ -5936,21 +5945,21 @@ const App = () => {
         })
         startIntelligentRunProgressPoller({
           proposalId,
-          controlIds: activeControlIdsForCurrentView,
+          controlIds: controlIdsForRun,
           startedAtIso: runStartedAt,
         })
       } else {
         const runStartedAt = new Date().toISOString()
         startIntelligentRunProgressPoller({
           proposalId,
-          controlIds: activeControlIdsForCurrentView,
+          controlIds: controlIdsForRun,
           startedAtIso: runStartedAt,
         })
       }
       const res = await fetch(`http://localhost:8001/proposals/${proposalId}/intelligent-controls/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: effectiveIntelligentRunMode, control_ids: activeControlIdsForCurrentView }),
+        body: JSON.stringify({ mode: effectiveIntelligentRunMode, control_ids: controlIdsForRun }),
         signal: controller.signal
       })
       if (!res.ok) {
@@ -6264,12 +6273,9 @@ const App = () => {
     }
   }
   useEffect(() => {
-    if (activeMenu !== 'control-propuestas') {
-      return
-    }
     fetchIntelligentControls()
     fetchIntelligentModeSettings()
-  }, [activeMenu])
+  }, [activeCareer, viewRole])
   useEffect(() => {
     if (activeMenu !== 'control-propuestas') {
       return
@@ -6591,6 +6597,17 @@ const App = () => {
         ? filteredByPlan.filter((proposal) => proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName))
         : [])
     : filteredByPlan
+  useEffect(() => {
+    if (!['home', 'propuestas'].includes(activeMenu)) {
+      return
+    }
+    const ids = filteredProposals.map((proposal) => proposal?.id).filter((id) => id != null)
+    const idsToFetch = ids.filter((id) => !intelligentResultsByProposal[id])
+    if (!idsToFetch.length) {
+      return
+    }
+    refreshIntelligentSummaries(idsToFetch, { silent: true })
+  }, [activeMenu, filteredProposals, intelligentResultsByProposal])
   const completeProposals = filteredProposals.filter(isProposalComplete)
   const inProcessProposals = filteredProposals.filter(isProposalInProcess)
   const totalProposalsHome = completeProposals.length + inProcessProposals.length
@@ -6600,6 +6617,23 @@ const App = () => {
   const subjectStatsHome = getSubjectStatistics(selectedPlanFilterId)
   const subjectsWithProposalPct = subjectStatsHome.total > 0
     ? Math.round((subjectStatsHome.withProposals / subjectStatsHome.total) * 100)
+    : 0
+  const controlRowsHome = controlChecklistRowsBase
+  const controlRowsHomeWithProposal = controlRowsHome.filter((row) => !row.missingProposal && row.proposal?.id != null)
+  const controlsHomeCompleteCount = controlRowsHomeWithProposal.filter((row) => row.rowTotal === controlChecklistColumns.length).length
+  const controlsHomeIncompleteCount = Math.max(controlRowsHomeWithProposal.length - controlsHomeCompleteCount, 0)
+  const controlsHomeValidatedCount = controlRowsHomeWithProposal.filter((row) => {
+    const summary = intelligentResultsByProposal[row.proposal.id]
+    const scopedStatus = computeScopedIntelligentStatus(summary)
+    return scopedStatus === 'Validada'
+  }).length
+  const controlsHomeSuggestedCount = controlRowsHomeWithProposal.filter((row) => {
+    const summary = intelligentResultsByProposal[row.proposal.id]
+    const scopedStatus = computeScopedIntelligentStatus(summary)
+    return scopedStatus === 'Con sugerencias'
+  }).length
+  const controlsHomeCompletePct = controlRowsHomeWithProposal.length > 0
+    ? Math.round((controlsHomeCompleteCount / controlRowsHomeWithProposal.length) * 100)
     : 0
   const teachersCompleteCount = teacherCatalogItems.filter((teacher) => {
     const dedication = String(teacher?.dedication || '').trim().toLowerCase()
@@ -7008,9 +7042,9 @@ const App = () => {
         {activeMenu === 'home' && (
           <div style={styles.section}>
             <h1>Bienvenido a MACAU</h1>
-            <p>MACAU centraliza la creacion, edicion e importacion de propuestas academicas y organiza todo el proceso de acreditacion en un flujo unico.</p>
-            <p>Integra catalogos de docentes y competencias, valida duplicados, y asiste con IA para redactar, reformular y estructurar contenidos clave con criterios consistentes.</p>
-            <p>El resultado es un repositorio ordenado, auditable y listo para exportar, que facilita el trabajo coordinado de las catedras y mejora la trazabilidad ante CONEAU.</p>
+            <p>MACAU gestiona el ciclo completo de propuestas académicas: creación, edición, importación, validación y seguimiento para acreditación ante CONEAU.</p>
+            <p>Consolida planes de estudio, competencias y docentes en una única plataforma, y aplica controles automáticos para detectar faltantes y mantener calidad documental.</p>
+            <p>Además, integra asistencia de IA para revisar propuestas, generar sugerencias accionables y dejar trazabilidad del estado de cada control por asignatura.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginTop: '20px' }}>
               <div style={{ border: '1px solid #d0d0d0', borderRadius: '10px', padding: '16px', background: '#f8f9fb', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
                 <div style={{ fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
@@ -7040,6 +7074,23 @@ const App = () => {
                 </div>
                 <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#2b6a3b' }}>
                   {teachersCompletePct}% completos
+                </div>
+              </div>
+              <div style={{ border: '1px solid #d9e4ff', borderRadius: '10px', padding: '16px', background: '#f4f7ff', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
+                <div style={{ fontSize: '16px', color: '#1f3d7a', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
+                  <span style={{ fontSize: '24px' }}>🧪</span> Control de Propuestas
+                </div>
+                <div style={{ marginTop: '10px' }}>
+                  <div style={{ fontSize: '32px', fontWeight: 800, color: '#1f3d7a' }}>{controlRowsHomeWithProposal.length}</div>
+                  <div style={{ fontSize: '12px', color: '#1f3d7a', marginTop: '8px' }}>
+                    <div>✅ Completas: {controlsHomeCompleteCount}</div>
+                    <div>⚠️ Incompletas: {controlsHomeIncompleteCount}</div>
+                    <div>🟢 Validadas: {controlsHomeValidatedCount}</div>
+                    <div>💡 Con sugerencias: {controlsHomeSuggestedCount}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#1f3d7a' }}>
+                  {controlsHomeCompletePct}% completas
                 </div>
               </div>
               <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', padding: '16px', background: '#fafafa' }}>
@@ -11922,9 +11973,51 @@ const App = () => {
                   <div style={{ color: '#607d8b', fontSize: '13px' }}>Aún no hay resultados. Ejecuta el control inteligente para ver sugerencias.</div>
                 ) : (
                   <div style={{ display: 'grid', gap: '8px' }}>
-                    <div style={{ fontSize: '12px', color: '#355070', fontWeight: 600 }}>
-                      Estado: {viewProposalIntelligentSummary.intelligent_status || 'Sin ejecutar'} • Fallas: {viewProposalIntelligentSummary.failed_controls || 0}
-                    </div>
+                    {(() => {
+                      const statusText = String(viewProposalIntelligentSummary.intelligent_status || 'Sin ejecutar')
+                      const failedCount = Number(viewProposalIntelligentSummary.failed_controls || 0)
+                      const normalizedStatus = statusText.toLowerCase()
+                      const isValidated = normalizedStatus.includes('valid')
+                      const isSuggested = normalizedStatus.includes('suger')
+                      const statusStyle = isValidated
+                        ? { background: '#e8f5e9', color: '#1b5e20', border: '1px solid #a5d6a7' }
+                        : isSuggested
+                        ? { background: '#fff8e1', color: '#8a5a00', border: '1px solid #ffe082' }
+                        : { background: '#eef3f9', color: '#355070', border: '1px solid #d5dfec' }
+                      const failedStyle = failedCount > 0
+                        ? { background: '#ffebee', color: '#b71c1c', border: '1px solid #ef9a9a' }
+                        : { background: '#e8f5e9', color: '#1b5e20', border: '1px solid #a5d6a7' }
+                      return (
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '4px 10px',
+                              borderRadius: '999px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              ...statusStyle
+                            }}
+                          >
+                            Estado: {statusText}
+                          </span>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '4px 10px',
+                              borderRadius: '999px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              ...failedStyle
+                            }}
+                          >
+                            Fallas: {failedCount}
+                          </span>
+                        </div>
+                      )
+                    })()}
                     {viewProposalIntelligentSummary.results
                       .filter((result) => !result.passed)
                       .map((result) => {
