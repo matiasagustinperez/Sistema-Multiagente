@@ -184,6 +184,9 @@ const App = () => {
   })
   const [teacherEditId, setTeacherEditId] = useState(null)
   const [teacherEditForm, setTeacherEditForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+  const [teacherFocusTargetId, setTeacherFocusTargetId] = useState(null)
+  const [teacherHighlightId, setTeacherHighlightId] = useState(null)
+  const teacherAnchorRefs = useRef({})
   const [teacherViewMode, setTeacherViewMode] = useState(() => {
     if (typeof window === 'undefined') return 'table'
     const saved = window.localStorage.getItem('teacherViewMode')
@@ -552,6 +555,23 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('teacherViewMode', teacherViewMode)
   }, [teacherViewMode])
+
+  useEffect(() => {
+    if (!teacherFocusTargetId) {
+      return
+    }
+    const anchor = teacherAnchorRefs.current[String(teacherFocusTargetId)]
+    if (!anchor) {
+      return
+    }
+    anchor.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setTeacherHighlightId(teacherFocusTargetId)
+    const clearTimer = setTimeout(() => {
+      setTeacherHighlightId((prev) => (prev === teacherFocusTargetId ? null : prev))
+    }, 3000)
+    setTeacherFocusTargetId(null)
+    return () => clearTimeout(clearTimer)
+  }, [teacherFocusTargetId, teacherCatalogItems, teacherViewMode])
 
   useEffect(() => {
     setSelectedTeacherId(null)
@@ -2113,6 +2133,7 @@ const App = () => {
       setStatusMsg('Docente actualizado')
       setStatusType('success')
       cancelTeacherEdit()
+      setTeacherFocusTargetId(teacher.id)
     } catch (err) {
       const message = err.message === 'Teacher already exists'
         ? 'Ese docente ya existe en el catálogo'
@@ -8211,7 +8232,20 @@ const App = () => {
                     </thead>
                     <tbody>
                       {teacherCatalogFiltered.map((teacher, idx) => (
-                        <tr key={teacher.id ?? idx} style={{ borderBottom: '1px solid #eee', background: idx % 2 === 0 ? '#fff' : '#f9f9f9' }}>
+                        <tr
+                          key={teacher.id ?? idx}
+                          ref={(node) => {
+                            if (!teacher?.id) return
+                            const key = String(teacher.id)
+                            if (node) teacherAnchorRefs.current[key] = node
+                            else delete teacherAnchorRefs.current[key]
+                          }}
+                          style={{
+                            borderBottom: '1px solid #eee',
+                            background: teacherHighlightId === teacher.id ? '#eaf6ff' : (idx % 2 === 0 ? '#fff' : '#f9f9f9'),
+                            transition: 'background 0.4s ease'
+                          }}
+                        >
                           {teacherEditId === teacher.id ? (
                             <>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.id ?? idx + 1}</td>
@@ -8322,12 +8356,20 @@ const App = () => {
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
                     {teacherCatalogFiltered.map((teacher, idx) => (
-                      <div key={teacher.id ?? idx} style={{
-                        border: '1px solid rgba(0, 102, 204, 0.22)',
+                      <div key={teacher.id ?? idx} ref={(node) => {
+                        if (!teacher?.id) return
+                        const key = String(teacher.id)
+                        if (node) teacherAnchorRefs.current[key] = node
+                        else delete teacherAnchorRefs.current[key]
+                      }} style={{
+                        border: teacherHighlightId === teacher.id ? '1px solid #8ccfff' : '1px solid rgba(0, 102, 204, 0.22)',
                         borderRadius: '10px',
-                        background: '#fff',
+                        background: teacherHighlightId === teacher.id ? '#eef8ff' : '#fff',
                         padding: '14px',
-                        boxShadow: '0 1px 4px rgba(0, 102, 204, 0.08)'
+                        boxShadow: teacherHighlightId === teacher.id
+                          ? '0 0 0 2px rgba(140, 207, 255, 0.32), 0 6px 16px rgba(140, 207, 255, 0.22)'
+                          : '0 1px 4px rgba(0, 102, 204, 0.08)',
+                        transition: 'background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease'
                       }}>
                         {teacherEditId === teacher.id ? (
                           <>
