@@ -302,6 +302,8 @@ const App = () => {
   const [viewProposalIntelligentSummary, setViewProposalIntelligentSummary] = useState(null)
   const [viewProposalIntelligentLoading, setViewProposalIntelligentLoading] = useState(false)
   const [editingSuggestionByResultId, setEditingSuggestionByResultId] = useState({})
+  const [viewProposalOriginMenu, setViewProposalOriginMenu] = useState('')
+  const [viewProposalExpandedSuggestions, setViewProposalExpandedSuggestions] = useState({})
   const [competencyPlanMappedByCareer, setCompetencyPlanMappedByCareer] = useState({})
   const variantPaletteRegistry = useRef({
     year: { index: 0, map: {} },
@@ -5068,6 +5070,8 @@ const App = () => {
         setStatusType('error')
         return
       }
+      setViewProposalOriginMenu(activeMenu || '')
+      setViewProposalExpandedSuggestions({})
       setViewProposal(data)
       setViewProposalIntelligentSummary(null)
       setViewProposalIntelligentLoading(true)
@@ -11849,7 +11853,16 @@ const App = () => {
                   >
                     Desvincular link
                   </button>
-                  <button style={{ ...styles.button, background: '#999' }} onClick={() => setViewProposal(null)}>Cerrar</button>
+                  <button
+                    style={{ ...styles.button, background: '#999' }}
+                    onClick={() => {
+                      setViewProposal(null)
+                      setViewProposalOriginMenu('')
+                      setViewProposalExpandedSuggestions({})
+                    }}
+                  >
+                    Cerrar
+                  </button>
                 </div>
               </div>
 
@@ -11904,105 +11917,136 @@ const App = () => {
                     </div>
                     {viewProposalIntelligentSummary.results
                       .filter((result) => !result.passed)
-                      .map((result) => (
-                        <div key={`view-proposal-suggestion-${result.id}`} style={{ border: '1px solid #ffd6d6', background: '#fff8f8', borderRadius: '6px', padding: '8px 10px' }}>
-                          <div style={{ fontWeight: 700, color: '#ad1457', marginBottom: '4px' }}>
-                            {getIntelligentTopicLabel(result.control_topic)} · {result.control_name}
+                      .map((result) => {
+                        const hasSuggestionContent = [
+                          result.what_failed,
+                          result.why_failed,
+                          result.suggestion,
+                          result.proposed_text,
+                        ].some((value) => String(value || '').trim().length > 0)
+                        const autoOpenByOrigin = viewProposalOriginMenu === 'control-propuestas'
+                        const isOpen = autoOpenByOrigin || !!viewProposalExpandedSuggestions[result.id]
+
+                        return (
+                          <div key={`view-proposal-suggestion-${result.id}`} style={{ border: '1px solid #ffd6d6', background: '#fff8f8', borderRadius: '6px', padding: '8px 10px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: isOpen ? '4px' : 0 }}>
+                              <div style={{ fontWeight: 700, color: '#ad1457' }}>
+                                {getIntelligentTopicLabel(result.control_topic)} · {result.control_name}
+                              </div>
+                              {!autoOpenByOrigin && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span style={{ fontSize: '12px', color: '#8a1c3a', fontWeight: 700 }}>
+                                    {hasSuggestionContent ? 'Hay sugerencias' : 'Sin detalle generado'}
+                                  </span>
+                                  <button
+                                    style={{ ...styles.button, background: '#5c6bc0', padding: '4px 10px' }}
+                                    onClick={() => setViewProposalExpandedSuggestions((prev) => ({ ...prev, [result.id]: !prev[result.id] }))}
+                                  >
+                                    {isOpen ? 'Ocultar' : 'Ver'}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {isOpen && (
+                              <>
+                                <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Qué no cumple</div>
+                                <textarea
+                                  style={{ ...styles.textarea, minHeight: '60px', marginBottom: '6px', background: '#fff' }}
+                                  value={(editingSuggestionByResultId[result.id]?.what_failed ?? result.what_failed ?? '')}
+                                  onChange={(e) => setEditingSuggestionByResultId((prev) => ({
+                                    ...prev,
+                                    [result.id]: {
+                                      ...{
+                                        what_failed: result.what_failed ?? '',
+                                        why_failed: result.why_failed ?? '',
+                                        suggestion: result.suggestion ?? '',
+                                        proposed_text: result.proposed_text ?? '',
+                                        summary: result.summary ?? ''
+                                      },
+                                      ...prev[result.id],
+                                      why_failed: prev[result.id]?.why_failed ?? result.why_failed ?? '',
+                                      suggestion: prev[result.id]?.suggestion ?? result.suggestion ?? '',
+                                      proposed_text: prev[result.id]?.proposed_text ?? result.proposed_text ?? '',
+                                      summary: prev[result.id]?.summary ?? result.summary ?? '',
+                                      what_failed: e.target.value
+                                    }
+                                  }))}
+                                />
+                                <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Por qué</div>
+                                <textarea
+                                  style={{ ...styles.textarea, minHeight: '60px', marginBottom: '6px', background: '#fff' }}
+                                  value={(editingSuggestionByResultId[result.id]?.why_failed ?? result.why_failed ?? '')}
+                                  onChange={(e) => setEditingSuggestionByResultId((prev) => ({
+                                    ...prev,
+                                    [result.id]: {
+                                      ...{
+                                        what_failed: result.what_failed ?? '',
+                                        why_failed: result.why_failed ?? '',
+                                        suggestion: result.suggestion ?? '',
+                                        proposed_text: result.proposed_text ?? '',
+                                        summary: result.summary ?? ''
+                                      },
+                                      ...prev[result.id],
+                                      why_failed: e.target.value
+                                    }
+                                  }))}
+                                />
+                                <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Sugerencia</div>
+                                <textarea
+                                  style={{ ...styles.textarea, minHeight: '70px', marginBottom: '8px', background: '#fff' }}
+                                  value={(editingSuggestionByResultId[result.id]?.suggestion ?? result.suggestion ?? '')}
+                                  onChange={(e) => setEditingSuggestionByResultId((prev) => ({
+                                    ...prev,
+                                    [result.id]: {
+                                      ...{
+                                        what_failed: result.what_failed ?? '',
+                                        why_failed: result.why_failed ?? '',
+                                        suggestion: result.suggestion ?? '',
+                                        proposed_text: result.proposed_text ?? '',
+                                        summary: result.summary ?? ''
+                                      },
+                                      ...prev[result.id],
+                                      suggestion: e.target.value
+                                    }
+                                  }))}
+                                />
+                                {result.control_topic !== 'teaching_team' && (
+                                  <>
+                                    <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Texto propuesto por IA (opcional)</div>
+                                    <textarea
+                                      style={{ ...styles.textarea, minHeight: '90px', marginBottom: '8px', background: '#fff', borderColor: '#d6e4ff' }}
+                                      value={(editingSuggestionByResultId[result.id]?.proposed_text ?? result.proposed_text ?? '')}
+                                      onChange={(e) => setEditingSuggestionByResultId((prev) => ({
+                                        ...prev,
+                                        [result.id]: {
+                                          ...{
+                                            what_failed: result.what_failed ?? '',
+                                            why_failed: result.why_failed ?? '',
+                                            suggestion: result.suggestion ?? '',
+                                            proposed_text: result.proposed_text ?? '',
+                                            summary: result.summary ?? ''
+                                          },
+                                          ...prev[result.id],
+                                          proposed_text: e.target.value
+                                        }
+                                      }))}
+                                    />
+                                  </>
+                                )}
+                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                  <button
+                                    style={{ ...styles.button, background: '#2e7d32', padding: '6px 10px' }}
+                                    onClick={() => saveIntelligentSuggestionEdits(viewProposal.id, result.id)}
+                                  >
+                                    Guardar sugerencia
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
-                          <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Qué no cumple</div>
-                          <textarea
-                            style={{ ...styles.textarea, minHeight: '60px', marginBottom: '6px', background: '#fff' }}
-                            value={(editingSuggestionByResultId[result.id]?.what_failed ?? result.what_failed ?? '')}
-                            onChange={(e) => setEditingSuggestionByResultId((prev) => ({
-                              ...prev,
-                              [result.id]: {
-                                ...{
-                                  what_failed: result.what_failed ?? '',
-                                  why_failed: result.why_failed ?? '',
-                                  suggestion: result.suggestion ?? '',
-                                  proposed_text: result.proposed_text ?? '',
-                                  summary: result.summary ?? ''
-                                },
-                                ...prev[result.id],
-                                why_failed: prev[result.id]?.why_failed ?? result.why_failed ?? '',
-                                suggestion: prev[result.id]?.suggestion ?? result.suggestion ?? '',
-                                proposed_text: prev[result.id]?.proposed_text ?? result.proposed_text ?? '',
-                                summary: prev[result.id]?.summary ?? result.summary ?? '',
-                                what_failed: e.target.value
-                              }
-                            }))}
-                          />
-                          <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Por qué</div>
-                          <textarea
-                            style={{ ...styles.textarea, minHeight: '60px', marginBottom: '6px', background: '#fff' }}
-                            value={(editingSuggestionByResultId[result.id]?.why_failed ?? result.why_failed ?? '')}
-                            onChange={(e) => setEditingSuggestionByResultId((prev) => ({
-                              ...prev,
-                              [result.id]: {
-                                ...{
-                                  what_failed: result.what_failed ?? '',
-                                  why_failed: result.why_failed ?? '',
-                                  suggestion: result.suggestion ?? '',
-                                  proposed_text: result.proposed_text ?? '',
-                                  summary: result.summary ?? ''
-                                },
-                                ...prev[result.id],
-                                why_failed: e.target.value
-                              }
-                            }))}
-                          />
-                          <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Sugerencia</div>
-                          <textarea
-                            style={{ ...styles.textarea, minHeight: '70px', marginBottom: '8px', background: '#fff' }}
-                            value={(editingSuggestionByResultId[result.id]?.suggestion ?? result.suggestion ?? '')}
-                            onChange={(e) => setEditingSuggestionByResultId((prev) => ({
-                              ...prev,
-                              [result.id]: {
-                                ...{
-                                  what_failed: result.what_failed ?? '',
-                                  why_failed: result.why_failed ?? '',
-                                  suggestion: result.suggestion ?? '',
-                                  proposed_text: result.proposed_text ?? '',
-                                  summary: result.summary ?? ''
-                                },
-                                ...prev[result.id],
-                                suggestion: e.target.value
-                              }
-                            }))}
-                          />
-                          {result.control_topic !== 'teaching_team' && (
-                            <>
-                              <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', fontWeight: 700 }}>Texto propuesto por IA (opcional)</div>
-                              <textarea
-                                style={{ ...styles.textarea, minHeight: '90px', marginBottom: '8px', background: '#fff', borderColor: '#d6e4ff' }}
-                                value={(editingSuggestionByResultId[result.id]?.proposed_text ?? result.proposed_text ?? '')}
-                                onChange={(e) => setEditingSuggestionByResultId((prev) => ({
-                                  ...prev,
-                                  [result.id]: {
-                                    ...{
-                                      what_failed: result.what_failed ?? '',
-                                      why_failed: result.why_failed ?? '',
-                                      suggestion: result.suggestion ?? '',
-                                      proposed_text: result.proposed_text ?? '',
-                                      summary: result.summary ?? ''
-                                    },
-                                    ...prev[result.id],
-                                    proposed_text: e.target.value
-                                  }
-                                }))}
-                              />
-                            </>
-                          )}
-                          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                            <button
-                              style={{ ...styles.button, background: '#2e7d32', padding: '6px 10px' }}
-                              onClick={() => saveIntelligentSuggestionEdits(viewProposal.id, result.id)}
-                            >
-                              Guardar sugerencia
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
 
                   </div>
                 )}
@@ -12834,7 +12878,7 @@ const App = () => {
                 const controls = Array.isArray(intelligentRunModalData.controls) ? intelligentRunModalData.controls : []
                 const total = intelligentRunModalData.controlsCount || controls.length || 0
                 const isCompleted = intelligentRunModalData.status === 'completed'
-                const done = Math.min(isCompleted ? (intelligentRunModalData.completedControls || 0) : 0, total)
+                const done = Math.min(Number(intelligentRunModalData.completedControls || 0), total)
                 const pct = total > 0 ? Math.round((done / total) * 100) : 0
                 return (
                   <div style={{ marginBottom: '14px' }}>
@@ -12848,11 +12892,12 @@ const App = () => {
                     {!!controls.length && (
                       <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid #e4ebf7', borderRadius: '8px', background: '#fcfdff', padding: '8px' }}>
                         {controls.map((control, index) => {
-                          const isDone = isCompleted && index < done
-                          const isCurrent = !isCompleted
+                          const isDone = index < done
+                          const isCurrent = !isCompleted && index === done && done < total
+                          const isPending = !isDone && !isCurrent
                           return (
                             <div key={`modal-control-${control.id}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 2px', color: isDone ? '#1b5e20' : isCurrent ? '#1a5fb4' : '#607d8b', fontSize: '12px', fontWeight: isDone || isCurrent ? 700 : 500 }}>
-                              <span>{isDone ? '✅' : isCurrent ? '⏳' : '•'}</span>
+                              <span>{isDone ? '✅' : isCurrent ? '⏳' : isPending ? '•' : '•'}</span>
                               <span>{control.label}</span>
                             </div>
                           )
