@@ -227,6 +227,11 @@ const App = () => {
   const [genericCompetencySort, setGenericCompetencySort] = useState({ key: '', direction: 'asc' })
   const [specificCompetencyFilters, setSpecificCompetencyFilters] = useState({ code: '', description: '', plan: '' })
   const [specificCompetencySort, setSpecificCompetencySort] = useState({ key: '', direction: 'asc' })
+  const [controlOnlyWithErrors, setControlOnlyWithErrors] = useState(false)
+  const [controlFailureFilter, setControlFailureFilter] = useState('all')
+  const [controlSubjectFilter, setControlSubjectFilter] = useState('')
+  const [controlProposalDetailsById, setControlProposalDetailsById] = useState({})
+  const [controlDetailsLoading, setControlDetailsLoading] = useState(false)
   const [competencyPlanMappedByCareer, setCompetencyPlanMappedByCareer] = useState({})
   const variantPaletteRegistry = useRef({
     year: { index: 0, map: {} },
@@ -3317,6 +3322,17 @@ const App = () => {
       .join('\n')
   }
 
+  const getTpRaCodesFromRaIds = (raIds) => {
+    if (!Array.isArray(raIds) || raIds.length === 0) {
+      return []
+    }
+    const raMap = new Map((formData.resultadosAprendizaje || []).map((ra, idx) => [ra.id, idx + 1]))
+    return raIds
+      .map((id) => raMap.get(id))
+      .filter((idx) => Number.isInteger(idx) && idx > 0)
+      .map((idx) => `RA ${idx}`)
+  }
+
   const inferTpRaIdsFromObjective = (objectiveText) => {
     if (!isNonEmptyText(objectiveText)) {
       return []
@@ -4601,6 +4617,7 @@ const App = () => {
         id: tp.id,
         number: tp.numero || '',
         name: tp.nombre || '',
+        ra_codes: getTpRaCodesFromRaIds(tp.raIds),
         objective: getTpObjectiveFromRaIds(tp.raIds) || tp.objetivo || '',
         activities: tp.actividades || '',
         materials: tp.materiales || '',
@@ -5299,6 +5316,216 @@ const App = () => {
         return planMatches(proposalPlan, selectedPlanName, activeCareer)
       })
     : filteredByCareer
+  useEffect(() => {
+    if (activeMenu !== 'control-propuestas') {
+      setControlDetailsLoading(false)
+      return
+    }
+    const missingIds = filteredByPlan
+      .map((proposal) => proposal?.id)
+      .filter((id) => id != null && !controlProposalDetailsById[id])
+    if (!missingIds.length) {
+      setControlDetailsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setControlDetailsLoading(true)
+
+    ;(async () => {
+      const loaded = await Promise.all(missingIds.map(async (id) => {
+        try {
+          const res = await fetch(`http://localhost:8001/proposals/${id}`)
+          if (!res.ok) return null
+          return await res.json()
+        } catch {
+          return null
+        }
+      }))
+
+      if (cancelled) {
+        return
+      }
+
+      setControlProposalDetailsById((prev) => {
+        const next = { ...prev }
+        loaded.forEach((item) => {
+          if (item?.id != null) {
+            next[item.id] = item
+          }
+        })
+        return next
+      })
+      setControlDetailsLoading(false)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeMenu, filteredByPlan, controlProposalDetailsById])
+  const controlChecklistColumns = [
+    { key: 'hours', label: 'Horas' },
+    { key: 'teachers', label: 'Docentes' },
+    { key: 'minimum_content', label: 'Cont. mín.' },
+    { key: 'fundamentals', label: 'Fundamentación' },
+    { key: 'objectives', label: 'Objetivos' },
+    { key: 'units', label: 'Unidades' },
+    { key: 'practicals', label: 'TPs' },
+    { key: 'methodology', label: 'Metodología' },
+    { key: 'evaluation', label: 'Evaluación' },
+    { key: 'bibliography', label: 'Bibliografía' }
+  ]
+  const parseControlYear = (proposal) => {
+    const rawYear = proposal?.year_of_career || proposal?.academic_year || ''
+    const match = String(rawYear).match(/\d+/)
+    return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER
+  }
+  const parseControlQuarter = (proposal) => {
+    const value = normalizeText(proposal?.quarter || '')
+    if (value.includes('anual')) return { order: 0, label: 'Anual' }
+    if (value.includes('1er') || value.includes('1ro') || value.includes('primer')) return { order: 1, label: '1er Cuatrimestre' }
+    if (value.includes('2do') || value.includes('segundo')) return { order: 2, label: '2do Cuatrimestre' }
+    return { order: 99, label: proposal?.quarter || '-' }
+  }
+  const controlChecklistRowsBase = [...filteredByPlan]
+    .map((proposalSummary) => {
+      const proposal = controlProposalDetailsById[proposalSummary?.id] || proposalSummary
+      const teachingTeam = Array.isArray(proposal?.teaching_team) ? proposal.teaching_team : []
+      const hasAnyTeacher = teachingTeam.some((teacher) => teacher?.id != null || isNonEmptyText(teacher?.name))
+      const hasRequiredTeacher = teachingTeam.some((teacher) => {
+        const category = normalizeText(teacher?.category || '')
+        return category.includes('titular') || category.includes('asociado') || category.includes('adjunto')
+      })
+      const practicals = Array.isArray(proposal?.practicals) ? proposal.practicals : []
+      const hasTpRaAssociation = (tp) => {
+        if (Array.isArray(tp?.ra_codes) && tp.ra_codes.length > 0) {
+          return true
+        }
+        const objectiveText = String(tp?.objective || '').trim()
+        if (!objectiveText) {
+          return false
+        }
+        if (/\bRA\s*\d+\b/i.test(objectiveText)) {
+          return true
+        }
+        const learningOutcomes = Array.isArray(proposal?.learning_outcomes) ? proposal.learning_outcomes : []
+        const loweredObjective = objectiveText.toLowerCase()
+        return learningOutcomes.some((item) => {
+          const description = String(item?.description || item || '').trim().toLowerCase()
+          return description && loweredObjective.includes(description)
+        })
+      }
+      const practicalsWithoutRa = practicals.filter((tp) => !hasTpRaAssociation(tp))
+      const practicalsWithoutRaLabels = practicalsWithoutRa.map((tp, idx) => {
+        const number = String(tp?.number || tp?.numero || idx + 1).trim()
+        const name = String(tp?.name || tp?.nombre || '').trim()
+        return name ? `TP ${number} - ${name}` : `TP ${number}`
+      })
+      const totalHours = Number(proposal?.total_hours ?? (Number(proposal?.theoretical_hours || 0) + Number(proposal?.practical_hours || 0)))
+      const learningOutcomes = Array.isArray(proposal?.learning_outcomes) ? proposal.learning_outcomes : []
+      const validLearningOutcomes = learningOutcomes.filter((item) => isNonEmptyText(item?.description || item))
+      const units = Array.isArray(proposal?.units) ? proposal.units : []
+      const validUnits = units.filter((unit) => isNonEmptyText(unit?.name) && isNonEmptyText(unit?.content))
+
+      const checks = {
+        hours: {
+          ok: totalHours > 0,
+          reason: totalHours > 0 ? '' : 'Debe tener horas teóricas/prácticas (o total de horas) mayores a 0.'
+        },
+        teachers: {
+          ok: hasAnyTeacher && hasRequiredTeacher,
+          reason: !hasAnyTeacher
+            ? 'No tiene docentes asignados.'
+            : 'Debe incluir al menos un docente con cargo TITULAR, ASOCIADO o ADJUNTO.'
+        },
+        minimum_content: {
+          ok: isNonEmptyText(proposal?.minimum_content),
+          reason: 'Faltan contenidos mínimos.'
+        },
+        fundamentals: {
+          ok: isNonEmptyText(proposal?.fundamentals_part1) && isNonEmptyText(proposal?.fundamentals_part2),
+          reason: 'La fundamentación debe tener Importancia y Perfil Profesional.'
+        },
+        objectives: {
+          ok: validLearningOutcomes.length > 0,
+          reason: 'Faltan objetivos/resultados de aprendizaje.'
+        },
+        units: {
+          ok: validUnits.length > 0,
+          reason: 'Debe incluir al menos una unidad con nombre y contenidos.'
+        },
+        practicals: {
+          ok: practicals.length > 0 && practicalsWithoutRa.length === 0,
+          reason: practicals.length === 0
+            ? 'Debe incluir al menos un trabajo práctico.'
+            : `Hay ${practicalsWithoutRa.length} TP(s) sin RA detectable: ${practicalsWithoutRaLabels.join('; ')}`
+        },
+        methodology: {
+          ok: isNonEmptyText(proposal?.methodology),
+          reason: 'Falta la metodología de enseñanza.'
+        },
+        evaluation: {
+          ok: isNonEmptyText(proposal?.evaluation),
+          reason: 'Falta el método de evaluación.'
+        },
+        bibliography: {
+          ok: isNonEmptyText(proposal?.bibliography),
+          reason: 'Falta la bibliografía.'
+        }
+      }
+
+      const passedCount = controlChecklistColumns.reduce((sum, column) => sum + (checks[column.key].ok ? 1 : 0), 0)
+      const quarterInfo = parseControlQuarter(proposal)
+      return {
+        proposal,
+        checks,
+        rowTotal: passedCount,
+        rowTotalLabel: `${passedCount}/${controlChecklistColumns.length}`,
+        yearValue: parseControlYear(proposal),
+        quarterOrder: quarterInfo.order,
+        quarterLabel: quarterInfo.label,
+        yearLabel: proposal?.year_of_career || proposal?.academic_year || '-'
+      }
+    })
+    .sort((a, b) => {
+      if (a.yearValue !== b.yearValue) return a.yearValue - b.yearValue
+      if (a.quarterOrder !== b.quarterOrder) return a.quarterOrder - b.quarterOrder
+      return String(a.proposal?.subject || '').localeCompare(String(b.proposal?.subject || ''), 'es', { sensitivity: 'base' })
+    })
+  const normalizedControlSubjectFilter = normalizeText(controlSubjectFilter)
+  const controlChecklistRows = controlChecklistRowsBase.filter((row) => {
+    if (normalizedControlSubjectFilter) {
+      const subjectText = normalizeText(row.proposal?.subject || '')
+      const idText = normalizeText(String(row.proposal?.id || ''))
+      if (!subjectText.includes(normalizedControlSubjectFilter) && !idText.includes(normalizedControlSubjectFilter)) {
+        return false
+      }
+    }
+    if (controlOnlyWithErrors && row.rowTotal === controlChecklistColumns.length) {
+      return false
+    }
+    if (controlFailureFilter !== 'all' && row.checks[controlFailureFilter]?.ok) {
+      return false
+    }
+    return true
+  })
+  const controlRowsGrouped = controlChecklistRows.reduce((acc, row) => {
+    const groupKey = `${row.yearLabel}-${row.quarterLabel}`
+    if (!acc[groupKey]) {
+      acc[groupKey] = {
+        key: groupKey,
+        title: `Año ${row.yearLabel} - ${row.quarterLabel}`,
+        rows: []
+      }
+    }
+    acc[groupKey].rows.push(row)
+    return acc
+  }, {})
+  const controlRowGroups = Object.values(controlRowsGrouped)
+  const controlColumnTotals = controlChecklistColumns.reduce((totals, column) => {
+    totals[column.key] = controlChecklistRows.reduce((sum, row) => sum + (row.checks[column.key].ok ? 1 : 0), 0)
+    return totals
+  }, {})
   const filteredProposals = isDocenteView
     ? (hasSelectedTeacher
         ? filteredByPlan.filter((proposal) => proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName))
@@ -5590,6 +5817,13 @@ const App = () => {
         )}
         {!isDocenteView && (
           <MenuButton label="Docentes" onClick={() => handleMenuChange('docentes')} active={activeMenu === 'docentes'} />
+        )}
+        {!isDocenteView && (
+          <MenuButton
+            label="Control Propuestas"
+            onClick={() => handleMenuChange('control-propuestas')}
+            active={activeMenu === 'control-propuestas'}
+          />
         )}
         {!isDocenteView && (
           <MenuButton label="Plan de Estudios" onClick={() => handleMenuChange('plan')} active={activeMenu === 'plan'} />
@@ -8466,6 +8700,146 @@ const App = () => {
                   </div>
                 )}
 
+              </>
+            )}
+          </div>
+        )}
+
+        {/* CONTROL DE PROPUESTAS */}
+        {activeMenu === 'control-propuestas' && (
+          <div style={styles.section}>
+            <h2>Control de Propuestas</h2>
+            {!activeCareer ? (
+              <div style={{ color: '#777', fontStyle: 'italic' }}>
+                Selecciona una carrera para ver el control.
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: '12px', color: '#555' }}>
+                  Checklist automático por asignatura ({selectedPlanName ? `Plan: ${selectedPlanName}` : 'Todos los planes'}).
+                </div>
+                {controlDetailsLoading && (
+                  <div style={{ marginBottom: '10px', color: '#355070', fontSize: '12px' }}>
+                    Cargando detalles completos de propuestas para validar checklist...
+                  </div>
+                )}
+                <div style={{
+                  marginBottom: '12px',
+                  padding: '10px',
+                  border: '1px solid #d8e2f0',
+                  borderRadius: '8px',
+                  background: '#f8fbff',
+                  display: 'grid',
+                  gridTemplateColumns: '1.2fr 1fr auto',
+                  gap: '10px',
+                  alignItems: 'center'
+                }}>
+                  <input
+                    style={{ ...styles.input, marginBottom: 0 }}
+                    placeholder="Buscar por ID o asignatura"
+                    value={controlSubjectFilter}
+                    onChange={(e) => setControlSubjectFilter(e.target.value)}
+                  />
+                  <select
+                    style={{ ...styles.input, marginBottom: 0 }}
+                    value={controlFailureFilter}
+                    onChange={(e) => setControlFailureFilter(e.target.value)}
+                  >
+                    <option value="all">Todos los criterios</option>
+                    {controlChecklistColumns.map((column) => (
+                      <option key={`control-filter-${column.key}`} value={column.key}>
+                        Falla en: {column.label}
+                      </option>
+                    ))}
+                  </select>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#355070', whiteSpace: 'nowrap' }}>
+                    <input
+                      type="checkbox"
+                      checked={controlOnlyWithErrors}
+                      onChange={(e) => setControlOnlyWithErrors(e.target.checked)}
+                    />
+                    Solo con errores
+                  </label>
+                </div>
+                {controlChecklistRows.length === 0 ? (
+                  <div style={{ color: '#777', fontStyle: 'italic' }}>
+                    No hay propuestas para la combinación de filtros actual.
+                  </div>
+                ) : (
+                  <div style={{ border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', background: '#fff' }}>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1400px' }}>
+                        <thead>
+                          <tr style={{ background: '#0066cc', color: '#fff' }}>
+                            <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)' }}>ID</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)' }}>Asignatura</th>
+                            {controlChecklistColumns.map((column) => (
+                              <th key={`control-head-${column.key}`} style={{ padding: '8px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.25)', minWidth: '95px' }}>
+                                {column.label}
+                              </th>
+                            ))}
+                            <th style={{ padding: '8px', textAlign: 'center', background: '#004d99', minWidth: '90px' }}>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {controlRowGroups.map((group, groupIdx) => (
+                            <React.Fragment key={group.key}>
+                              <tr style={{ background: '#e3f2fd', borderTop: groupIdx === 0 ? 'none' : '2px solid #90caf9' }}>
+                                <td colSpan={controlChecklistColumns.length + 3} style={{ padding: '8px 12px', fontWeight: 700, color: '#1565c0' }}>
+                                  📚 {group.title}
+                                </td>
+                              </tr>
+                              {group.rows.map((row, idx) => (
+                                <tr key={`control-row-${row.proposal.id}`} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #eee' }}>
+                                  <td style={{ padding: '8px', borderRight: '1px solid #eee' }}>#{row.proposal.id}</td>
+                                  <td style={{ padding: '8px', borderRight: '1px solid #eee', fontWeight: 600 }}>{row.proposal.subject || '-'}</td>
+                                  {controlChecklistColumns.map((column) => {
+                                    const check = row.checks[column.key]
+                                    return (
+                                      <td
+                                        key={`control-cell-${row.proposal.id}-${column.key}`}
+                                        title={!check.ok ? check.reason : ''}
+                                        style={{
+                                          padding: '8px',
+                                          textAlign: 'center',
+                                          borderRight: '1px solid #eee',
+                                          background: check.ok ? 'rgba(56, 142, 60, 0.08)' : 'rgba(211, 47, 47, 0.1)',
+                                          color: check.ok ? '#1b5e20' : '#b00020',
+                                          fontWeight: 700,
+                                          cursor: check.ok ? 'default' : 'help'
+                                        }}
+                                      >
+                                        {check.ok ? '✓' : '✗'}
+                                      </td>
+                                    )
+                                  })}
+                                  <td style={{ padding: '8px', textAlign: 'center', fontWeight: 700, background: '#f3f7ff', color: '#1a3d5c' }}>
+                                    {row.rowTotalLabel}
+                                  </td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ background: '#eef4ff', borderTop: '2px solid #c6d8ff' }}>
+                            <td colSpan={2} style={{ padding: '8px', fontWeight: 700, color: '#1a3d5c' }}>
+                              Totales por criterio
+                            </td>
+                            {controlChecklistColumns.map((column) => (
+                              <td key={`control-total-${column.key}`} style={{ padding: '8px', textAlign: 'center', fontWeight: 700, color: '#1a3d5c' }}>
+                                {controlColumnTotals[column.key]}/{controlChecklistRows.length}
+                              </td>
+                            ))}
+                            <td style={{ padding: '8px', textAlign: 'center', fontWeight: 700, color: '#1a3d5c', background: '#dfe9ff' }}>
+                              {controlChecklistRows.reduce((sum, row) => sum + row.rowTotal, 0)}/{controlChecklistRows.length * controlChecklistColumns.length}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
