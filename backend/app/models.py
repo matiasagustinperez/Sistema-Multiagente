@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey, Boolean, Float
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -267,6 +267,7 @@ class IntelligentControl(Base):
     instruction = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     sort_order = Column(Integer, nullable=True)
+    associated_topics = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -281,6 +282,7 @@ class ProposalIntelligentControlResult(Base):
     what_failed = Column(Text, nullable=True)
     why_failed = Column(Text, nullable=True)
     suggestion = Column(Text, nullable=True)
+    proposed_text = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     raw_response = Column(JSON, nullable=True)
     checked_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -292,4 +294,13 @@ class IntelligentControlSettings(Base):
     id = Column(Integer, primary_key=True, index=True)
     director_last_mode = Column(String(20), nullable=False, default="delfin")
     docente_mode = Column(String(20), nullable=False, default="guepardo")
+    guepardo_model = Column(String(100), nullable=False, default="gpt-4o-mini")
+    guepardo_temperature = Column(Float, nullable=False, default=0.15)
+    guepardo_max_tokens = Column(Integer, nullable=False, default=420)
+    delfin_model = Column(String(100), nullable=False, default="gpt-4o-mini")
+    delfin_temperature = Column(Float, nullable=False, default=0.1)
+    delfin_max_tokens = Column(Integer, nullable=False, default=500)
+    ballena_model = Column(String(100), nullable=False, default="gpt-4o")
+    ballena_temperature = Column(Float, nullable=False, default=0.1)
+    ballena_max_tokens = Column(Integer, nullable=False, default=700)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

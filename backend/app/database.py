@@ -153,6 +153,18 @@ def ensure_intelligent_controls_columns():
             conn.execute(text("ALTER TABLE proposals ADD COLUMN intelligent_status VARCHAR(30)"))
             conn.commit()
 
+        controls_result = conn.execute(text("PRAGMA table_info(intelligent_controls)"))
+        controls_columns = {row[1] for row in controls_result}
+        if "associated_topics" not in controls_columns:
+            conn.execute(text("ALTER TABLE intelligent_controls ADD COLUMN associated_topics JSON"))
+            conn.commit()
+
+        results_result = conn.execute(text("PRAGMA table_info(proposal_intelligent_control_results)"))
+        results_columns = {row[1] for row in results_result}
+        if "proposed_text" not in results_columns:
+            conn.execute(text("ALTER TABLE proposal_intelligent_control_results ADD COLUMN proposed_text TEXT"))
+            conn.commit()
+
 
 def ensure_intelligent_settings_columns():
     """Ensure intelligent control settings table and columns (SQLite only)."""
@@ -170,12 +182,31 @@ def ensure_intelligent_settings_columns():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     director_last_mode VARCHAR(20) NOT NULL DEFAULT 'delfin',
                     docente_mode VARCHAR(20) NOT NULL DEFAULT 'guepardo',
+                    guepardo_model VARCHAR(100) NOT NULL DEFAULT 'gpt-4o-mini',
+                    guepardo_temperature FLOAT NOT NULL DEFAULT 0.15,
+                    guepardo_max_tokens INTEGER NOT NULL DEFAULT 420,
+                    delfin_model VARCHAR(100) NOT NULL DEFAULT 'gpt-4o-mini',
+                    delfin_temperature FLOAT NOT NULL DEFAULT 0.1,
+                    delfin_max_tokens INTEGER NOT NULL DEFAULT 500,
+                    ballena_model VARCHAR(100) NOT NULL DEFAULT 'gpt-4o',
+                    ballena_temperature FLOAT NOT NULL DEFAULT 0.1,
+                    ballena_max_tokens INTEGER NOT NULL DEFAULT 700,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """))
             conn.execute(text("""
-                INSERT INTO intelligent_control_settings (director_last_mode, docente_mode)
-                VALUES ('delfin', 'guepardo')
+                INSERT INTO intelligent_control_settings (
+                    director_last_mode, docente_mode,
+                    guepardo_model, guepardo_temperature, guepardo_max_tokens,
+                    delfin_model, delfin_temperature, delfin_max_tokens,
+                    ballena_model, ballena_temperature, ballena_max_tokens
+                )
+                VALUES (
+                    'delfin', 'guepardo',
+                    'gpt-4o-mini', 0.15, 420,
+                    'gpt-4o-mini', 0.1, 500,
+                    'gpt-4o', 0.1, 700
+                )
             """))
             conn.commit()
             return
@@ -188,12 +219,49 @@ def ensure_intelligent_settings_columns():
         if "docente_mode" not in columns:
             conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN docente_mode VARCHAR(20) NOT NULL DEFAULT 'guepardo'"))
             conn.commit()
+        if "guepardo_model" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN guepardo_model VARCHAR(100) NOT NULL DEFAULT 'gpt-4o-mini'"))
+            conn.commit()
+        if "guepardo_temperature" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN guepardo_temperature FLOAT NOT NULL DEFAULT 0.15"))
+            conn.commit()
+        if "guepardo_max_tokens" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN guepardo_max_tokens INTEGER NOT NULL DEFAULT 420"))
+            conn.commit()
+        if "delfin_model" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN delfin_model VARCHAR(100) NOT NULL DEFAULT 'gpt-4o-mini'"))
+            conn.commit()
+        if "delfin_temperature" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN delfin_temperature FLOAT NOT NULL DEFAULT 0.1"))
+            conn.commit()
+        if "delfin_max_tokens" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN delfin_max_tokens INTEGER NOT NULL DEFAULT 500"))
+            conn.commit()
+        if "ballena_model" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN ballena_model VARCHAR(100) NOT NULL DEFAULT 'gpt-4o'"))
+            conn.commit()
+        if "ballena_temperature" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN ballena_temperature FLOAT NOT NULL DEFAULT 0.1"))
+            conn.commit()
+        if "ballena_max_tokens" not in columns:
+            conn.execute(text("ALTER TABLE intelligent_control_settings ADD COLUMN ballena_max_tokens INTEGER NOT NULL DEFAULT 700"))
+            conn.commit()
 
         count = conn.execute(text("SELECT COUNT(*) FROM intelligent_control_settings")).scalar() or 0
         if count == 0:
             conn.execute(text("""
-                INSERT INTO intelligent_control_settings (director_last_mode, docente_mode)
-                VALUES ('delfin', 'guepardo')
+                INSERT INTO intelligent_control_settings (
+                    director_last_mode, docente_mode,
+                    guepardo_model, guepardo_temperature, guepardo_max_tokens,
+                    delfin_model, delfin_temperature, delfin_max_tokens,
+                    ballena_model, ballena_temperature, ballena_max_tokens
+                )
+                VALUES (
+                    'delfin', 'guepardo',
+                    'gpt-4o-mini', 0.15, 420,
+                    'gpt-4o-mini', 0.1, 500,
+                    'gpt-4o', 0.1, 700
+                )
             """))
             conn.commit()
 

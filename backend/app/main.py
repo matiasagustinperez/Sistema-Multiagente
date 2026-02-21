@@ -1411,6 +1411,95 @@ INTELLIGENT_TOPIC_ALIASES = {
     "evaluación": "evaluation",
 }
 
+INTELLIGENT_AVAILABLE_MODELS = [
+    "gpt-5.2",
+    "gpt-5.2-pro",
+    "gpt-5.1",
+    "gpt-5-mini",
+    "gpt-4o",
+    "o3",
+    "o3-pro",
+    "o4-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+]
+
+
+def default_intelligent_mode_settings() -> dict:
+    return {
+        "guepardo": {
+            "model": os.getenv("OPENAI_MODEL_FAST", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+            "temperature": 0.15,
+            "max_tokens": 420,
+        },
+        "delfin": {
+            "model": os.getenv("OPENAI_MODEL_BALANCED", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+            "temperature": 0.1,
+            "max_tokens": 500,
+        },
+        "ballena": {
+            "model": os.getenv("OPENAI_MODEL_PRECISE", os.getenv("OPENAI_MODEL", "gpt-4o")),
+            "temperature": 0.1,
+            "max_tokens": 700,
+        },
+    }
+
+
+def sanitize_mode_temperature(value, default: float) -> float:
+    try:
+        temp = float(value)
+    except Exception:
+        return float(default)
+    if temp < 0:
+        return 0.0
+    if temp > 2:
+        return 2.0
+    return temp
+
+
+def sanitize_mode_max_tokens(value, default: int) -> int:
+    try:
+        tokens = int(value)
+    except Exception:
+        return int(default)
+    if tokens < 100:
+        return 100
+    if tokens > 4000:
+        return 4000
+    return tokens
+
+
+def build_effective_intelligent_mode_settings(settings: models.IntelligentControlSettings | None) -> dict:
+    defaults = default_intelligent_mode_settings()
+    if not settings:
+        return defaults
+
+    result = {}
+    for mode in ("guepardo", "delfin", "ballena"):
+        default_mode = defaults[mode]
+        model = getattr(settings, f"{mode}_model", None) or default_mode["model"]
+        temperature = sanitize_mode_temperature(getattr(settings, f"{mode}_temperature", None), default_mode["temperature"])
+        max_tokens = sanitize_mode_max_tokens(getattr(settings, f"{mode}_max_tokens", None), default_mode["max_tokens"])
+        result[mode] = {
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+    return result
+
+
+def serialize_intelligent_settings(settings: models.IntelligentControlSettings) -> dict:
+    mode_settings = build_effective_intelligent_mode_settings(settings)
+    return {
+        "director_last_mode": normalize_intelligent_mode(settings.director_last_mode, default="delfin"),
+        "docente_mode": normalize_intelligent_mode(settings.docente_mode, default="guepardo"),
+        "guepardo": mode_settings["guepardo"],
+        "delfin": mode_settings["delfin"],
+        "ballena": mode_settings["ballena"],
+        "available_models": INTELLIGENT_AVAILABLE_MODELS,
+        "updated_at": settings.updated_at,
+    }
+
 
 def normalize_intelligent_mode(value: str | None, default: str = "delfin") -> str:
     mode = normalize_header(value or default)
@@ -1421,6 +1510,7 @@ def normalize_intelligent_mode(value: str | None, default: str = "delfin") -> st
 
 def get_or_create_intelligent_settings(db: Session) -> models.IntelligentControlSettings:
     settings = db.query(models.IntelligentControlSettings).order_by(models.IntelligentControlSettings.id.asc()).first()
+    defaults = default_intelligent_mode_settings()
     if settings:
         changed = False
         if not settings.director_last_mode:
@@ -1429,6 +1519,19 @@ def get_or_create_intelligent_settings(db: Session) -> models.IntelligentControl
         if not settings.docente_mode:
             settings.docente_mode = "guepardo"
             changed = True
+        for mode in ("guepardo", "delfin", "ballena"):
+            model_key = f"{mode}_model"
+            temp_key = f"{mode}_temperature"
+            tokens_key = f"{mode}_max_tokens"
+            if not getattr(settings, model_key, None):
+                setattr(settings, model_key, defaults[mode]["model"])
+                changed = True
+            if getattr(settings, temp_key, None) is None:
+                setattr(settings, temp_key, defaults[mode]["temperature"])
+                changed = True
+            if getattr(settings, tokens_key, None) is None:
+                setattr(settings, tokens_key, defaults[mode]["max_tokens"])
+                changed = True
         if changed:
             db.add(settings)
             db.commit()
@@ -1438,6 +1541,15 @@ def get_or_create_intelligent_settings(db: Session) -> models.IntelligentControl
     settings = models.IntelligentControlSettings(
         director_last_mode="delfin",
         docente_mode="guepardo",
+        guepardo_model=defaults["guepardo"]["model"],
+        guepardo_temperature=defaults["guepardo"]["temperature"],
+        guepardo_max_tokens=defaults["guepardo"]["max_tokens"],
+        delfin_model=defaults["delfin"]["model"],
+        delfin_temperature=defaults["delfin"]["temperature"],
+        delfin_max_tokens=defaults["delfin"]["max_tokens"],
+        ballena_model=defaults["ballena"]["model"],
+        ballena_temperature=defaults["ballena"]["temperature"],
+        ballena_max_tokens=defaults["ballena"]["max_tokens"],
     )
     db.add(settings)
     db.commit()
@@ -1452,13 +1564,74 @@ def normalize_intelligent_topic(topic: str | None) -> str:
     return INTELLIGENT_TOPIC_ALIASES.get(raw, raw.replace(" ", "_"))
 
 
+def normalize_associated_topics(topics: list[str] | None, main_topic: str | None = None) -> list[str]:
+    if not isinstance(topics, list):
+        return []
+    normalized_main = normalize_intelligent_topic(main_topic or "") if main_topic else None
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in topics:
+        topic = normalize_intelligent_topic(str(item or "").strip())
+        if not topic:
+            continue
+        if normalized_main and topic == normalized_main:
+            continue
+        if topic in seen:
+            continue
+        seen.add(topic)
+        result.append(topic)
+    return result
+
+
 def build_topic_payload(proposal: models.Proposal, topic: str) -> dict:
     normalized = normalize_intelligent_topic(topic)
     if normalized == "teaching_team":
         team = proposal.teaching_team or []
+        def normalize_teacher_category(value: str | None) -> str:
+            raw = normalize_header(value or "")
+            if not raw:
+                return "SIN INFORMAR"
+            mapping = {
+                "titular": "TITULAR",
+                "asociado": "ASOCIADO",
+                "adjunto": "ADJUNTO",
+                "jtp": "JTP",
+                "ayudante 1": "AYUDANTE 1º",
+                "ayudante 1o": "AYUDANTE 1º",
+                "ayudante 1º": "AYUDANTE 1º",
+            }
+            return mapping.get(raw, str(value or "").strip().upper() or "SIN INFORMAR")
+
+        normalized_team = []
+        categories_count: dict[str, int] = {}
+        senior_categories = {"ADJUNTO", "ASOCIADO", "TITULAR"}
+        senior_teachers = []
+        for member in team:
+            category = normalize_teacher_category((member or {}).get("category"))
+            name = str((member or {}).get("name") or "").strip()
+            normalized_member = {
+                "id": (member or {}).get("id"),
+                "name": name,
+                "category": category,
+                "email": (member or {}).get("email"),
+            }
+            normalized_team.append(normalized_member)
+            categories_count[category] = categories_count.get(category, 0) + 1
+            if category in senior_categories:
+                senior_teachers.append({"name": name, "category": category})
+
         return {
             "topic": normalized,
-            "content": team,
+            "content": {
+                "team": normalized_team,
+                "summary": {
+                    "total_teachers": len(normalized_team),
+                    "categories_count": categories_count,
+                    "senior_categories": sorted(list(senior_categories)),
+                    "has_senior_teacher": len(senior_teachers) > 0,
+                    "senior_teachers": senior_teachers,
+                },
+            },
             "has_content": bool(team),
         }
     if normalized == "fundamentals":
@@ -1497,6 +1670,19 @@ def build_topic_payload(proposal: models.Proposal, topic: str) -> dict:
     return {"topic": normalized, "content": text, "has_content": bool(text.strip())}
 
 
+def build_associated_topic_payloads(proposal: models.Proposal, associated_topics: list[str] | None) -> list[dict]:
+    topics = normalize_associated_topics(associated_topics)
+    payloads: list[dict] = []
+    for topic in topics:
+        topic_payload = build_topic_payload(proposal, topic)
+        payloads.append({
+            "topic": topic,
+            "has_content": bool(topic_payload.get("has_content")),
+            "content": topic_payload.get("content"),
+        })
+    return payloads
+
+
 def parse_llm_json_response(content: str) -> dict:
     raw = (content or "").strip()
     if raw.startswith("```"):
@@ -1517,45 +1703,113 @@ def parse_llm_json_response(content: str) -> dict:
         "what_failed": "No se pudo interpretar respuesta JSON del modelo.",
         "why_failed": raw[:1500],
         "suggestion": "Revisar manualmente este tópico y volver a ejecutar el control.",
+        "proposed_text": "",
         "summary": "Respuesta no estructurada del modelo",
     }
 
 
-def evaluate_control_with_llm(control: models.IntelligentControl, proposal: models.Proposal, topic_payload: dict, mode: str = "delfin") -> dict:
+ENGLISH_HINT_WORDS = {
+    "the", "and", "or", "with", "without", "requires", "require", "should", "must", "only",
+    "because", "reason", "suggestion", "add", "include", "team", "teacher", "teachers", "senior",
+    "presence", "meets", "does", "not", "fail", "failed", "rule", "rules", "compliance",
+}
+
+
+def text_looks_english(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    words = re.findall(r"[A-Za-z']+", value.lower())
+    if not words:
+        return False
+    english_hits = sum(1 for token in words if token in ENGLISH_HINT_WORDS)
+    return english_hits >= 2
+
+
+def force_intelligent_feedback_spanish(data: dict, client: OpenAI) -> dict:
+    if not isinstance(data, dict):
+        return data
+
+    fields = ["what_failed", "why_failed", "suggestion", "proposed_text", "summary"]
+    payload = {field: str(data.get(field) or "").strip() for field in fields}
+    if not any(text_looks_english(payload[field]) for field in fields):
+        return data
+
+    system_prompt = (
+        "Eres traductor técnico académico. Convierte al español claro y natural el contenido recibido. "
+        "Debes devolver SOLO JSON válido con las mismas claves: what_failed, why_failed, suggestion, proposed_text, summary."
+    )
+    user_prompt = (
+        "Traduce al español (sin cambiar sentido) este JSON:\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
+    )
+    try:
+        translation = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL_FAST", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0,
+            max_tokens=450,
+        )
+        translated_raw = (translation.choices[0].message.content or "").strip()
+        translated = parse_llm_json_response(translated_raw)
+        for field in fields:
+            translated_value = str(translated.get(field) or "").strip()
+            if translated_value:
+                data[field] = translated_value
+    except Exception:
+        return data
+    return data
+
+
+def evaluate_control_with_llm(
+    control: models.IntelligentControl,
+    proposal: models.Proposal,
+    topic_payload: dict,
+    mode: str = "delfin",
+    associated_context: list[dict] | None = None,
+) -> dict:
     selected_mode = normalize_header(mode or "delfin")
     if selected_mode not in {"guepardo", "delfin", "ballena"}:
         selected_mode = "delfin"
 
-    mode_settings = {
-        "guepardo": {
-            "model": os.getenv("OPENAI_MODEL_FAST", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
-            "temperature": 0.35,
-            "max_tokens": 360,
-        },
-        "delfin": {
-            "model": os.getenv("OPENAI_MODEL_BALANCED", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
-            "temperature": 0.2,
-            "max_tokens": 500,
-        },
-        "ballena": {
-            "model": os.getenv("OPENAI_MODEL_PRECISE", os.getenv("OPENAI_MODEL", "gpt-4o")),
-            "temperature": 0.1,
-            "max_tokens": 700,
-        },
-    }
-    config = mode_settings[selected_mode]
+    db = SessionLocal()
+    try:
+        persisted_settings = get_or_create_intelligent_settings(db)
+        mode_settings = build_effective_intelligent_mode_settings(persisted_settings)
+    finally:
+        db.close()
+    effective_mode = selected_mode
+    topic_normalized = normalize_intelligent_topic(control.topic)
+    instruction_text = str(control.instruction or "")
+    senior_category_rule = bool(re.search(r"adjunt|asociad|titular", normalize_header(instruction_text)))
+    if topic_normalized == "teaching_team" and senior_category_rule and selected_mode in {"guepardo", "delfin"}:
+        effective_mode = "ballena"
+
+    config = mode_settings[effective_mode]
 
     system_prompt = (
         "Eres un evaluador académico estricto de programas analíticos universitarios. "
         "Debes responder SOLO JSON válido con claves: "
-        "pass (boolean), what_failed (string), why_failed (string), suggestion (string), summary (string)."
+        "pass (boolean), what_failed (string), why_failed (string), suggestion (string), proposed_text (string), summary (string). "
+        "En proposed_text devuelve texto reformulado sugerido SOLO si aplica (p.ej. evaluación, metodología, contenidos, fundamentación). "
+        "Si no aplica, devuelve cadena vacía. "
+        "Debes escribir SIEMPRE en español (nunca en inglés). "
+        "No inventes datos ni contradigas evidencia explícita del JSON. "
+        "Si el JSON trae un resumen estructurado, úsalo como fuente principal para decidir."
     )
     user_prompt = (
         f"Control: {control.name}\n"
         f"Tópico: {control.topic}\n"
         f"Regla de control:\n{control.instruction}\n\n"
         f"Datos de la propuesta (JSON):\n{json.dumps(topic_payload.get('content'), ensure_ascii=False, indent=2)}\n\n"
-        "Evalúa si cumple estrictamente la regla."
+        + (
+            f"Contexto adicional asociado (JSON por tópico):\n{json.dumps(associated_context or [], ensure_ascii=False, indent=2)}\n\n"
+            if associated_context else ""
+        )
+        + "Evalúa si cumple estrictamente la regla."
     )
     client = get_openai_client()
     response = client.chat.completions.create(
@@ -1569,14 +1823,21 @@ def evaluate_control_with_llm(control: models.IntelligentControl, proposal: mode
     )
     content = (response.choices[0].message.content or "").strip()
     data = parse_llm_json_response(content)
+    data = force_intelligent_feedback_spanish(data, client)
     passed = bool(data.get("pass") or data.get("passed") or data.get("ok"))
     return {
         "pass": passed,
         "what_failed": str(data.get("what_failed") or "").strip(),
         "why_failed": str(data.get("why_failed") or "").strip(),
         "suggestion": str(data.get("suggestion") or "").strip(),
+        "proposed_text": str(data.get("proposed_text") or "").strip(),
         "summary": str(data.get("summary") or "").strip(),
-        "raw_response": data,
+        "raw_response": {
+            **(data if isinstance(data, dict) else {"data": data}),
+            "requested_mode": selected_mode,
+            "effective_mode": effective_mode,
+            "associated_topics": normalize_associated_topics(getattr(control, "associated_topics", None), control.topic),
+        },
     }
 
 
@@ -1642,6 +1903,7 @@ def build_intelligent_summary(db: Session, proposal: models.Proposal) -> dict:
             "what_failed": row.what_failed,
             "why_failed": row.why_failed,
             "suggestion": row.suggestion,
+            "proposed_text": row.proposed_text,
             "summary": row.summary,
             "checked_at": row.checked_at,
         })
@@ -2742,12 +3004,13 @@ def list_intelligent_controls(topic: str = "", db: Session = Depends(get_db)):
 @app.get("/intelligent-controls/settings", response_model=schemas.IntelligentControlSettingsOut)
 def get_intelligent_control_settings(db: Session = Depends(get_db)):
     settings = get_or_create_intelligent_settings(db)
-    return settings
+    return serialize_intelligent_settings(settings)
 
 
 @app.patch("/intelligent-controls/settings", response_model=schemas.IntelligentControlSettingsOut)
 def update_intelligent_control_settings(payload: schemas.IntelligentControlSettingsUpdate, db: Session = Depends(get_db)):
     settings = get_or_create_intelligent_settings(db)
+    defaults = default_intelligent_mode_settings()
     data = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
 
     if "director_last_mode" in data and data["director_last_mode"] is not None:
@@ -2755,20 +3018,46 @@ def update_intelligent_control_settings(payload: schemas.IntelligentControlSetti
     if "docente_mode" in data and data["docente_mode"] is not None:
         settings.docente_mode = normalize_intelligent_mode(data["docente_mode"], default="guepardo")
 
+    for mode in ("guepardo", "delfin", "ballena"):
+        mode_payload = data.get(mode)
+        if not isinstance(mode_payload, dict):
+            continue
+
+        if "model" in mode_payload and mode_payload.get("model") is not None:
+            model_value = str(mode_payload.get("model") or "").strip()
+            if model_value:
+                setattr(settings, f"{mode}_model", model_value)
+
+        if "temperature" in mode_payload and mode_payload.get("temperature") is not None:
+            setattr(
+                settings,
+                f"{mode}_temperature",
+                sanitize_mode_temperature(mode_payload.get("temperature"), defaults[mode]["temperature"]),
+            )
+
+        if "max_tokens" in mode_payload and mode_payload.get("max_tokens") is not None:
+            setattr(
+                settings,
+                f"{mode}_max_tokens",
+                sanitize_mode_max_tokens(mode_payload.get("max_tokens"), defaults[mode]["max_tokens"]),
+            )
+
     db.add(settings)
     db.commit()
     db.refresh(settings)
-    return settings
+    return serialize_intelligent_settings(settings)
 
 
 @app.post("/intelligent-controls", response_model=schemas.IntelligentControlOut)
 def create_intelligent_control(payload: schemas.IntelligentControlCreate, db: Session = Depends(get_db)):
+    main_topic = normalize_intelligent_topic(payload.topic)
     control = models.IntelligentControl(
-        topic=normalize_intelligent_topic(payload.topic),
+        topic=main_topic,
         name=payload.name.strip(),
         instruction=payload.instruction.strip(),
         is_active=bool(payload.is_active) if payload.is_active is not None else True,
         sort_order=payload.sort_order,
+        associated_topics=normalize_associated_topics(payload.associated_topics, main_topic),
     )
     db.add(control)
     db.commit()
@@ -2789,6 +3078,9 @@ def update_intelligent_control(control_id: int, payload: schemas.IntelligentCont
         data["name"] = str(data["name"]).strip()
     if "instruction" in data and data["instruction"] is not None:
         data["instruction"] = str(data["instruction"]).strip()
+    if "associated_topics" in data:
+        main_topic = data.get("topic", control.topic)
+        data["associated_topics"] = normalize_associated_topics(data.get("associated_topics"), main_topic)
 
     for key, value in data.items():
         setattr(control, key, value)
@@ -2850,24 +3142,33 @@ def run_intelligent_controls(
 
     for control in controls:
         topic_payload = build_topic_payload(proposal, control.topic)
+        associated_context = build_associated_topic_payloads(proposal, getattr(control, "associated_topics", None))
         if not topic_payload.get("has_content"):
             llm_result = {
                 "pass": False,
                 "what_failed": f"El tópico '{control.topic}' no tiene contenido suficiente en la propuesta.",
                 "why_failed": "No hay datos para aplicar el control inteligente.",
                 "suggestion": "Completar este tópico en la propuesta y volver a ejecutar el control.",
+                "proposed_text": "",
                 "summary": "Control no ejecutable por falta de contenido",
                 "raw_response": {"reason": "missing-topic-content"},
             }
         else:
             try:
-                llm_result = evaluate_control_with_llm(control, proposal, topic_payload, mode=selected_mode)
+                llm_result = evaluate_control_with_llm(
+                    control,
+                    proposal,
+                    topic_payload,
+                    mode=selected_mode,
+                    associated_context=associated_context,
+                )
             except Exception as exc:
                 llm_result = {
                     "pass": False,
                     "what_failed": "No se pudo evaluar el control con el modelo.",
                     "why_failed": str(exc),
                     "suggestion": "Reintentar el control o revisar la configuración del modelo.",
+                    "proposed_text": "",
                     "summary": "Error al ejecutar control inteligente",
                     "raw_response": {"error": str(exc)},
                 }
@@ -2885,12 +3186,13 @@ def run_intelligent_controls(
         existing.what_failed = llm_result.get("what_failed")
         existing.why_failed = llm_result.get("why_failed")
         existing.suggestion = llm_result.get("suggestion")
+        existing.proposed_text = llm_result.get("proposed_text")
         existing.summary = llm_result.get("summary")
         existing.raw_response = llm_result.get("raw_response")
         existing.checked_at = datetime.utcnow()
         db.add(existing)
+        db.commit()
 
-    db.commit()
     return build_intelligent_summary(db, proposal)
 
 

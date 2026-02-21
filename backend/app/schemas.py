@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -372,6 +372,7 @@ class IntelligentControlBase(BaseModel):
     instruction: str
     is_active: Optional[bool] = True
     sort_order: Optional[int] = None
+    associated_topics: Optional[List[str]] = []
 
 
 class IntelligentControlCreate(IntelligentControlBase):
@@ -384,6 +385,7 @@ class IntelligentControlUpdate(BaseModel):
     instruction: Optional[str] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
+    associated_topics: Optional[List[str]] = None
 
 
 class IntelligentControlOut(IntelligentControlBase):
@@ -400,14 +402,33 @@ class IntelligentControlRunRequest(BaseModel):
     mode: Optional[str] = "delfin"
 
 
+class IntelligentModeConfigUpdate(BaseModel):
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+
+
+class IntelligentModeConfigOut(BaseModel):
+    model: str
+    temperature: float
+    max_tokens: int
+
+
 class IntelligentControlSettingsUpdate(BaseModel):
     director_last_mode: Optional[str] = None
     docente_mode: Optional[str] = None
+    guepardo: Optional[IntelligentModeConfigUpdate] = None
+    delfin: Optional[IntelligentModeConfigUpdate] = None
+    ballena: Optional[IntelligentModeConfigUpdate] = None
 
 
 class IntelligentControlSettingsOut(BaseModel):
     director_last_mode: str
     docente_mode: str
+    guepardo: IntelligentModeConfigOut
+    delfin: IntelligentModeConfigOut
+    ballena: IntelligentModeConfigOut
+    available_models: List[str] = Field(default_factory=list)
     updated_at: Optional[datetime] = None
 
     class Config:
@@ -418,6 +439,7 @@ class ProposalIntelligentResultUpdate(BaseModel):
     what_failed: Optional[str] = None
     why_failed: Optional[str] = None
     suggestion: Optional[str] = None
+    proposed_text: Optional[str] = None
     summary: Optional[str] = None
 
 
@@ -431,6 +453,7 @@ class ProposalIntelligentControlResultOut(BaseModel):
     what_failed: Optional[str] = None
     why_failed: Optional[str] = None
     suggestion: Optional[str] = None
+    proposed_text: Optional[str] = None
     summary: Optional[str] = None
     checked_at: Optional[datetime] = None
 
