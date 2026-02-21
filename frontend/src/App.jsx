@@ -52,6 +52,7 @@ const App = () => {
   const [viewProposalGdocUpdateAvailable, setViewProposalGdocUpdateAvailable] = useState(false)
   const [viewProposalGdocUpdateMessage, setViewProposalGdocUpdateMessage] = useState('')
   const [viewProposalGdocSyncLoading, setViewProposalGdocSyncLoading] = useState(false)
+  const [viewProposalGdocValidateLoading, setViewProposalGdocValidateLoading] = useState(false)
   const [showGdocDiff, setShowGdocDiff] = useState(false)
   const [gdocDiffLoading, setGdocDiffLoading] = useState(false)
   const [gdocDiffData, setGdocDiffData] = useState(null)
@@ -201,7 +202,8 @@ const App = () => {
     quarter: '',
     plan: '',
     updated_at: '',
-    status: ''
+    status: '',
+    drive: ''
   })
   const [completeProposalSort, setCompleteProposalSort] = useState({ key: '', direction: 'asc' })
   const [pendingProposalFilters, setPendingProposalFilters] = useState({
@@ -212,7 +214,8 @@ const App = () => {
     quarter: '',
     plan: '',
     updated_at: '',
-    status: ''
+    status: '',
+    drive: ''
   })
   const [pendingProposalSort, setPendingProposalSort] = useState({ key: '', direction: 'asc' })
   const [teacherTableFilters, setTeacherTableFilters] = useState({
@@ -1065,7 +1068,7 @@ const App = () => {
 
   const fetchGdocStatuses = async (items) => {
     const target = Array.isArray(items) ? items : proposals
-    const ids = target.filter((p) => p.gdoc_url).map((p) => p.id)
+    const ids = Array.from(new Set(target.filter((p) => p?.gdoc_url).map((p) => p.id).filter((id) => id != null)))
     if (ids.length === 0) {
       return
     }
@@ -1087,6 +1090,34 @@ const App = () => {
     } finally {
       setGdocStatusLoading(false)
     }
+  }
+
+  const getGdocStatusTargets = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return []
+    const normalizedCareer = normalizeCareer(activeCareer)
+    const docenteMode = viewRole === 'docente'
+    const teacherSelected = !!selectedTeacherId
+    return items.filter((proposal) => {
+      if (!proposal?.gdoc_url) return false
+      if (normalizedCareer && normalizeCareer(proposal.career) !== normalizedCareer) return false
+      if (docenteMode) {
+        if (!teacherSelected) return false
+        return proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName)
+      }
+      return true
+    })
+  }
+
+  const handleManualGdocRefresh = async () => {
+    const targets = getGdocStatusTargets(proposals)
+    if (!targets.length) {
+      setStatusMsg('No hay propuestas vinculadas a Google Docs para sincronizar en el contexto actual.')
+      setStatusType('info')
+      return
+    }
+    await fetchGdocStatuses(targets)
+    setStatusMsg('Estado de Google Docs actualizado.')
+    setStatusType('success')
   }
 
   const getProposalGdocStatus = (proposal) => {
@@ -1129,10 +1160,23 @@ const App = () => {
   useEffect(() => {
     if (activeMenu !== 'propuestas') return
     if (!proposals || proposals.length === 0) return
-    if (gdocStatusLoading) return
-    if (lastGdocCheckAt && Date.now() - lastGdocCheckAt < 30000) return
-    fetchGdocStatuses(proposals)
-  }, [activeMenu, proposalsMode, proposals, gdocStatusLoading, lastGdocCheckAt])
+    const targets = getGdocStatusTargets(proposals)
+    if (targets.length === 0) return
+    fetchGdocStatuses(targets)
+  }, [activeMenu, proposalsMode, proposals, activeCareer, viewRole, selectedTeacherId, selectedTeacherName])
+
+  useEffect(() => {
+    if (activeMenu !== 'propuestas') return undefined
+    const refreshMs = 8000
+    const timer = setInterval(() => {
+      const targets = getGdocStatusTargets(proposals)
+      if (!targets.length) return
+      if (gdocStatusLoading) return
+      if (lastGdocCheckAt && Date.now() - lastGdocCheckAt < refreshMs) return
+      fetchGdocStatuses(targets)
+    }, refreshMs)
+    return () => clearInterval(timer)
+  }, [activeMenu, proposals, activeCareer, viewRole, selectedTeacherId, selectedTeacherName, gdocStatusLoading, lastGdocCheckAt])
 
   const mapCompetenciesToPlans = async (career) => {
     if (!career || competencyPlanMappedByCareer[career]) {
@@ -1509,6 +1553,60 @@ const App = () => {
     }
   }
 
+  const validateProposalGdocRemote = async (proposalId, { openDiffOnUpdated = false, notifyOnOk = false } = {}) => {
+    if (!proposalId) {
+      return null
+    }
+    try {
+      setViewProposalGdocValidateLoading(true)
+      const validationRes = await fetch(`http://localhost:8001/proposals/${proposalId}/validate-gdoc`, {
+        method: 'POST'
+      })
+      const validation = await validationRes.json().catch(() => ({}))
+      if (!validationRes.ok) {
+        throw new Error(validation.detail || 'No se pudo validar el estado remoto en Google Docs')
+      }
+
+      if (validation.status === 'updated') {
+        setViewProposalGdocUpdateAvailable(true)
+        setViewProposalGdocUpdateMessage(validation.message || 'Documento actualizado en Google Docs.')
+        setViewProposalLinkIssue('')
+        setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'updated' } }))
+        if (openDiffOnUpdated) {
+          openGdocDiff(proposalId)
+        }
+      } else if (validation.status === 'ok') {
+        setViewProposalGdocUpdateAvailable(false)
+        setViewProposalGdocUpdateMessage('')
+        setViewProposalLinkIssue('')
+        setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
+        if (notifyOnOk) {
+          setStatusMsg(validation.message || 'No hay cambios remotos en Google Docs.')
+          setStatusType('success')
+        }
+      } else if (validation.status) {
+        setViewProposal((prev) => (prev ? { ...prev, gdoc_url: null } : prev))
+        setViewProposalLinkIssue(validation.message || 'El enlace de Google Docs no está disponible.')
+        setViewProposalGdocUpdateAvailable(false)
+        setViewProposalGdocUpdateMessage('')
+        setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'lost' } }))
+        fetchProposals()
+      }
+
+      return validation
+    } catch (err) {
+      const message = err?.message || 'No se pudo validar el estado remoto en Google Docs'
+      setViewProposalGdocError(message)
+      if (notifyOnOk) {
+        setStatusMsg(message)
+        setStatusType('error')
+      }
+      return null
+    } finally {
+      setViewProposalGdocValidateLoading(false)
+    }
+  }
+
   const acceptLatestGdocChanges = async (proposalId) => {
     if (!proposalId) {
       return
@@ -1562,6 +1660,19 @@ const App = () => {
     }
   }
 
+  const normalizeUnitsForPatch = (items = []) => {
+    if (!Array.isArray(items)) return []
+    return items
+      .map((unit, idx) => ({
+        id: unit?.id ?? idx + 1,
+        name: String(unit?.name || unit?.nombre || '').trim(),
+        content: String(unit?.content || unit?.contenidos || unit?.contents || '').trim(),
+        bibliography_basic: String(unit?.bibliography_basic || unit?.bib_basica || unit?.bib_basic || unit?.bibliografia_basica || '').trim(),
+        bibliography_complementary: String(unit?.bibliography_complementary || unit?.bib_complementaria || unit?.bib_comp || unit?.bibliografia_complementaria || '').trim()
+      }))
+      .filter((unit) => isNonEmptyText(unit.name) || isNonEmptyText(unit.content) || isNonEmptyText(unit.bibliography_basic) || isNonEmptyText(unit.bibliography_complementary))
+  }
+
   const buildPatchFromDiff = (latest, selection) => {
     const patch = {}
     if (selection.importance) {
@@ -1578,13 +1689,10 @@ const App = () => {
       }))
     }
     if (selection.units) {
-      patch.units = (latest.units || []).map((unit, idx) => ({
-        id: unit.id ?? idx + 1,
-        name: unit.name || '',
-        content: unit.content || unit.contenidos || '',
-        bibliography_basic: unit.bibliography_basic || unit.bib_basica || '',
-        bibliography_complementary: unit.bibliography_complementary || unit.bib_complementaria || ''
-      }))
+      const normalizedUnits = normalizeUnitsForPatch(latest.units || [])
+      if (normalizedUnits.length > 0) {
+        patch.units = normalizedUnits
+      }
     }
     if (selection.practicals) {
       patch.practicals = (latest.practicals || []).map((tp, idx) => ({
@@ -1620,6 +1728,11 @@ const App = () => {
       const reviewOnlyKeys = ['minimum_content', 'teaching_team']
       const selectedReviewOnly = reviewOnlyKeys.filter((key) => !!gdocDiffSelection[key])
       const patch = buildPatchFromDiff(gdocDiffData.latest, gdocDiffSelection)
+      const unitsSelected = !!gdocDiffSelection.units
+      const unitsReady = Array.isArray(patch.units) && patch.units.length > 0
+      if (unitsSelected && !unitsReady) {
+        setViewProposalGdocUpdateMessage('Se detectaron cambios en Unidades, pero no se pudo construir un bloque válido para guardar (contenido/bibliografía vacíos o formato no compatible).')
+      }
       if (Object.keys(patch).length === 0) {
         if (selectedReviewOnly.length > 0) {
           setViewProposalGdocUpdateMessage('Los bloques sensibles seleccionados son solo de revisión y no se aplican automáticamente.')
@@ -1654,20 +1767,9 @@ const App = () => {
     }
   }
 
-  const closeGdocDiff = async () => {
+  const closeGdocDiff = () => {
     setShowGdocDiff(false)
-    if (!viewProposal?.id) {
-      return
-    }
-    try {
-      await acceptLatestGdocChanges(viewProposal.id)
-      setViewProposalGdocUpdateAvailable(false)
-      setViewProposalGdocUpdateMessage('')
-      setViewProposalLinkIssue('Cambios de Google Docs marcados como revisados.')
-      fetchProposals()
-    } catch (err) {
-      setViewProposalGdocUpdateMessage(err.message || 'No se pudo cerrar la revisión de cambios')
-    }
+    setViewProposalLinkIssue('Revisión cerrada. Los cambios de Google Docs quedan pendientes hasta sincronizar o marcar como revisados.')
   }
 
   const unlinkProposalGdoc = async (proposalId) => {
@@ -4887,23 +4989,7 @@ const App = () => {
         setActiveCareer(normalizeCareer(data.career))
       }
       if (data.gdoc_url) {
-        const validationRes = await fetch(`http://localhost:8001/proposals/${proposalId}/validate-gdoc`, {
-          method: 'POST'
-        })
-        if (validationRes.ok) {
-          const validation = await validationRes.json()
-          if (validation.status === 'updated') {
-            setViewProposalGdocUpdateAvailable(true)
-            setViewProposalGdocUpdateMessage(validation.message || 'Documento actualizado en Google Docs.')
-            openGdocDiff(proposalId)
-            setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'updated' } }))
-          } else if (validation.status && validation.status !== 'ok') {
-            setViewProposal((prev) => (prev ? { ...prev, gdoc_url: null } : prev))
-            setViewProposalLinkIssue(validation.message || 'El enlace de Google Docs no está disponible.')
-            setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'lost' } }))
-            fetchProposals()
-          }
-        }
+        await validateProposalGdocRemote(proposalId, { openDiffOnUpdated: true, notifyOnOk: false })
       }
     } catch (err) {
       setStatusMsg('Error al cargar propuesta: ' + err.message)
@@ -5316,12 +5402,44 @@ const App = () => {
         return planMatches(proposalPlan, selectedPlanName, activeCareer)
       })
     : filteredByCareer
+  const controlPlansToUse = activeCareer
+    ? (selectedPlanName
+        ? (selectedPlan ? [selectedPlan] : [])
+        : (savedPlans[activeCareer] || []).filter((plan) => plan?.years))
+    : []
+  const controlSubjectsFromPlans = controlPlansToUse.length
+    ? (() => {
+        const subjectMap = new Map()
+        controlPlansToUse.forEach((plan) => {
+          getPlanSubjects(activeCareer, plan.id).forEach((subject) => {
+            const key = [
+              normalizeText(plan.name || ''),
+              normalizeText(subject?.name || ''),
+              String(subject?.year || ''),
+              normalizeText(subject?.termName || '')
+            ].join('|')
+            if (!subjectMap.has(key)) {
+              subjectMap.set(key, {
+                ...subject,
+                planName: plan.name || ''
+              })
+            }
+          })
+        })
+        return Array.from(subjectMap.values())
+      })()
+    : []
+  const controlProposalCandidates = isDocenteView
+    ? (hasSelectedTeacher
+        ? filteredByPlan.filter((proposal) => proposalHasTeacher(proposal, selectedTeacherId, selectedTeacherName))
+        : [])
+    : filteredByPlan
   useEffect(() => {
     if (activeMenu !== 'control-propuestas') {
       setControlDetailsLoading(false)
       return
     }
-    const missingIds = filteredByPlan
+    const missingIds = controlProposalCandidates
       .map((proposal) => proposal?.id)
       .filter((id) => id != null && !controlProposalDetailsById[id])
     if (!missingIds.length) {
@@ -5362,7 +5480,7 @@ const App = () => {
     return () => {
       cancelled = true
     }
-  }, [activeMenu, filteredByPlan, controlProposalDetailsById])
+  }, [activeMenu, controlProposalCandidates, controlProposalDetailsById])
   const controlChecklistColumns = [
     { key: 'hours', label: 'Horas' },
     { key: 'teachers', label: 'Docentes' },
@@ -5387,9 +5505,28 @@ const App = () => {
     if (value.includes('2do') || value.includes('segundo')) return { order: 2, label: '2do Cuatrimestre' }
     return { order: 99, label: proposal?.quarter || '-' }
   }
-  const controlChecklistRowsBase = [...filteredByPlan]
-    .map((proposalSummary) => {
-      const proposal = controlProposalDetailsById[proposalSummary?.id] || proposalSummary
+  const controlChecklistRowsBase = (isDocenteView
+    ? [...controlProposalCandidates].map((proposalSummary) => ({ proposalSummary, subjectItem: null }))
+    : controlSubjectsFromPlans.map((subjectItem) => ({
+        subjectItem,
+        proposalSummary: findProposalForSubject(activeCareer, subjectItem.name, subjectItem.planName)
+      })))
+    .map(({ proposalSummary, subjectItem }, idx) => {
+      const fallbackProposal = subjectItem
+        ? {
+            id: null,
+            subject: subjectItem.name || '',
+            year_of_career: subjectItem.year || '',
+            quarter: subjectItem.termName || '',
+            study_plan: subjectItem.planName || '',
+            status: 'Sin propuesta'
+          }
+        : null
+      const proposal = proposalSummary
+        ? (controlProposalDetailsById[proposalSummary?.id] || proposalSummary)
+        : fallbackProposal
+      const hasProposal = !!proposalSummary
+      const noProposalReason = 'La asignatura está en el plan de estudios pero no tiene propuesta cargada.'
       const teachingTeam = Array.isArray(proposal?.teaching_team) ? proposal.teaching_team : []
       const hasAnyTeacher = teachingTeam.some((teacher) => teacher?.id != null || isNonEmptyText(teacher?.name))
       const hasRequiredTeacher = teachingTeam.some((teacher) => {
@@ -5429,54 +5566,63 @@ const App = () => {
 
       const checks = {
         hours: {
-          ok: totalHours > 0,
-          reason: totalHours > 0 ? '' : 'Debe tener horas teóricas/prácticas (o total de horas) mayores a 0.'
+          ok: hasProposal && totalHours > 0,
+          reason: !hasProposal ? noProposalReason : (totalHours > 0 ? '' : 'Debe tener horas teóricas/prácticas (o total de horas) mayores a 0.')
         },
         teachers: {
-          ok: hasAnyTeacher && hasRequiredTeacher,
-          reason: !hasAnyTeacher
+          ok: hasProposal && hasAnyTeacher && hasRequiredTeacher,
+          reason: !hasProposal
+            ? noProposalReason
+            : !hasAnyTeacher
             ? 'No tiene docentes asignados.'
             : 'Debe incluir al menos un docente con cargo TITULAR, ASOCIADO o ADJUNTO.'
         },
         minimum_content: {
-          ok: isNonEmptyText(proposal?.minimum_content),
-          reason: 'Faltan contenidos mínimos.'
+          ok: hasProposal && isNonEmptyText(proposal?.minimum_content),
+          reason: !hasProposal ? noProposalReason : 'Faltan contenidos mínimos.'
         },
         fundamentals: {
-          ok: isNonEmptyText(proposal?.fundamentals_part1) && isNonEmptyText(proposal?.fundamentals_part2),
-          reason: 'La fundamentación debe tener Importancia y Perfil Profesional.'
+          ok: hasProposal && isNonEmptyText(proposal?.fundamentals_part1) && isNonEmptyText(proposal?.fundamentals_part2),
+          reason: !hasProposal ? noProposalReason : 'La fundamentación debe tener Importancia y Perfil Profesional.'
         },
         objectives: {
-          ok: validLearningOutcomes.length > 0,
-          reason: 'Faltan objetivos/resultados de aprendizaje.'
+          ok: hasProposal && validLearningOutcomes.length > 0,
+          reason: !hasProposal ? noProposalReason : 'Faltan objetivos/resultados de aprendizaje.'
         },
         units: {
-          ok: validUnits.length > 0,
-          reason: 'Debe incluir al menos una unidad con nombre y contenidos.'
+          ok: hasProposal && validUnits.length > 0,
+          reason: !hasProposal ? noProposalReason : 'Debe incluir al menos una unidad con nombre y contenidos.'
         },
         practicals: {
-          ok: practicals.length > 0 && practicalsWithoutRa.length === 0,
-          reason: practicals.length === 0
+          ok: hasProposal && practicals.length > 0 && practicalsWithoutRa.length === 0,
+          reason: !hasProposal
+            ? noProposalReason
+            : practicals.length === 0
             ? 'Debe incluir al menos un trabajo práctico.'
             : `Hay ${practicalsWithoutRa.length} TP(s) sin RA detectable: ${practicalsWithoutRaLabels.join('; ')}`
         },
         methodology: {
-          ok: isNonEmptyText(proposal?.methodology),
-          reason: 'Falta la metodología de enseñanza.'
+          ok: hasProposal && isNonEmptyText(proposal?.methodology),
+          reason: !hasProposal ? noProposalReason : 'Falta la metodología de enseñanza.'
         },
         evaluation: {
-          ok: isNonEmptyText(proposal?.evaluation),
-          reason: 'Falta el método de evaluación.'
+          ok: hasProposal && isNonEmptyText(proposal?.evaluation),
+          reason: !hasProposal ? noProposalReason : 'Falta el método de evaluación.'
         },
         bibliography: {
-          ok: isNonEmptyText(proposal?.bibliography),
-          reason: 'Falta la bibliografía.'
+          ok: hasProposal && isNonEmptyText(proposal?.bibliography),
+          reason: !hasProposal ? noProposalReason : 'Falta la bibliografía.'
         }
       }
 
       const passedCount = controlChecklistColumns.reduce((sum, column) => sum + (checks[column.key].ok ? 1 : 0), 0)
       const quarterInfo = parseControlQuarter(proposal)
+      const rowKey = hasProposal
+        ? `control-proposal-${proposal?.id}`
+        : `control-missing-${normalizeText(subjectItem?.planName || '')}-${normalizeText(subjectItem?.name || '')}-${String(subjectItem?.year || '')}-${normalizeText(subjectItem?.termName || '')}-${idx}`
       return {
+        rowKey,
+        missingProposal: !hasProposal,
         proposal,
         checks,
         rowTotal: passedCount,
@@ -5496,7 +5642,7 @@ const App = () => {
   const controlChecklistRows = controlChecklistRowsBase.filter((row) => {
     if (normalizedControlSubjectFilter) {
       const subjectText = normalizeText(row.proposal?.subject || '')
-      const idText = normalizeText(String(row.proposal?.id || ''))
+      const idText = normalizeText(row.missingProposal ? 'sin propuesta' : String(row.proposal?.id || ''))
       if (!subjectText.includes(normalizedControlSubjectFilter) && !idText.includes(normalizedControlSubjectFilter)) {
         return false
       }
@@ -5557,10 +5703,42 @@ const App = () => {
     quarter: (p) => p.quarter ?? '',
     plan: (p) => p.study_plan || p.plan || '',
     updated_at: (p) => formatDateTime(p.updated_at || p.created_at),
-    status: (p) => p.status ?? ''
+    status: (p) => p.status ?? '',
+    drive: (p) => getProposalGdocBadge(p).label
+  }
+  const getProposalFilterOptions = (rows, key) => {
+    const getter = proposalTableGetters[key]
+    if (!getter) return []
+    return Array.from(
+      new Set(
+        rows
+          .map((row) => String(getter(row) ?? '').trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+  }
+  const proposalFilterOptions = {
+    academic_year: getProposalFilterOptions(filteredProposals, 'academic_year'),
+    year_of_career: getProposalFilterOptions(filteredProposals, 'year_of_career'),
+    quarter: getProposalFilterOptions(filteredProposals, 'quarter'),
+    plan: getProposalFilterOptions(filteredProposals, 'plan'),
+    status: getProposalFilterOptions(filteredProposals, 'status'),
+    drive: getProposalFilterOptions(filteredProposals, 'drive')
+  }
+  const pendingProposalFilterOptions = {
+    academic_year: getProposalFilterOptions(inProcessProposals, 'academic_year'),
+    year_of_career: getProposalFilterOptions(inProcessProposals, 'year_of_career'),
+    quarter: getProposalFilterOptions(inProcessProposals, 'quarter'),
+    plan: getProposalFilterOptions(inProcessProposals, 'plan'),
+    drive: getProposalFilterOptions(inProcessProposals, 'drive')
   }
   const completeProposalsFiltered = applyTableSort(
     applyTableFilters(completeProposals, completeProposalFilters, proposalTableGetters),
+    completeProposalSort,
+    proposalTableGetters
+  )
+  const allProposalsFiltered = applyTableSort(
+    applyTableFilters(filteredProposals, completeProposalFilters, proposalTableGetters),
     completeProposalSort,
     proposalTableGetters
   )
@@ -5801,13 +5979,11 @@ const App = () => {
           </div>
         </div>
         {!isDocenteView && (
-          <MenuButton label="Home" onClick={() => handleMenuChange('home')} active={activeMenu === 'home'} />
+          <MenuButton label="Inicio" onClick={() => handleMenuChange('home')} active={activeMenu === 'home'} />
         )}
-        <MenuButton
-          label="Propuestas"
-          onClick={() => handleMenuChange('propuestas')}
-          active={activeMenu === 'propuestas'}
-        />
+        {!isDocenteView && (
+          <MenuButton label="Plan de Estudios" onClick={() => handleMenuChange('plan')} active={activeMenu === 'plan'} />
+        )}
         {!isDocenteView && (
           <MenuButton
             label="Competencias"
@@ -5815,18 +5991,18 @@ const App = () => {
             active={activeMenu === 'competencias'}
           />
         )}
+        <MenuButton
+          label="Propuestas"
+          onClick={() => handleMenuChange('propuestas')}
+          active={activeMenu === 'propuestas'}
+        />
+        <MenuButton
+          label="Control de Propuestas"
+          onClick={() => handleMenuChange('control-propuestas')}
+          active={activeMenu === 'control-propuestas'}
+        />
         {!isDocenteView && (
           <MenuButton label="Docentes" onClick={() => handleMenuChange('docentes')} active={activeMenu === 'docentes'} />
-        )}
-        {!isDocenteView && (
-          <MenuButton
-            label="Control Propuestas"
-            onClick={() => handleMenuChange('control-propuestas')}
-            active={activeMenu === 'control-propuestas'}
-          />
-        )}
-        {!isDocenteView && (
-          <MenuButton label="Plan de Estudios" onClick={() => handleMenuChange('plan')} active={activeMenu === 'plan'} />
         )}
         <MenuButton label="Resoluciones" onClick={() => handleMenuChange('resoluciones')} active={activeMenu === 'resoluciones'} />
 
@@ -5988,9 +6164,8 @@ const App = () => {
             )}
             
             {/* CARDS SECTION */}
-            <div style={{ display: 'grid', gridTemplateColumns: isDocenteView ? '1fr' : 'repeat(4, 1fr)', gap: '20px', marginBottom: '30px', marginTop: '20px' }}>
-              {/* Card 1: Crear Propuesta */}
-              {!isDocenteView && (
+            {!isDocenteView && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '30px', marginTop: '20px' }}>
                 <div style={{ 
                   border: '2px solid #0066cc', 
                   borderRadius: '8px', 
@@ -6011,28 +6186,8 @@ const App = () => {
                   <h3 style={{ color: '#0066cc', margin: '0 0 10px 0' }}>Crear Propuesta</h3>
                   <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Crear una propuesta desde cero, con asistencia de IA 🤖</p>
                 </div>
-              )}
 
-              {/* Card 2: En Proceso */}
-              <div style={{ 
-                border: '2px solid #ff9900', 
-                borderRadius: '8px', 
-                padding: '20px', 
-                textAlign: 'center', 
-                cursor: 'pointer', 
-                transition: 'all 0.3s ease',
-                backgroundColor: '#fffbf0'
-              }}
-              onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(255, 153, 0, 0.2)'; e.target.style.backgroundColor = '#fffaf0'; }}
-              onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#fffbf0'; }}
-              onClick={() => setProposalsMode('pending')}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>⏳</div>
-                <h3 style={{ color: '#ff9900', margin: '0 0 10px 0' }}>Propuestas en Proceso</h3>
-                <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Ver y completar propuestas en edición</p>
-              </div>
-
-              {/* Card 3: Importar */}
-              {!isDocenteView && (
+                {/* Card 2: Importar */}
                 <div style={{ 
                   border: '2px solid #00a854', 
                   borderRadius: '8px', 
@@ -6049,9 +6204,7 @@ const App = () => {
                   <h3 style={{ color: '#00a854', margin: '0 0 10px 0' }}>Importar Propuesta</h3>
                   <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Importar desde PDF o DOC</p>
                 </div>
-              )}
 
-              {!isDocenteView && (
                 <div style={{ 
                   border: '2px solid #6b7280', 
                   borderRadius: '8px', 
@@ -6059,22 +6212,32 @@ const App = () => {
                   textAlign: 'center', 
                   cursor: 'pointer', 
                   transition: 'all 0.3s ease',
-                  backgroundColor: '#f3f4f6'
+                  backgroundColor: 'rgba(243, 244, 246, 0.45)'
                 }}
-                onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(107, 114, 128, 0.2)'; e.target.style.backgroundColor = '#eef2f7'; }}
-                onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = '#f3f4f6'; }}
+                onMouseEnter={(e) => { e.target.style.boxShadow = '0 4px 12px rgba(107, 114, 128, 0.2)'; e.target.style.backgroundColor = 'rgba(238, 242, 247, 0.55)'; }}
+                onMouseLeave={(e) => { e.target.style.boxShadow = 'none'; e.target.style.backgroundColor = 'rgba(243, 244, 246, 0.45)'; }}
                 onClick={() => setActiveMenu('configuracion')}>
                   <div style={{ fontSize: '32px', marginBottom: '10px' }}>⚙️</div>
                   <h3 style={{ color: '#4b5563', margin: '0 0 10px 0' }}>Configuración Drive</h3>
                   <p style={{ color: '#555', margin: '0', fontSize: '14px' }}>Definir carpetas por carrera</p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* PROPOSALS TABLE */}
             <div style={{ ...styles.section, marginTop: '30px', borderTop: '2px solid #ddd', paddingTop: '20px' }}>
-              <h3>Propuestas Cargadas ({completeProposals.length})</h3>
-              {completeProposals.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <h3 style={{ margin: 0 }}>Propuestas Cargadas ({filteredProposals.length})</h3>
+                <button
+                  style={{ ...styles.button, background: '#1a73e8', marginRight: 0, padding: '8px 12px', fontSize: '12px' }}
+                  onClick={handleManualGdocRefresh}
+                  disabled={gdocStatusLoading}
+                  title="Forzar chequeo inmediato del estado de Google Docs"
+                >
+                  {gdocStatusLoading ? 'Sincronizando...' : '🔄 Sincronizar ahora'}
+                </button>
+              </div>
+              {filteredProposals.length > 0 ? (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
@@ -6121,7 +6284,18 @@ const App = () => {
                         >
                           Ultima edición{getSortIndicator(completeProposalSort, 'updated_at')}
                         </th>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc' }}>Drive</th>
+                        <th
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'status')}
+                        >
+                          Estado{getSortIndicator(completeProposalSort, 'status')}
+                        </th>
+                        <th
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
+                          onClick={() => toggleSort(setCompleteProposalSort, 'drive')}
+                        >
+                          Drive{getSortIndicator(completeProposalSort, 'drive')}
+                        </th>
                         <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>Acciones</th>
                       </tr>
                       <tr style={{ backgroundColor: '#f4f8ff' }}>
@@ -6142,36 +6316,52 @@ const App = () => {
                           />
                         </th>
                         <th style={{ padding: '6px' }}>
-                          <input
+                          <select
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
                             value={completeProposalFilters.academic_year}
                             onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, academic_year: e.target.value }))}
-                            placeholder="Buscar"
-                          />
+                          >
+                            <option value="">Todos</option>
+                            {proposalFilterOptions.academic_year.map((value) => (
+                              <option key={value} value={value}>{value}</option>
+                            ))}
+                          </select>
                         </th>
                         <th style={{ padding: '6px' }}>
-                          <input
+                          <select
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
                             value={completeProposalFilters.year_of_career}
                             onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, year_of_career: e.target.value }))}
-                            placeholder="Buscar"
-                          />
+                          >
+                            <option value="">Todos</option>
+                            {proposalFilterOptions.year_of_career.map((value) => (
+                              <option key={value} value={value}>{value}</option>
+                            ))}
+                          </select>
                         </th>
                         <th style={{ padding: '6px' }}>
-                          <input
+                          <select
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
                             value={completeProposalFilters.quarter}
                             onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, quarter: e.target.value }))}
-                            placeholder="Buscar"
-                          />
+                          >
+                            <option value="">Todos</option>
+                            {proposalFilterOptions.quarter.map((value) => (
+                              <option key={value} value={value}>{value}</option>
+                            ))}
+                          </select>
                         </th>
                         <th style={{ padding: '6px' }}>
-                          <input
+                          <select
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
                             value={completeProposalFilters.plan}
                             onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, plan: e.target.value }))}
-                            placeholder="Buscar"
-                          />
+                          >
+                            <option value="">Todos</option>
+                            {proposalFilterOptions.plan.map((value) => (
+                              <option key={value} value={value}>{value}</option>
+                            ))}
+                          </select>
                         </th>
                         <th style={{ padding: '6px' }}>
                           <input
@@ -6181,13 +6371,44 @@ const App = () => {
                             placeholder="Buscar"
                           />
                         </th>
-                        <th style={{ padding: '6px' }} />
+                        <th style={{ padding: '6px' }}>
+                          <select
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.status}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, status: e.target.value }))}
+                          >
+                            <option value="">Todos</option>
+                            {proposalFilterOptions.status.map((value) => (
+                              <option key={value} value={value}>{value}</option>
+                            ))}
+                          </select>
+                        </th>
+                        <th style={{ padding: '6px' }}>
+                          <select
+                            style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
+                            value={completeProposalFilters.drive}
+                            onChange={(e) => setCompleteProposalFilters(prev => ({ ...prev, drive: e.target.value }))}
+                          >
+                            <option value="">Todos</option>
+                            {proposalFilterOptions.drive.map((value) => (
+                              <option key={value} value={value}>{value}</option>
+                            ))}
+                          </select>
+                        </th>
                         <th style={{ padding: '6px' }} />
                       </tr>
                     </thead>
                     <tbody>
-                      {completeProposalsFiltered.map((prop, idx) => (
-                        <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
+                      {allProposalsFiltered.map((prop, idx) => (
+                        <tr
+                          key={prop.id}
+                          style={{
+                            backgroundColor: prop.status === 'EnProceso'
+                              ? (idx % 2 === 0 ? '#fff8ef' : '#fff5e6')
+                              : (idx % 2 === 0 ? '#f9f9f9' : '#fff'),
+                            borderBottom: '1px solid #eee'
+                          }}
+                        >
                           <td style={{ width: '70px', padding: '10px' }}>#{prop.id}</td>
                           <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
                           <td style={{ padding: '10px' }}>{renderCapsule(prop.academic_year || '-', 'year')}</td>
@@ -6195,26 +6416,27 @@ const App = () => {
                           <td style={{ padding: '10px' }}>{renderCapsule(prop.quarter || '-', 'quarter')}</td>
                           <td style={{ padding: '10px' }}>{renderCapsule(prop.study_plan || prop.plan || '-', 'plan')}</td>
                           <td style={{ padding: '10px' }}>{formatDateTime(prop.updated_at || prop.created_at)}</td>
+                          <td style={{ padding: '10px' }}>{renderStatusCapsule(prop.status || '-')}</td>
                           <td style={{ padding: '10px' }}>
                             {renderDriveCapsule(prop)}
                           </td>
                           <td style={{ padding: '10px', textAlign: 'center' }}>
                             <button
-                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                               title="Ver propuesta"
                               onClick={() => openProposalView(prop.id)}
                             >
                               👁️
                             </button>
                             <button
-                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                               title="Editar propuesta"
                               onClick={() => loadProposalForEdit(prop.id)}
                             >
                               ✏️
                             </button>
                             <button
-                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                               title="Descargar propuesta"
                               onClick={() => downloadProposalDocx(prop.id)}
                             >
@@ -6222,7 +6444,7 @@ const App = () => {
                             </button>
                             {!isDocenteView && (
                               <button
-                                style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                                 title="Eliminar propuesta"
                                 onClick={() => deleteProposal(prop.id)}
                               >
@@ -7194,8 +7416,8 @@ const App = () => {
         {activeMenu === 'propuestas' && proposalsMode === 'list' && (
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => setProposalsMode(null)}>← Volver</button>
-            <h2>Propuestas Guardadas</h2>
-            {completeProposals.length === 0 ? (
+            <h2>Propuestas</h2>
+            {filteredProposals.length === 0 ? (
               <p>No hay propuestas guardadas</p>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -7212,15 +7434,23 @@ const App = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {completeProposals.map(p => (
-                    <tr key={p.id} style={{ borderBottom: '1px solid #ddd' }}>
+                  {allProposalsFiltered.map((p, idx) => (
+                    <tr
+                      key={p.id}
+                      style={{
+                        borderBottom: '1px solid #ddd',
+                        backgroundColor: p.status === 'EnProceso'
+                          ? (idx % 2 === 0 ? '#fff8ef' : '#fff5e6')
+                          : (idx % 2 === 0 ? '#f9f9f9' : '#fff')
+                      }}
+                    >
                       <td style={{ padding: '10px' }}>{p.id}</td>
                       <td style={{ padding: '10px' }}>{p.title || 'Sin título'}</td>
                       <td style={{ padding: '10px' }}>{p.career || '-'}</td>
                       <td style={{ padding: '10px' }}>{p.study_plan || p.plan || '-'}</td>
                       <td style={{ padding: '10px' }}>{new Date(p.created_at).toLocaleDateString()}</td>
                       <td style={{ padding: '10px' }}>{formatDateTime(p.updated_at || p.created_at)}</td>
-                      <td style={{ padding: '10px' }}>{p.status || '-'}</td>
+                      <td style={{ padding: '10px' }}>{renderStatusCapsule(p.status || '-')}</td>
                       <td style={{ padding: '10px', textAlign: 'center' }}>
                         <button
                           style={{ ...styles.button, padding: '6px 10px', fontSize: '12px', marginRight: 0 }}
@@ -7288,7 +7518,12 @@ const App = () => {
                       >
                         Ultima edición{getSortIndicator(pendingProposalSort, 'updated_at')}
                       </th>
-                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900' }}>Drive</th>
+                      <th
+                        style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
+                        onClick={() => toggleSort(setPendingProposalSort, 'drive')}
+                      >
+                        Drive{getSortIndicator(pendingProposalSort, 'drive')}
+                      </th>
                       <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>Acciones</th>
                     </tr>
                     <tr style={{ backgroundColor: '#fff6e6' }}>
@@ -7309,36 +7544,52 @@ const App = () => {
                         />
                       </th>
                       <th style={{ padding: '6px' }}>
-                        <input
+                        <select
                           style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
                           value={pendingProposalFilters.academic_year}
                           onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, academic_year: e.target.value }))}
-                          placeholder="Buscar"
-                        />
+                        >
+                          <option value="">Todos</option>
+                          {pendingProposalFilterOptions.academic_year.map((value) => (
+                            <option key={value} value={value}>{value}</option>
+                          ))}
+                        </select>
                       </th>
                       <th style={{ padding: '6px' }}>
-                        <input
+                        <select
                           style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
                           value={pendingProposalFilters.year_of_career}
                           onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, year_of_career: e.target.value }))}
-                          placeholder="Buscar"
-                        />
+                        >
+                          <option value="">Todos</option>
+                          {pendingProposalFilterOptions.year_of_career.map((value) => (
+                            <option key={value} value={value}>{value}</option>
+                          ))}
+                        </select>
                       </th>
                       <th style={{ padding: '6px' }}>
-                        <input
+                        <select
                           style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
                           value={pendingProposalFilters.quarter}
                           onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, quarter: e.target.value }))}
-                          placeholder="Buscar"
-                        />
+                        >
+                          <option value="">Todos</option>
+                          {pendingProposalFilterOptions.quarter.map((value) => (
+                            <option key={value} value={value}>{value}</option>
+                          ))}
+                        </select>
                       </th>
                       <th style={{ padding: '6px' }}>
-                        <input
+                        <select
                           style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
                           value={pendingProposalFilters.plan}
                           onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, plan: e.target.value }))}
-                          placeholder="Buscar"
-                        />
+                        >
+                          <option value="">Todos</option>
+                          {pendingProposalFilterOptions.plan.map((value) => (
+                            <option key={value} value={value}>{value}</option>
+                          ))}
+                        </select>
                       </th>
                       <th style={{ padding: '6px' }}>
                         <input
@@ -7348,7 +7599,18 @@ const App = () => {
                           placeholder="Buscar"
                         />
                       </th>
-                      <th style={{ padding: '6px' }} />
+                      <th style={{ padding: '6px' }}>
+                        <select
+                          style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
+                          value={pendingProposalFilters.drive}
+                          onChange={(e) => setPendingProposalFilters(prev => ({ ...prev, drive: e.target.value }))}
+                        >
+                          <option value="">Todos</option>
+                          {pendingProposalFilterOptions.drive.map((value) => (
+                            <option key={value} value={value}>{value}</option>
+                          ))}
+                        </select>
+                      </th>
                       <th style={{ padding: '6px' }} />
                     </tr>
                   </thead>
@@ -7367,21 +7629,21 @@ const App = () => {
                         </td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <button
-                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                             title="Ver propuesta"
                             onClick={() => openProposalView(prop.id)}
                           >
                             👁︎
                           </button>
                           <button
-                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                             title="Editar propuesta"
                             onClick={() => loadProposalForEdit(prop.id)}
                           >
                             ✏︎
                           </button>
                           <button
-                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                             title="Descargar propuesta"
                             onClick={() => downloadProposalDocx(prop.id)}
                           >
@@ -7389,7 +7651,7 @@ const App = () => {
                           </button>
                           {!isDocenteView && (
                             <button
-                              style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.7)', color: '#fff' }}
+                              style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                               title="Eliminar propuesta"
                               onClick={() => deleteProposal(prop.id)}
                             >
@@ -8713,6 +8975,10 @@ const App = () => {
               <div style={{ color: '#777', fontStyle: 'italic' }}>
                 Selecciona una carrera para ver el control.
               </div>
+            ) : (isDocenteView && !hasSelectedTeacher) ? (
+              <div style={{ marginTop: '10px', background: '#fff6e6', border: '1px solid #ffcc80', padding: '10px 12px', borderRadius: '6px', color: '#7a4b00' }}>
+                Selecciona un docente para ver el control solo de sus asignaturas.
+              </div>
             ) : (
               <>
                 <div style={{ marginBottom: '12px', color: '#555' }}>
@@ -8763,22 +9029,22 @@ const App = () => {
                 </div>
                 {controlChecklistRows.length === 0 ? (
                   <div style={{ color: '#777', fontStyle: 'italic' }}>
-                    No hay propuestas para la combinación de filtros actual.
+                    No hay asignaturas para la combinación de filtros actual.
                   </div>
                 ) : (
                   <div style={{ border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', background: '#fff' }}>
-                    <div style={{ overflowX: 'auto' }}>
+                    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '70vh' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1400px' }}>
                         <thead>
                           <tr style={{ background: '#0066cc', color: '#fff' }}>
-                            <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)' }}>ID</th>
-                            <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)' }}>Asignatura</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>ID</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>Asignatura</th>
                             {controlChecklistColumns.map((column) => (
-                              <th key={`control-head-${column.key}`} style={{ padding: '8px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.25)', minWidth: '95px' }}>
+                              <th key={`control-head-${column.key}`} style={{ padding: '8px', textAlign: 'center', borderRight: '1px solid rgba(255,255,255,0.25)', minWidth: '95px', position: 'sticky', top: 0, zIndex: 3, background: '#0066cc' }}>
                                 {column.label}
                               </th>
                             ))}
-                            <th style={{ padding: '8px', textAlign: 'center', background: '#004d99', minWidth: '90px' }}>Total</th>
+                            <th style={{ padding: '8px', textAlign: 'center', background: '#004d99', minWidth: '90px', position: 'sticky', top: 0, zIndex: 4 }}>Total</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -8790,14 +9056,16 @@ const App = () => {
                                 </td>
                               </tr>
                               {group.rows.map((row, idx) => (
-                                <tr key={`control-row-${row.proposal.id}`} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #eee' }}>
-                                  <td style={{ padding: '8px', borderRight: '1px solid #eee' }}>#{row.proposal.id}</td>
+                                <tr key={row.rowKey} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #eee' }}>
+                                  <td style={{ padding: '8px', borderRight: '1px solid #eee' }}>
+                                    {row.missingProposal ? 'Sin propuesta' : `#${row.proposal.id}`}
+                                  </td>
                                   <td style={{ padding: '8px', borderRight: '1px solid #eee', fontWeight: 600 }}>{row.proposal.subject || '-'}</td>
                                   {controlChecklistColumns.map((column) => {
                                     const check = row.checks[column.key]
                                     return (
                                       <td
-                                        key={`control-cell-${row.proposal.id}-${column.key}`}
+                                        key={`control-cell-${row.rowKey}-${column.key}`}
                                         title={!check.ok ? check.reason : ''}
                                         style={{
                                           padding: '8px',
@@ -9792,6 +10060,14 @@ const App = () => {
                     title={!viewProposal.gdoc_url ? 'Sin enlace de Google Docs' : 'Abrir en Google Docs'}
                   >
                     Abrir en Google Docs
+                  </button>
+                  <button
+                    style={{ ...styles.button, background: viewProposal.gdoc_url ? '#00695c' : '#bbb' }}
+                    onClick={() => validateProposalGdocRemote(viewProposal.id, { openDiffOnUpdated: true, notifyOnOk: true })}
+                    disabled={!viewProposal.gdoc_url || viewProposalGdocValidateLoading}
+                    title={!viewProposal.gdoc_url ? 'Sin enlace de Google Docs' : 'Validar si hay cambios remotos en Google Docs'}
+                  >
+                    {viewProposalGdocValidateLoading ? 'Validando remoto...' : 'Validar cambios remotos (GDoc)'}
                   </button>
                   <button
                     style={{ ...styles.button, background: viewProposal.gdoc_url ? '#ff9800' : '#bbb' }}
