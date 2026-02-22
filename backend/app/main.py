@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from . import models, schemas
 from .database import SessionLocal, init_db
 from agents import extract as extract_agent
@@ -18,7 +18,8 @@ import re
 import hashlib
 import json
 import ast
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from io import BytesIO
 import requests
 
@@ -180,6 +181,24 @@ def extract_drive_folder_id(url_or_id: str | None) -> str | None:
     folder_match = re.search(r"/folders/([\w-]+)", raw)
     if folder_match:
         return folder_match.group(1)
+    query_match = re.search(r"[?&]id=([\w-]+)", raw)
+    if query_match:
+        return query_match.group(1)
+    if re.fullmatch(r"[\w-]+", raw):
+        return raw
+    return None
+
+
+def extract_drive_file_id(url_or_id: str | None) -> str | None:
+    raw = str(url_or_id or "").strip()
+    if not raw:
+        return None
+    file_match = re.search(r"/file/d/([\w-]+)", raw)
+    if file_match:
+        return file_match.group(1)
+    open_match = re.search(r"/open\?id=([\w-]+)", raw)
+    if open_match:
+        return open_match.group(1)
     query_match = re.search(r"[?&]id=([\w-]+)", raw)
     if query_match:
         return query_match.group(1)
@@ -2586,6 +2605,1202 @@ def upsert_drive_settings(payload: schemas.DriveSettingsCreate, db: Session = De
     db.commit()
     db.refresh(settings)
     return settings
+
+
+def serialize_accreditation_evidence(item: models.AccreditationEvidenceRegistry) -> dict:
+    return {
+        "id": item.id,
+        "career": item.career,
+        "title": item.title,
+        "evidence_type": item.evidence_type,
+        "source_kind": item.source_kind,
+        "source_reference": item.source_reference,
+        "source_file_id": item.source_file_id,
+        "source_filename": item.source_filename,
+        "normalized_filename": item.normalized_filename,
+        "destination_folder_url": item.destination_folder_url,
+        "destination_file_url": item.destination_file_url,
+        "destination_file_id": item.destination_file_id,
+        "checksum_sha256": item.checksum_sha256,
+        "version_number": item.version_number,
+        "status": item.status,
+        "ocr_applied": bool(item.ocr_applied),
+        "access_error": item.access_error,
+        "metadata": item.metadata_json,
+        "created_by": item.created_by,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+
+def normalize_evidence_source_kind(value: str | None) -> str:
+    normalized = normalize_header(value or "")
+    if normalized in {"local", "drive-url", "drive_url", "drive folder", "drive-folder", "drive_folder"}:
+        if "folder" in normalized:
+            return "drive-folder"
+        if "url" in normalized:
+            return "drive-url"
+        return "local"
+    return "local"
+
+
+def infer_evidence_source_kind(source_reference: str, source_kind: str | None = None) -> str:
+    explicit = normalize_evidence_source_kind(source_kind)
+    if source_kind:
+        return explicit
+    reference = str(source_reference or "").strip().lower()
+    if "/folders/" in reference:
+        return "drive-folder"
+    if "drive.google.com" in reference:
+        return "drive-url"
+    return "local"
+
+
+def normalize_simple_list(values, fallback: list[str]) -> list[str]:
+    if not isinstance(values, list):
+        return fallback
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        text = re.sub(r"\s+", " ", str(item or "").strip())
+        if not text:
+            continue
+        key = normalize_header(text)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+    return cleaned
+
+
+def normalize_accreditation_actors(values) -> list[dict]:
+    if not isinstance(values, list):
+        return []
+    result: list[dict] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        name = re.sub(r"\s+", " ", str(item.get("name") or "").strip())
+        role = re.sub(r"\s+", " ", str(item.get("role") or "").strip())
+        actor_type = re.sub(r"\s+", " ", str(item.get("type") or "manual").strip().lower())
+        teacher_id = item.get("teacher_id")
+        if not name:
+            continue
+        if actor_type not in {"teacher", "manual"}:
+            actor_type = "manual"
+        key = f"{normalize_header(name)}::{normalize_header(role)}::{actor_type}::{teacher_id or ''}"
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({
+            "name": name,
+            "role": role or None,
+            "type": actor_type,
+            "teacher_id": teacher_id,
+        })
+    return result
+
+
+def normalize_evidence_filename(source_filename: str | None, source_reference: str | None) -> str | None:
+    if source_filename and str(source_filename).strip():
+        candidate = str(source_filename).strip()
+    elif source_reference and str(source_reference).strip():
+        raw_reference = str(source_reference).strip().rstrip("/")
+        parts = [part for part in raw_reference.split("/") if part]
+        candidate = parts[-1] if parts else raw_reference
+    else:
+        candidate = ""
+
+    if not candidate:
+        return None
+    cleaned = re.sub(r"\s+", " ", candidate).strip()
+    cleaned = re.sub(r"[<>:\"/\\|?*]", "", cleaned)
+    return cleaned or None
+
+
+def list_drive_folder_files(drive_service, folder_id: str, recursive: bool = True) -> list[dict]:
+    collected: list[dict] = []
+
+    def traverse(current_folder_id: str):
+        page_token = None
+        while True:
+            response = drive_service.files().list(
+                q=f"'{current_folder_id}' in parents and trashed = false",
+                fields="nextPageToken, files(id, name, mimeType, webViewLink)",
+                pageToken=page_token,
+                pageSize=200,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            ).execute()
+            files = response.get("files") or []
+            for file_item in files:
+                mime_type = str(file_item.get("mimeType") or "")
+                is_folder = mime_type == "application/vnd.google-apps.folder"
+                if is_folder and recursive:
+                    traverse(file_item.get("id"))
+                elif not is_folder:
+                    collected.append(file_item)
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+
+    traverse(folder_id)
+    return collected
+
+
+@app.get("/accreditation/evidences", response_model=list[schemas.AccreditationEvidenceOut])
+def list_accreditation_evidences(career: str | None = None, db: Session = Depends(get_db)):
+    query = db.query(models.AccreditationEvidenceRegistry)
+    if career:
+        query = query.filter(models.AccreditationEvidenceRegistry.career == career)
+    rows = query.order_by(models.AccreditationEvidenceRegistry.created_at.desc()).all()
+    return [serialize_accreditation_evidence(row) for row in rows]
+
+
+@app.get("/accreditation/settings", response_model=schemas.AccreditationSettingsOut | None)
+def get_accreditation_settings(career: str, study_plan: str | None = None, db: Session = Depends(get_db)):
+    normalized_career = (career or "").strip()
+    normalized_study_plan = (study_plan or "").strip() or None
+    if not normalized_career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not normalized_study_plan:
+        raise HTTPException(status_code=400, detail="Study plan is required")
+    settings = db.query(models.AccreditationSettings).filter(
+        models.AccreditationSettings.career == normalized_career,
+        models.AccreditationSettings.study_plan == normalized_study_plan,
+    ).first()
+    if not settings:
+        return None
+    settings.evidence_types = normalize_simple_list(settings.evidence_types, ["General"])
+    settings.actor_roles = normalize_simple_list(settings.actor_roles, [])
+    settings.actors = normalize_accreditation_actors(settings.actors)
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+@app.put("/accreditation/settings", response_model=schemas.AccreditationSettingsOut)
+def upsert_accreditation_settings(payload: schemas.AccreditationSettingsCreate, db: Session = Depends(get_db)):
+    normalized_career = (payload.career or "").strip()
+    normalized_study_plan = (payload.study_plan or "").strip() or None
+    source_folder_url = (payload.source_folder_url or "").strip() or None
+    destination_folder_url = (payload.destination_folder_url or "").strip() or None
+    process_mode = (payload.process_mode or "move").strip().lower() or "move"
+    recursive_scan = bool(payload.recursive_scan)
+    evidence_types = normalize_simple_list(payload.evidence_types, ["General"])
+    actor_roles = normalize_simple_list(payload.actor_roles, [])
+    actors = normalize_accreditation_actors(payload.actors)
+
+    if not normalized_career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not normalized_study_plan:
+        raise HTTPException(status_code=400, detail="Study plan is required")
+    if process_mode not in {"move", "copy"}:
+        raise HTTPException(status_code=400, detail="process_mode must be 'move' or 'copy'")
+    if not source_folder_url and not destination_folder_url:
+        raise HTTPException(status_code=400, detail="At least one folder URL is required")
+
+    settings = db.query(models.AccreditationSettings).filter(
+        models.AccreditationSettings.career == normalized_career,
+        models.AccreditationSettings.study_plan == normalized_study_plan,
+    ).first()
+    if not settings:
+        settings = models.AccreditationSettings(
+            career=normalized_career,
+            study_plan=normalized_study_plan,
+            source_folder_url=source_folder_url,
+            destination_folder_url=destination_folder_url,
+            process_mode=process_mode,
+            recursive_scan=recursive_scan,
+            evidence_types=evidence_types,
+            actor_roles=actor_roles,
+            actors=actors,
+        )
+    else:
+        settings.study_plan = normalized_study_plan
+        settings.source_folder_url = source_folder_url
+        settings.destination_folder_url = destination_folder_url
+        settings.process_mode = process_mode
+        settings.recursive_scan = recursive_scan
+        settings.evidence_types = evidence_types
+        settings.actor_roles = actor_roles
+        settings.actors = actors
+
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+@app.post("/accreditation/evidences", response_model=schemas.AccreditationEvidenceOut)
+def create_accreditation_evidence(payload: schemas.AccreditationEvidenceCreate, db: Session = Depends(get_db)):
+    created_by = (payload.created_by or "").strip()
+    if not created_by:
+        raise HTTPException(status_code=400, detail="Actor es obligatorio para registrar la evidencia")
+
+    item = models.AccreditationEvidenceRegistry(
+        career=payload.career,
+        title=payload.title,
+        evidence_type=payload.evidence_type,
+        source_kind=payload.source_kind,
+        source_reference=payload.source_reference,
+        source_file_id=payload.source_file_id,
+        source_filename=payload.source_filename,
+        normalized_filename=payload.normalized_filename,
+        destination_folder_url=payload.destination_folder_url,
+        destination_file_url=payload.destination_file_url,
+        destination_file_id=payload.destination_file_id,
+        checksum_sha256=payload.checksum_sha256,
+        version_number=1,
+        status=payload.status,
+        ocr_applied=bool(payload.ocr_applied),
+        access_error=payload.access_error,
+        metadata_json=payload.metadata,
+        created_by=created_by,
+    )
+    db.add(item)
+    db.flush()
+
+    version = models.AccreditationEvidenceVersion(
+        evidence_id=item.id,
+        version_number=1,
+        source_reference=item.source_reference,
+        source_file_id=item.source_file_id,
+        source_filename=item.source_filename,
+        destination_file_url=item.destination_file_url,
+        destination_file_id=item.destination_file_id,
+        checksum_sha256=item.checksum_sha256,
+        status=item.status,
+        note=payload.version_note or "Registro inicial",
+        created_by=created_by,
+    )
+    db.add(version)
+
+    audit = models.AccreditationEvidenceAuditLog(
+        evidence_id=item.id,
+        action="create",
+        changed_fields={"created": True},
+        note=payload.version_note or "Alta de evidencia",
+        actor=created_by,
+    )
+    db.add(audit)
+
+    db.commit()
+    db.refresh(item)
+    return serialize_accreditation_evidence(item)
+
+
+@app.post("/accreditation/ingest", response_model=schemas.AccreditationIngestResult)
+def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, db: Session = Depends(get_db)):
+    career = (payload.career or "").strip()
+    study_plan = (payload.study_plan or "").strip() or None
+    if not career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not study_plan:
+        raise HTTPException(status_code=400, detail="Study plan is required")
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="At least one item is required")
+
+    settings = db.query(models.AccreditationSettings).filter(
+        models.AccreditationSettings.career == career,
+        models.AccreditationSettings.study_plan == study_plan,
+    ).first()
+    if not settings:
+        raise HTTPException(status_code=400, detail="No hay configuración de acreditación para la carrera")
+
+    actor = (payload.actor or "").strip()
+    if not actor:
+        raise HTTPException(status_code=400, detail="Actor es obligatorio para la ingesta de evidencias")
+    destination_folder_url = settings.destination_folder_url
+
+    drive_service = None
+    drive_service_error = None
+
+    def get_drive_service_for_ingest():
+        nonlocal drive_service, drive_service_error
+        if drive_service is not None:
+            return drive_service
+        if drive_service_error:
+            raise RuntimeError(drive_service_error)
+        try:
+            drive_service = get_google_drive_service()
+            return drive_service
+        except Exception as exc:
+            drive_service_error = str(getattr(exc, "detail", "") or exc)
+            raise RuntimeError(drive_service_error)
+
+    def create_incident(
+        *,
+        source_kind: str,
+        source_reference: str,
+        source_file_id: str | None,
+        source_filename: str | None,
+        title: str | None,
+        evidence_type: str | None,
+        metadata_value,
+        error_message: str,
+    ):
+        normalized_filename = normalize_evidence_filename(source_filename, source_reference)
+        incident = models.AccreditationEvidenceRegistry(
+            career=career,
+            title=title,
+            evidence_type=evidence_type,
+            source_kind=source_kind,
+            source_reference=source_reference,
+            source_file_id=source_file_id,
+            source_filename=source_filename,
+            normalized_filename=normalized_filename,
+            destination_folder_url=destination_folder_url,
+            destination_file_url=None,
+            destination_file_id=None,
+            checksum_sha256=None,
+            version_number=1,
+            status="error",
+            ocr_applied=False,
+            access_error=error_message,
+            metadata_json=metadata_value,
+            created_by=actor,
+        )
+        db.add(incident)
+        db.flush()
+        db.add(models.AccreditationEvidenceVersion(
+            evidence_id=incident.id,
+            version_number=1,
+            source_reference=source_reference,
+            source_file_id=source_file_id,
+            source_filename=source_filename,
+            destination_file_url=None,
+            destination_file_id=None,
+            checksum_sha256=None,
+            status="error",
+            note="Incidencia de acceso/permisos durante ingesta",
+            created_by=actor,
+        ))
+        db.add(models.AccreditationEvidenceAuditLog(
+            evidence_id=incident.id,
+            action="create",
+            changed_fields={"access_error": error_message},
+            note="Incidencia registrada en ingesta",
+            actor=actor,
+        ))
+        return {
+            "evidence_id": incident.id,
+            "version_number": 1,
+            "action": "incident",
+            "source_kind": source_kind,
+            "source_reference": source_reference,
+            "source_file_id": source_file_id,
+            "normalized_filename": normalized_filename,
+            "status": "error",
+            "access_error": error_message,
+        }
+
+    expanded_items: list[dict] = []
+    for item_payload in payload.items:
+        source_reference = (item_payload.source_reference or "").strip()
+        if not source_reference:
+            continue
+        source_kind = infer_evidence_source_kind(source_reference, item_payload.source_kind)
+
+        if source_kind == "drive-folder":
+            folder_id = extract_drive_folder_id(source_reference)
+            if not folder_id:
+                expanded_items.append({
+                    "kind": "incident",
+                    "source_kind": source_kind,
+                    "source_reference": source_reference,
+                    "source_file_id": item_payload.source_file_id,
+                    "source_filename": item_payload.source_filename,
+                    "title": item_payload.title,
+                    "evidence_type": item_payload.evidence_type,
+                    "metadata": item_payload.metadata,
+                    "error": "No se pudo extraer ID de carpeta de Drive",
+                })
+                continue
+            try:
+                service = get_drive_service_for_ingest()
+                folder_files = list_drive_folder_files(service, folder_id, recursive=bool(settings.recursive_scan))
+                for folder_item in folder_files:
+                    file_id = folder_item.get("id")
+                    file_name = folder_item.get("name")
+                    web_url = folder_item.get("webViewLink") or (f"https://drive.google.com/file/d/{file_id}/view" if file_id else source_reference)
+                    expanded_items.append({
+                        "kind": "item",
+                        "source_kind": "drive-url",
+                        "source_reference": web_url,
+                        "source_file_id": file_id,
+                        "source_filename": file_name,
+                        "title": item_payload.title,
+                        "evidence_type": item_payload.evidence_type,
+                        "metadata": item_payload.metadata,
+                    })
+                if not folder_files:
+                    expanded_items.append({
+                        "kind": "incident",
+                        "source_kind": source_kind,
+                        "source_reference": source_reference,
+                        "source_file_id": None,
+                        "source_filename": None,
+                        "title": item_payload.title,
+                        "evidence_type": item_payload.evidence_type,
+                        "metadata": item_payload.metadata,
+                        "error": "No se encontraron archivos en la carpeta indicada",
+                    })
+            except Exception as exc:
+                expanded_items.append({
+                    "kind": "incident",
+                    "source_kind": source_kind,
+                    "source_reference": source_reference,
+                    "source_file_id": None,
+                    "source_filename": None,
+                    "title": item_payload.title,
+                    "evidence_type": item_payload.evidence_type,
+                    "metadata": item_payload.metadata,
+                    "error": f"No se pudo listar carpeta de Drive: {exc}",
+                })
+            continue
+
+        expanded_items.append({
+            "kind": "item",
+            "source_kind": source_kind,
+            "source_reference": source_reference,
+            "source_file_id": item_payload.source_file_id,
+            "source_filename": item_payload.source_filename,
+            "title": item_payload.title,
+            "evidence_type": item_payload.evidence_type,
+            "metadata": item_payload.metadata,
+        })
+
+    result_items: list[dict] = []
+    created = 0
+    versioned = 0
+    skipped = 0
+
+    for item_payload in expanded_items:
+        source_reference = (item_payload.get("source_reference") or "").strip()
+        if not source_reference:
+            skipped += 1
+            continue
+
+        if item_payload.get("kind") == "incident":
+            incident_item = create_incident(
+                source_kind=item_payload.get("source_kind") or "local",
+                source_reference=source_reference,
+                source_file_id=item_payload.get("source_file_id"),
+                source_filename=item_payload.get("source_filename"),
+                title=item_payload.get("title"),
+                evidence_type=item_payload.get("evidence_type"),
+                metadata_value=item_payload.get("metadata"),
+                error_message=item_payload.get("error") or "Incidencia desconocida",
+            )
+            created += 1
+            result_items.append(incident_item)
+            continue
+
+        source_kind = infer_evidence_source_kind(source_reference, item_payload.get("source_kind"))
+        source_file_id = item_payload.get("source_file_id")
+        source_filename = item_payload.get("source_filename")
+
+        if source_kind == "drive-url":
+            file_id = source_file_id or extract_drive_file_id(source_reference)
+            if file_id:
+                source_file_id = file_id
+                try:
+                    service = get_drive_service_for_ingest()
+                    drive_file = service.files().get(
+                        fileId=file_id,
+                        fields="id, name, webViewLink",
+                        supportsAllDrives=True,
+                    ).execute()
+                    source_filename = source_filename or drive_file.get("name")
+                    source_reference = drive_file.get("webViewLink") or source_reference
+                except Exception as exc:
+                    incident_item = create_incident(
+                        source_kind=source_kind,
+                        source_reference=source_reference,
+                        source_file_id=source_file_id,
+                        source_filename=source_filename,
+                        title=item_payload.get("title"),
+                        evidence_type=item_payload.get("evidence_type"),
+                        metadata_value=item_payload.get("metadata"),
+                        error_message=f"Sin acceso de lectura al recurso de Drive: {exc}",
+                    )
+                    created += 1
+                    result_items.append(incident_item)
+                    continue
+
+        normalized_filename = normalize_evidence_filename(source_filename, source_reference)
+
+        existing_query = db.query(models.AccreditationEvidenceRegistry).filter(
+            models.AccreditationEvidenceRegistry.career == career,
+        )
+        if normalized_filename:
+            existing_query = existing_query.filter(or_(
+                models.AccreditationEvidenceRegistry.source_reference == source_reference,
+                models.AccreditationEvidenceRegistry.normalized_filename == normalized_filename,
+            ))
+        else:
+            existing_query = existing_query.filter(
+                models.AccreditationEvidenceRegistry.source_reference == source_reference,
+            )
+        existing = existing_query.first()
+
+        if existing:
+            next_version = int(existing.version_number or 1) + 1
+            existing.version_number = next_version
+            existing.source_kind = source_kind
+            existing.source_reference = source_reference
+            existing.source_filename = source_filename or existing.source_filename
+            existing.normalized_filename = normalized_filename or existing.normalized_filename
+            existing.source_file_id = source_file_id or existing.source_file_id
+            existing.destination_folder_url = destination_folder_url or existing.destination_folder_url
+            existing.status = "versioned"
+            if item_payload.get("title"):
+                existing.title = item_payload.get("title")
+            if item_payload.get("evidence_type"):
+                existing.evidence_type = item_payload.get("evidence_type")
+            if item_payload.get("metadata") is not None:
+                existing.metadata_json = item_payload.get("metadata")
+            db.add(existing)
+
+            db.add(models.AccreditationEvidenceVersion(
+                evidence_id=existing.id,
+                version_number=next_version,
+                source_reference=source_reference,
+                source_file_id=source_file_id or existing.source_file_id,
+                source_filename=source_filename or existing.source_filename,
+                destination_file_url=existing.destination_file_url,
+                destination_file_id=existing.destination_file_id,
+                checksum_sha256=existing.checksum_sha256,
+                status="versioned",
+                note=payload.version_note or "Nueva versión por ingesta",
+                created_by=actor,
+            ))
+            db.add(models.AccreditationEvidenceAuditLog(
+                evidence_id=existing.id,
+                action="version",
+                changed_fields={
+                    "version_number": {"from": next_version - 1, "to": next_version},
+                    "source_reference": source_reference,
+                },
+                note=payload.version_note or "Versionado automático",
+                actor=actor,
+            ))
+            versioned += 1
+            result_items.append({
+                "evidence_id": existing.id,
+                "version_number": next_version,
+                "action": "versioned",
+                "source_kind": source_kind,
+                "source_reference": source_reference,
+                "source_file_id": source_file_id,
+                "normalized_filename": normalized_filename,
+                "status": "versioned",
+                "access_error": None,
+            })
+            continue
+
+        record = models.AccreditationEvidenceRegistry(
+            career=career,
+            title=item_payload.get("title"),
+            evidence_type=item_payload.get("evidence_type"),
+            source_kind=source_kind,
+            source_reference=source_reference,
+            source_file_id=source_file_id,
+            source_filename=source_filename,
+            normalized_filename=normalized_filename,
+            destination_folder_url=destination_folder_url,
+            destination_file_url=None,
+            destination_file_id=None,
+            checksum_sha256=None,
+            version_number=1,
+            status="registered",
+            ocr_applied=False,
+            access_error=None,
+            metadata_json=item_payload.get("metadata"),
+            created_by=actor,
+        )
+        db.add(record)
+        db.flush()
+
+        db.add(models.AccreditationEvidenceVersion(
+            evidence_id=record.id,
+            version_number=1,
+            source_reference=source_reference,
+            source_file_id=source_file_id,
+            source_filename=source_filename,
+            destination_file_url=None,
+            destination_file_id=None,
+            checksum_sha256=None,
+            status="registered",
+            note=payload.version_note or "Registro inicial por ingesta",
+            created_by=actor,
+        ))
+        db.add(models.AccreditationEvidenceAuditLog(
+            evidence_id=record.id,
+            action="create",
+            changed_fields={"ingested": True},
+            note=payload.version_note or "Alta automática por ingesta",
+            actor=actor,
+        ))
+        created += 1
+        result_items.append({
+            "evidence_id": record.id,
+            "version_number": 1,
+            "action": "created",
+            "source_kind": source_kind,
+            "source_reference": source_reference,
+            "source_file_id": source_file_id,
+            "normalized_filename": normalized_filename,
+            "status": "registered",
+            "access_error": None,
+        })
+
+    db.commit()
+    return {
+        "processed": len(expanded_items),
+        "created": created,
+        "versioned": versioned,
+        "skipped": skipped,
+        "items": result_items,
+    }
+
+
+@app.post("/accreditation/ingest-local", response_model=schemas.AccreditationIngestResult)
+async def ingest_accreditation_local_files(
+    career: str = Form(...),
+    actor: str = Form(""),
+    evidence_type: str = Form("General"),
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    normalized_career = (career or "").strip()
+    if not normalized_career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one local file is required")
+
+    settings = db.query(models.AccreditationSettings).filter(models.AccreditationSettings.career == normalized_career).first()
+    if not settings:
+        raise HTTPException(status_code=400, detail="No hay configuración de acreditación para la carrera")
+
+    actor_value = (actor or "").strip()
+    if not actor_value:
+        raise HTTPException(status_code=400, detail="Actor es obligatorio para la carga local de evidencias")
+    evidence_type_value = (evidence_type or "").strip() or "General"
+    accreditation_local_dir = os.path.join(UPLOAD_FOLDER, "accreditation")
+    os.makedirs(accreditation_local_dir, exist_ok=True)
+
+    created = 0
+    versioned = 0
+    skipped = 0
+    result_items: list[dict] = []
+
+    for upload in files:
+        original_name = str(upload.filename or "").strip()
+        if not original_name:
+            skipped += 1
+            continue
+
+        normalized_filename = normalize_evidence_filename(original_name, original_name)
+        timestamp_prefix = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        safe_name = normalized_filename or f"archivo_{timestamp_prefix}"
+        target_name = f"{timestamp_prefix}_{safe_name}"
+        target_path = os.path.join(accreditation_local_dir, target_name)
+
+        content = await upload.read()
+        with open(target_path, "wb") as handler:
+            handler.write(content)
+
+        source_reference = target_path.replace("\\", "/")
+        checksum = hashlib.sha256(content).hexdigest() if content else None
+
+        existing = db.query(models.AccreditationEvidenceRegistry).filter(
+            models.AccreditationEvidenceRegistry.career == normalized_career,
+            models.AccreditationEvidenceRegistry.normalized_filename == normalized_filename,
+        ).first()
+
+        if existing:
+            next_version = int(existing.version_number or 1) + 1
+            existing.version_number = next_version
+            existing.source_kind = "local"
+            existing.source_reference = source_reference
+            existing.source_filename = original_name
+            existing.destination_folder_url = settings.destination_folder_url or existing.destination_folder_url
+            existing.status = "versioned"
+            existing.evidence_type = evidence_type_value
+            existing.checksum_sha256 = checksum
+            existing.access_error = None
+            db.add(existing)
+
+            db.add(models.AccreditationEvidenceVersion(
+                evidence_id=existing.id,
+                version_number=next_version,
+                source_reference=source_reference,
+                source_file_id=None,
+                source_filename=original_name,
+                destination_file_url=existing.destination_file_url,
+                destination_file_id=existing.destination_file_id,
+                checksum_sha256=checksum,
+                status="versioned",
+                note="Nueva versión por carga local",
+                created_by=actor_value,
+            ))
+            db.add(models.AccreditationEvidenceAuditLog(
+                evidence_id=existing.id,
+                action="version",
+                changed_fields={"version_number": {"from": next_version - 1, "to": next_version}},
+                note="Carga local versionada",
+                actor=actor_value,
+            ))
+            versioned += 1
+            result_items.append({
+                "evidence_id": existing.id,
+                "version_number": next_version,
+                "action": "versioned",
+                "source_kind": "local",
+                "source_reference": source_reference,
+                "source_file_id": None,
+                "normalized_filename": normalized_filename,
+                "status": "versioned",
+                "access_error": None,
+            })
+            continue
+
+        record = models.AccreditationEvidenceRegistry(
+            career=normalized_career,
+            title=original_name,
+            evidence_type=evidence_type_value,
+            source_kind="local",
+            source_reference=source_reference,
+            source_file_id=None,
+            source_filename=original_name,
+            normalized_filename=normalized_filename,
+            destination_folder_url=settings.destination_folder_url,
+            destination_file_url=None,
+            destination_file_id=None,
+            checksum_sha256=checksum,
+            version_number=1,
+            status="registered",
+            ocr_applied=False,
+            access_error=None,
+            metadata_json=None,
+            created_by=actor_value,
+        )
+        db.add(record)
+        db.flush()
+        db.add(models.AccreditationEvidenceVersion(
+            evidence_id=record.id,
+            version_number=1,
+            source_reference=source_reference,
+            source_file_id=None,
+            source_filename=original_name,
+            destination_file_url=None,
+            destination_file_id=None,
+            checksum_sha256=checksum,
+            status="registered",
+            note="Registro inicial por carga local",
+            created_by=actor_value,
+        ))
+        db.add(models.AccreditationEvidenceAuditLog(
+            evidence_id=record.id,
+            action="create",
+            changed_fields={"local_upload": True},
+            note="Alta por carga local",
+            actor=actor_value,
+        ))
+        created += 1
+        result_items.append({
+            "evidence_id": record.id,
+            "version_number": 1,
+            "action": "created",
+            "source_kind": "local",
+            "source_reference": source_reference,
+            "source_file_id": None,
+            "normalized_filename": normalized_filename,
+            "status": "registered",
+            "access_error": None,
+        })
+
+    db.commit()
+    return {
+        "processed": len(files),
+        "created": created,
+        "versioned": versioned,
+        "skipped": skipped,
+        "items": result_items,
+    }
+
+
+@app.patch("/accreditation/evidences/{evidence_id}", response_model=schemas.AccreditationEvidenceOut)
+def update_accreditation_evidence(evidence_id: int, payload: schemas.AccreditationEvidenceUpdate, db: Session = Depends(get_db)):
+    item = db.query(models.AccreditationEvidenceRegistry).filter(models.AccreditationEvidenceRegistry.id == evidence_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Evidencia no encontrada")
+
+    updates = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+    actor = updates.pop("actor", None)
+    note = updates.pop("note", None)
+
+    changed_fields = {}
+    field_map = {
+        "title": "title",
+        "evidence_type": "evidence_type",
+        "created_by": "created_by",
+        "source_reference": "source_reference",
+        "source_filename": "source_filename",
+        "normalized_filename": "normalized_filename",
+        "destination_folder_url": "destination_folder_url",
+        "destination_file_url": "destination_file_url",
+        "status": "status",
+        "ocr_applied": "ocr_applied",
+        "access_error": "access_error",
+        "metadata": "metadata_json",
+    }
+
+    for payload_key, model_key in field_map.items():
+        if payload_key not in updates:
+            continue
+        next_value = updates[payload_key]
+        current_value = getattr(item, model_key)
+        if current_value != next_value:
+            changed_fields[payload_key] = {"from": current_value, "to": next_value}
+            setattr(item, model_key, next_value)
+
+    if not changed_fields:
+        return serialize_accreditation_evidence(item)
+
+    db.add(item)
+    db.add(models.AccreditationEvidenceAuditLog(
+        evidence_id=item.id,
+        action="update",
+        changed_fields=changed_fields,
+        note=note,
+        actor=actor,
+    ))
+    db.commit()
+    db.refresh(item)
+    return serialize_accreditation_evidence(item)
+
+
+@app.delete("/accreditation/evidences/{evidence_id}")
+def delete_accreditation_evidence(evidence_id: int, db: Session = Depends(get_db)):
+    item = db.query(models.AccreditationEvidenceRegistry).filter(models.AccreditationEvidenceRegistry.id == evidence_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Evidencia no encontrada")
+
+    db.query(models.AccreditationEvidenceVersion).filter(
+        models.AccreditationEvidenceVersion.evidence_id == evidence_id
+    ).delete(synchronize_session=False)
+    db.query(models.AccreditationEvidenceAuditLog).filter(
+        models.AccreditationEvidenceAuditLog.evidence_id == evidence_id
+    ).delete(synchronize_session=False)
+    db.delete(item)
+    db.commit()
+    return {"status": "deleted", "id": evidence_id}
+
+
+@app.get("/accreditation/evidences/{evidence_id}/versions", response_model=list[schemas.AccreditationEvidenceVersionOut])
+def list_accreditation_evidence_versions(evidence_id: int, db: Session = Depends(get_db)):
+    exists = db.query(models.AccreditationEvidenceRegistry.id).filter(models.AccreditationEvidenceRegistry.id == evidence_id).first()
+    if not exists:
+        raise HTTPException(status_code=404, detail="Evidencia no encontrada")
+    return db.query(models.AccreditationEvidenceVersion).filter(
+        models.AccreditationEvidenceVersion.evidence_id == evidence_id
+    ).order_by(models.AccreditationEvidenceVersion.version_number.desc()).all()
+
+
+@app.get("/accreditation/evidences/{evidence_id}/audit", response_model=list[schemas.AccreditationEvidenceAuditOut])
+def list_accreditation_evidence_audit(evidence_id: int, db: Session = Depends(get_db)):
+    exists = db.query(models.AccreditationEvidenceRegistry.id).filter(models.AccreditationEvidenceRegistry.id == evidence_id).first()
+    if not exists:
+        raise HTTPException(status_code=404, detail="Evidencia no encontrada")
+    return db.query(models.AccreditationEvidenceAuditLog).filter(
+        models.AccreditationEvidenceAuditLog.evidence_id == evidence_id
+    ).order_by(models.AccreditationEvidenceAuditLog.created_at.desc()).all()
+
+
+WORKPLAN_ALLOWED_STATUS = {"pending", "started", "completed", "delayed", "cancelled"}
+
+
+def normalize_workplan_status(value: str | None) -> str:
+    status = str(value or "pending").strip().lower()
+    if status not in WORKPLAN_ALLOWED_STATUS:
+        raise HTTPException(status_code=400, detail="Estado inválido para plan de trabajo")
+    return status
+
+
+def compute_activity_number(stage_order: int, sub_stage_order: int, activity_order: int) -> str:
+    return f"{int(stage_order)}.{int(sub_stage_order)}.{int(activity_order)}"
+
+
+def to_naive_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def is_workplan_overdue(deadline: datetime | None) -> bool:
+    normalized_deadline = to_naive_utc(deadline)
+    if not normalized_deadline:
+        return False
+    return datetime.utcnow() > normalized_deadline
+
+
+def serialize_workplan_activity(db: Session, row: models.AccreditationWorkPlanActivity):
+    tasks = db.query(models.AccreditationWorkPlanTask).filter(
+        models.AccreditationWorkPlanTask.activity_id == row.id
+    ).order_by(models.AccreditationWorkPlanTask.status_date.asc(), models.AccreditationWorkPlanTask.id.asc()).all()
+    return {
+        "id": row.id,
+        "career": row.career,
+        "study_plan": row.study_plan,
+        "stage": row.stage,
+        "stage_order": row.stage_order,
+        "sub_stage": row.sub_stage,
+        "sub_stage_order": row.sub_stage_order,
+        "activity": row.activity,
+        "activity_order": row.activity_order,
+        "activity_number": row.activity_number,
+        "responsible_actor": row.responsible_actor,
+        "collaborators": list(row.collaborators or []),
+        "start_date": row.start_date,
+        "deadline": row.deadline,
+        "end_date": row.end_date,
+        "status": row.status,
+        "deadline_history": list(row.deadline_history or []),
+        "observations": row.observations,
+        "tasks": tasks,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+@app.get("/accreditation/workplan", response_model=list[schemas.AccreditationWorkPlanActivityOut])
+def list_accreditation_workplan(career: str, study_plan: str | None = None, db: Session = Depends(get_db)):
+    normalized_career = (career or "").strip()
+    normalized_study_plan = (study_plan or "").strip() or None
+    if not normalized_career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not normalized_study_plan:
+        raise HTTPException(status_code=400, detail="Study plan is required")
+    rows = db.query(models.AccreditationWorkPlanActivity).filter(
+        models.AccreditationWorkPlanActivity.career == normalized_career,
+        models.AccreditationWorkPlanActivity.study_plan == normalized_study_plan,
+    ).order_by(
+        models.AccreditationWorkPlanActivity.stage_order.asc(),
+        models.AccreditationWorkPlanActivity.sub_stage_order.asc(),
+        models.AccreditationWorkPlanActivity.activity_order.asc(),
+        models.AccreditationWorkPlanActivity.id.asc(),
+    ).all()
+
+    dirty = False
+    for row in rows:
+        if row.status not in {"completed", "cancelled"} and is_workplan_overdue(row.deadline):
+            if row.status != "delayed":
+                row.status = "delayed"
+                row.end_date = None
+                db.add(row)
+                dirty = True
+
+    if dirty:
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+
+    return [serialize_workplan_activity(db, row) for row in rows]
+
+
+@app.post("/accreditation/workplan/activities", response_model=schemas.AccreditationWorkPlanActivityOut)
+def create_accreditation_workplan_activity(payload: schemas.AccreditationWorkPlanActivityCreate, db: Session = Depends(get_db)):
+    normalized_career = (payload.career or "").strip()
+    normalized_study_plan = (payload.study_plan or "").strip() or None
+    if not normalized_career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not normalized_study_plan:
+        raise HTTPException(status_code=400, detail="Study plan is required")
+
+    start_date = to_naive_utc(payload.start_date)
+    deadline = to_naive_utc(payload.deadline)
+
+    if deadline < start_date:
+        raise HTTPException(status_code=400, detail="Deadline no puede ser anterior a Fecha Inicio")
+
+    status = normalize_workplan_status(payload.status)
+    if status not in {"completed", "cancelled"} and is_workplan_overdue(deadline):
+        status = "delayed"
+    end_date = datetime.utcnow() if status == "completed" else None
+    activity_number = compute_activity_number(payload.stage_order, payload.sub_stage_order, payload.activity_order)
+
+    row = models.AccreditationWorkPlanActivity(
+        career=normalized_career,
+        study_plan=normalized_study_plan,
+        stage=(payload.stage or "").strip(),
+        stage_order=int(payload.stage_order),
+        sub_stage=(payload.sub_stage or "").strip(),
+        sub_stage_order=int(payload.sub_stage_order),
+        activity=(payload.activity or "").strip(),
+        activity_order=int(payload.activity_order),
+        activity_number=activity_number,
+        responsible_actor=(payload.responsible_actor or "").strip() or None,
+        collaborators=[str(item).strip() for item in (payload.collaborators or []) if str(item).strip()],
+        start_date=start_date,
+        deadline=deadline,
+        end_date=end_date,
+        status=status,
+        deadline_history=[],
+        observations=(payload.observations or "").strip() or None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return serialize_workplan_activity(db, row)
+
+
+@app.patch("/accreditation/workplan/activities/{activity_id}", response_model=schemas.AccreditationWorkPlanActivityOut)
+def update_accreditation_workplan_activity(activity_id: int, payload: schemas.AccreditationWorkPlanActivityUpdate, db: Session = Depends(get_db)):
+    row = db.query(models.AccreditationWorkPlanActivity).filter(models.AccreditationWorkPlanActivity.id == activity_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Actividad no encontrada")
+
+    updates = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+
+    next_stage_order = int(updates.get("stage_order", row.stage_order))
+    next_sub_stage_order = int(updates.get("sub_stage_order", row.sub_stage_order))
+    next_activity_order = int(updates.get("activity_order", row.activity_order))
+    next_start_date = to_naive_utc(updates.get("start_date", row.start_date))
+    next_deadline = to_naive_utc(updates.get("deadline", row.deadline))
+
+    if next_deadline < next_start_date:
+        raise HTTPException(status_code=400, detail="Deadline no puede ser anterior a Fecha Inicio")
+
+    if "stage" in updates:
+        row.stage = (updates.get("stage") or "").strip()
+    if "sub_stage" in updates:
+        row.sub_stage = (updates.get("sub_stage") or "").strip()
+    if "activity" in updates:
+        row.activity = (updates.get("activity") or "").strip()
+    if "stage_order" in updates:
+        row.stage_order = next_stage_order
+    if "sub_stage_order" in updates:
+        row.sub_stage_order = next_sub_stage_order
+    if "activity_order" in updates:
+        row.activity_order = next_activity_order
+    if "responsible_actor" in updates:
+        row.responsible_actor = (updates.get("responsible_actor") or "").strip() or None
+    if "collaborators" in updates:
+        row.collaborators = [str(item).strip() for item in (updates.get("collaborators") or []) if str(item).strip()]
+    if "start_date" in updates:
+        row.start_date = next_start_date
+    if "observations" in updates:
+        row.observations = (updates.get("observations") or "").strip() or None
+
+    if "deadline" in updates and next_deadline != row.deadline:
+        current_deadline = to_naive_utc(row.deadline)
+        is_extension = bool(current_deadline and next_deadline and next_deadline > current_deadline)
+        is_overdue_now = bool(current_deadline and datetime.utcnow() > current_deadline)
+
+        if is_extension and is_overdue_now:
+            history = list(row.deadline_history or [])
+            history.append({
+                "changed_at": datetime.utcnow().isoformat(),
+                "previous_deadline": current_deadline.isoformat() if current_deadline else None,
+                "new_deadline": next_deadline.isoformat() if next_deadline else None,
+            })
+            row.deadline_history = history
+
+        row.deadline = next_deadline
+
+    next_status = normalize_workplan_status(updates.get("status")) if "status" in updates else row.status
+    effective_deadline = next_deadline if "deadline" in updates else to_naive_utc(row.deadline)
+    if next_status not in {"completed", "cancelled"} and is_workplan_overdue(effective_deadline):
+        next_status = "delayed"
+
+    row.status = next_status
+    if next_status == "completed":
+        row.end_date = datetime.utcnow()
+    elif next_status in {"pending", "started", "delayed", "cancelled"}:
+        row.end_date = None
+
+    row.activity_number = compute_activity_number(row.stage_order, row.sub_stage_order, row.activity_order)
+
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return serialize_workplan_activity(db, row)
+
+
+@app.post("/accreditation/workplan/activities/{activity_id}/tasks", response_model=schemas.AccreditationWorkPlanTaskOut)
+def create_accreditation_workplan_task(activity_id: int, payload: schemas.AccreditationWorkPlanTaskCreate, db: Session = Depends(get_db)):
+    activity = db.query(models.AccreditationWorkPlanActivity).filter(models.AccreditationWorkPlanActivity.id == activity_id).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Actividad no encontrada")
+    status = normalize_workplan_status(payload.status)
+    task = models.AccreditationWorkPlanTask(
+        activity_id=activity_id,
+        name=(payload.name or "").strip(),
+        status=status,
+        status_date=payload.status_date,
+        notes=(payload.notes or "").strip() or None,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@app.patch("/accreditation/workplan/tasks/{task_id}", response_model=schemas.AccreditationWorkPlanTaskOut)
+def update_accreditation_workplan_task(task_id: int, payload: schemas.AccreditationWorkPlanTaskUpdate, db: Session = Depends(get_db)):
+    task = db.query(models.AccreditationWorkPlanTask).filter(models.AccreditationWorkPlanTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    updates = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+    if "name" in updates:
+        task.name = (updates.get("name") or "").strip()
+    if "status" in updates:
+        task.status = normalize_workplan_status(updates.get("status"))
+        now_ba = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
+        task.status_date = now_ba.astimezone(timezone.utc).replace(tzinfo=None)
+    elif "status_date" in updates:
+        task.status_date = to_naive_utc(updates.get("status_date"))
+    if "notes" in updates:
+        task.notes = (updates.get("notes") or "").strip() or None
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@app.delete("/accreditation/workplan/tasks/{task_id}")
+def delete_accreditation_workplan_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(models.AccreditationWorkPlanTask).filter(models.AccreditationWorkPlanTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    db.delete(task)
+    db.commit()
+    return {"status": "deleted", "id": task_id}
+
+
+@app.delete("/accreditation/workplan/activities/{activity_id}")
+def delete_accreditation_workplan_activity(activity_id: int, db: Session = Depends(get_db)):
+    activity = db.query(models.AccreditationWorkPlanActivity).filter(models.AccreditationWorkPlanActivity.id == activity_id).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Actividad no encontrada")
+
+    tasks = db.query(models.AccreditationWorkPlanTask).filter(
+        models.AccreditationWorkPlanTask.activity_id == activity_id
+    ).all()
+    tasks_deleted = len(tasks)
+    for task in tasks:
+        db.delete(task)
+
+    db.delete(activity)
+    db.commit()
+    return {"status": "deleted", "id": activity_id, "tasks_deleted": tasks_deleted}
 
 
 @app.get("/study-plans/{plan_id}", response_model=schemas.StudyPlanDetail)

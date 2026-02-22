@@ -2,6 +2,13 @@ import React, { useState, useEffect, useRef } from 'react'
 import logoMacau from '../Logo MACAU.png'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8011').replace(/\/$/, '')
+const API_BASE_FALLBACKS = Array.from(new Set([
+  API_BASE_URL,
+  'http://127.0.0.1:8001',
+  'http://localhost:8001',
+  'http://127.0.0.1:8011',
+  'http://localhost:8011'
+].map((item) => String(item || '').replace(/\/$/, ''))))
 const LEGACY_API_BASE_URLS = [
   'http://localhost:8001',
   'http://127.0.0.1:8001',
@@ -18,27 +25,44 @@ const careerOptions = [
 const App = () => {
   useEffect(() => {
     const nativeFetch = window.fetch.bind(window)
-    const replaceLegacyApiBase = (url) => {
+    const replaceLegacyApiBase = (url, preferredBase = API_BASE_URL) => {
       let nextUrl = url
       LEGACY_API_BASE_URLS.forEach((legacyBase) => {
         if (legacyBase && nextUrl.includes(legacyBase)) {
-          nextUrl = nextUrl.replace(legacyBase, API_BASE_URL)
+          nextUrl = nextUrl.replace(legacyBase, preferredBase)
         }
       })
       return nextUrl
     }
-    window.fetch = (input, init) => {
+    window.fetch = async (input, init) => {
       if (typeof input === 'string') {
-        return nativeFetch(replaceLegacyApiBase(input), init)
+        let lastError = null
+        for (const candidateBase of API_BASE_FALLBACKS) {
+          try {
+            return await nativeFetch(replaceLegacyApiBase(input, candidateBase), init)
+          } catch (err) {
+            lastError = err
+          }
+        }
+        throw lastError || new Error('No se pudo conectar con el backend')
       }
       if (input instanceof Request) {
-        const nextUrl = replaceLegacyApiBase(input.url)
-        if (nextUrl !== input.url) {
-          const nextRequest = new Request(nextUrl, input)
-          return nativeFetch(nextRequest, init)
+        let lastError = null
+        for (const candidateBase of API_BASE_FALLBACKS) {
+          try {
+            const nextUrl = replaceLegacyApiBase(input.url, candidateBase)
+            if (nextUrl !== input.url) {
+              const nextRequest = new Request(nextUrl, input)
+              return await nativeFetch(nextRequest, init)
+            }
+            return await nativeFetch(input, init)
+          } catch (err) {
+            lastError = err
+          }
         }
+        throw lastError || new Error('No se pudo conectar con el backend')
       }
-      return nativeFetch(input, init)
+      return await nativeFetch(input, init)
     }
     return () => {
       window.fetch = nativeFetch
@@ -318,6 +342,88 @@ const App = () => {
   const [activePlanId, setActivePlanId] = useState(null)
   const [selectedPlanFilterId, setSelectedPlanFilterId] = useState(null)
   const [planMode, setPlanMode] = useState('list') // 'view', 'edit', 'new', 'list'
+  const [accreditationSection, setAccreditationSection] = useState('actividades')
+  const [accreditationRecords, setAccreditationRecords] = useState([])
+  const [accreditationLoading, setAccreditationLoading] = useState(false)
+  const [accreditationError, setAccreditationError] = useState('')
+  const [accreditationEditingById, setAccreditationEditingById] = useState({})
+  const [accreditationSavingById, setAccreditationSavingById] = useState({})
+  const [accreditationConfigForm, setAccreditationConfigForm] = useState({
+    source_folder_url: '',
+    destination_folder_url: '',
+    process_mode: 'move',
+    recursive_scan: true,
+    evidence_types: ['General'],
+    actor_roles: [],
+    actors: []
+  })
+  const [accreditationConfigLoading, setAccreditationConfigLoading] = useState(false)
+  const [accreditationConfigSaving, setAccreditationConfigSaving] = useState(false)
+  const [accreditationConfigError, setAccreditationConfigError] = useState('')
+  const [accreditationRouteEditMode, setAccreditationRouteEditMode] = useState(false)
+  const [accreditationRouteDraft, setAccreditationRouteDraft] = useState({ source_folder_url: '', destination_folder_url: '' })
+  const [accreditationTeachers, setAccreditationTeachers] = useState([])
+  const [accreditationTeachersLoading, setAccreditationTeachersLoading] = useState(false)
+  const [accreditationShowAddEvidenceType, setAccreditationShowAddEvidenceType] = useState(false)
+  const [accreditationNewEvidenceType, setAccreditationNewEvidenceType] = useState('')
+  const [accreditationShowAddRole, setAccreditationShowAddRole] = useState(false)
+  const [accreditationNewRole, setAccreditationNewRole] = useState('')
+  const [accreditationShowAddActor, setAccreditationShowAddActor] = useState(false)
+  const [accreditationActorSearchName, setAccreditationActorSearchName] = useState('')
+  const [accreditationSelectedActorRole, setAccreditationSelectedActorRole] = useState('')
+  const [accreditationIngestForm, setAccreditationIngestForm] = useState({
+    evidence_type: 'General',
+    actor: '',
+    referencesText: ''
+  })
+  const [accreditationIngestLoading, setAccreditationIngestLoading] = useState(false)
+  const [accreditationIngestResult, setAccreditationIngestResult] = useState(null)
+  const [accreditationIngestError, setAccreditationIngestError] = useState('')
+  const [accreditationLocalFiles, setAccreditationLocalFiles] = useState([])
+  const [accreditationHistoryById, setAccreditationHistoryById] = useState({})
+  const [accreditationHistoryLoadingById, setAccreditationHistoryLoadingById] = useState({})
+  const [accreditationHistoryErrorById, setAccreditationHistoryErrorById] = useState({})
+  const [accreditationHistoryOpenById, setAccreditationHistoryOpenById] = useState({})
+  const [accreditationFilters, setAccreditationFilters] = useState({
+    text: '',
+    status: 'all',
+    evidenceType: 'all',
+    sourceKind: 'all'
+  })
+  const [workPlanRows, setWorkPlanRows] = useState([])
+  const [workPlanLoading, setWorkPlanLoading] = useState(false)
+  const [workPlanError, setWorkPlanError] = useState('')
+  const [showWorkPlanCreateModal, setShowWorkPlanCreateModal] = useState(false)
+  const [showWorkPlanDetailModal, setShowWorkPlanDetailModal] = useState(false)
+  const [workPlanDetailRow, setWorkPlanDetailRow] = useState(null)
+  const [workPlanDetailDraft, setWorkPlanDetailDraft] = useState(null)
+  const [showWorkPlanTaskModal, setShowWorkPlanTaskModal] = useState(false)
+  const [workPlanTaskModalActivityId, setWorkPlanTaskModalActivityId] = useState(null)
+  const [workPlanDetailSaving, setWorkPlanDetailSaving] = useState(false)
+  const [workPlanDetailEditMode, setWorkPlanDetailEditMode] = useState(false)
+  const [workPlanDeleteModal, setWorkPlanDeleteModal] = useState({ isOpen: false, row: null, loading: false, error: '' })
+  const [workPlanCreateError, setWorkPlanCreateError] = useState('')
+  const [workPlanDetailError, setWorkPlanDetailError] = useState('')
+  const [workPlanCollaboratorInput, setWorkPlanCollaboratorInput] = useState('')
+  const [workPlanDetailCollaboratorInput, setWorkPlanDetailCollaboratorInput] = useState('')
+  const [workPlanForm, setWorkPlanForm] = useState({
+    stage: '',
+    sub_stage: '',
+    activity: '',
+    responsible_actor: '',
+    selected_collaborators: [],
+    collaborators_text: '',
+    start_date: '',
+    deadline: '',
+    status: 'pending',
+    observations: ''
+  })
+  const [workPlanSaving, setWorkPlanSaving] = useState(false)
+  const [workPlanCreateTaskDraft, setWorkPlanCreateTaskDraft] = useState({ name: '', status: 'pending', status_date: '', notes: '' })
+  const [workPlanCreateTasks, setWorkPlanCreateTasks] = useState([])
+  const [workPlanTaskDraftByActivity, setWorkPlanTaskDraftByActivity] = useState({})
+  const [workPlanTaskSavingByActivity, setWorkPlanTaskSavingByActivity] = useState({})
+  const [workPlanTaskBusyById, setWorkPlanTaskBusyById] = useState({})
   const [editingPlanId, setEditingPlanId] = useState(null)
   const [correlativeMode, setCorrelativeMode] = useState(false)
   const [selectedSubjectForCorrelatives, setSelectedSubjectForCorrelatives] = useState(null)
@@ -476,6 +582,28 @@ const App = () => {
         {status || 'Sin estado'}
       </span>
     )
+  }
+
+  const ACCREDITATION_STATUS_LABELS = {
+    pending: 'Pendiente',
+    processed: 'Procesada',
+    error: 'Error',
+    registered: 'Registrada',
+    versioned: 'Versionada',
+    created: 'Creada',
+    imported: 'Importada',
+    inprocess: 'En proceso',
+    enproceso: 'En proceso',
+    revisada: 'Revisada',
+    aprobada: 'Aprobada',
+    rechazada: 'Rechazada'
+  }
+
+  const getAccreditationStatusLabel = (status) => {
+    const raw = String(status || '').trim()
+    if (!raw) return 'Sin estado'
+    const key = raw.toLowerCase().replace(/[\s_-]+/g, '')
+    return ACCREDITATION_STATUS_LABELS[key] || raw
   }
 
   const isPlanNameTaken = (career, name, excludeId = null) => {
@@ -1167,6 +1295,1600 @@ const App = () => {
     return []
   }
 
+  const fetchAccreditationEvidences = async (career = activeCareer) => {
+    try {
+      setAccreditationLoading(true)
+      setAccreditationError('')
+      const query = career ? `?career=${encodeURIComponent(career)}` : ''
+      const res = await fetch(`${API_BASE_URL}/accreditation/evidences${query}`)
+      const data = await res.json().catch(() => [])
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo cargar el registro de evidencias')
+      }
+      setAccreditationRecords(Array.isArray(data) ? data : [])
+      return Array.isArray(data) ? data : []
+    } catch (err) {
+      setAccreditationError(err.message || 'Error desconocido al cargar evidencias')
+      return []
+    } finally {
+      setAccreditationLoading(false)
+    }
+  }
+
+  const toMetadataText = (metadata) => {
+    if (metadata == null) return ''
+    try {
+      return JSON.stringify(metadata, null, 2)
+    } catch (_) {
+      return ''
+    }
+  }
+
+  const formatDateTimeBuenosAires = (value) => {
+    if (!value) return '-'
+    const raw = String(value).trim()
+    const isoWithTimezone = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(raw) ? `${raw}Z` : raw
+    const parsed = new Date(isoWithTimezone)
+    if (Number.isNaN(parsed.getTime())) {
+      return raw
+    }
+    return new Intl.DateTimeFormat('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).format(parsed)
+  }
+
+  const accreditationStatusOptions = Array.from(new Set(accreditationRecords.map((item) => String(item.status || '').trim()).filter(Boolean)))
+  const accreditationTypeOptions = Array.from(new Set(accreditationRecords.map((item) => String(item.evidence_type || '').trim()).filter(Boolean)))
+  const filteredAccreditationRecords = accreditationRecords.filter((item) => {
+    const matchesText = !accreditationFilters.text || [
+      item.title,
+      item.source_reference,
+      item.source_filename,
+      item.normalized_filename,
+      item.evidence_type,
+      item.created_by
+    ].some((field) => String(field || '').toLowerCase().includes(accreditationFilters.text.toLowerCase()))
+    const matchesStatus = accreditationFilters.status === 'all' || String(item.status || '') === accreditationFilters.status
+    const matchesType = accreditationFilters.evidenceType === 'all' || String(item.evidence_type || '') === accreditationFilters.evidenceType
+    return matchesText && matchesStatus && matchesType
+  })
+
+  const startAccreditationEdit = (row) => {
+    setAccreditationEditingById((prev) => ({
+      ...prev,
+      [row.id]: {
+        title: row.title || '',
+        evidence_type: row.evidence_type || '',
+        created_by: row.created_by || '',
+        source_reference: row.source_reference || '',
+        destination_file_url: row.destination_file_url || '',
+        status: row.status || 'pending',
+        metadataText: toMetadataText(row.metadata)
+      }
+    }))
+  }
+
+  const cancelAccreditationEdit = (id) => {
+    setAccreditationEditingById((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }
+
+  const updateAccreditationDraftField = (id, field, value) => {
+    setAccreditationEditingById((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || {}),
+        [field]: value
+      }
+    }))
+  }
+
+  const saveAccreditationEdit = async (id) => {
+    const draft = accreditationEditingById[id]
+    if (!draft) return
+
+    let parsedMetadata = null
+    if ((draft.metadataText || '').trim()) {
+      try {
+        parsedMetadata = JSON.parse(draft.metadataText)
+      } catch (_) {
+        setStatusMsg('El campo metadata debe ser JSON válido para guardar cambios.')
+        setStatusType('error')
+        return
+      }
+    }
+
+    try {
+      setAccreditationSavingById((prev) => ({ ...prev, [id]: true }))
+      const payload = {
+        title: draft.title,
+        evidence_type: draft.evidence_type,
+        created_by: String(draft.created_by || '').trim() || null,
+        source_reference: draft.source_reference,
+        destination_file_url: draft.destination_file_url,
+        status: draft.status,
+        metadata: parsedMetadata,
+        actor: viewRole || 'usuario',
+        note: 'Edición manual desde registro de evidencias'
+      }
+      const res = await fetch(`${API_BASE_URL}/accreditation/evidences/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo actualizar la evidencia')
+      }
+      setAccreditationRecords((prev) => prev.map((row) => (row.id === id ? data : row)))
+      cancelAccreditationEdit(id)
+      setStatusMsg('Evidencia actualizada correctamente')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'Error desconocido al actualizar evidencia')
+      setStatusType('error')
+    } finally {
+      setAccreditationSavingById((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
+  const fetchAccreditationTeachers = async (career = activeCareer) => {
+    if (!career) {
+      setAccreditationTeachers([])
+      return []
+    }
+    try {
+      setAccreditationTeachersLoading(true)
+      const res = await fetch(`${API_BASE_URL}/teachers?career=${encodeURIComponent(career)}`)
+      const data = await res.json().catch(() => [])
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo cargar docentes para acreditación')
+      }
+      const items = Array.isArray(data) ? data : []
+      setAccreditationTeachers(items)
+      return items
+    } catch (_) {
+      setAccreditationTeachers([])
+      return []
+    } finally {
+      setAccreditationTeachersLoading(false)
+    }
+  }
+
+  const normalizeAccreditationSettingsFromApi = (data) => {
+    const normalizedEvidenceTypes = Array.isArray(data?.evidence_types) && data.evidence_types.length ? data.evidence_types : ['General']
+    const normalizedRoles = Array.isArray(data?.actor_roles) ? data.actor_roles : []
+    const normalizedActors = Array.isArray(data?.actors) ? data.actors : []
+    return {
+      source_folder_url: data?.source_folder_url || '',
+      destination_folder_url: data?.destination_folder_url || '',
+      process_mode: data?.process_mode || 'move',
+      recursive_scan: data?.recursive_scan !== false,
+      evidence_types: normalizedEvidenceTypes,
+      actor_roles: normalizedRoles,
+      actors: normalizedActors,
+    }
+  }
+
+  const getAccreditationStudyPlanName = () => {
+    if (!activeCareer) return ''
+    const selectedPlan = selectedPlanFilterId ? getPlanById(activeCareer, selectedPlanFilterId) : null
+    const fallbackPlan = getActivePlan(activeCareer)
+    return String(selectedPlan?.name || fallbackPlan?.name || '').trim()
+  }
+
+  const persistAccreditationSettings = async (nextForm, options = {}) => {
+    const { successMessage = 'Configuración actualizada', silentSuccess = false } = options
+    if (!activeCareer) {
+      setStatusMsg('Seleccioná una carrera activa antes de editar la configuración de acreditación.')
+      setStatusType('error')
+      return null
+    }
+    const studyPlanName = getAccreditationStudyPlanName()
+    if (!studyPlanName) {
+      setStatusMsg('Seleccioná un plan de estudio activo para editar configuración de acreditación.')
+      setStatusType('error')
+      return null
+    }
+    try {
+      setAccreditationConfigSaving(true)
+      setAccreditationConfigError('')
+      const payload = {
+        career: activeCareer,
+        study_plan: studyPlanName,
+        source_folder_url: nextForm.source_folder_url || null,
+        destination_folder_url: nextForm.destination_folder_url || null,
+        process_mode: nextForm.process_mode || 'move',
+        recursive_scan: !!nextForm.recursive_scan,
+        evidence_types: Array.isArray(nextForm.evidence_types) && nextForm.evidence_types.length
+          ? nextForm.evidence_types
+          : ['General'],
+        actor_roles: nextForm.actor_roles || [],
+        actors: nextForm.actors || []
+      }
+      const res = await fetch(`${API_BASE_URL}/accreditation/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo guardar la configuración de acreditación')
+      }
+      const normalized = normalizeAccreditationSettingsFromApi(data)
+      setAccreditationConfigForm(normalized)
+      setAccreditationRouteDraft({
+        source_folder_url: normalized.source_folder_url,
+        destination_folder_url: normalized.destination_folder_url
+      })
+      setAccreditationIngestForm((prev) => ({
+        ...prev,
+        evidence_type: normalized.evidence_types.includes(prev.evidence_type) ? prev.evidence_type : (normalized.evidence_types[0] || 'General')
+      }))
+      if (!silentSuccess) {
+        setStatusMsg(successMessage)
+        setStatusType('success')
+      }
+      return normalized
+    } catch (err) {
+      const message = err.message || 'Error desconocido al guardar configuración'
+      setAccreditationConfigError(message)
+      setStatusMsg(message)
+      setStatusType('error')
+      return null
+    } finally {
+      setAccreditationConfigSaving(false)
+    }
+  }
+
+  const addEvidenceTypeToConfig = async () => {
+    const text = String(accreditationNewEvidenceType || '').trim()
+    if (!text) return
+    const already = (accreditationConfigForm.evidence_types || []).some((item) => String(item).toLowerCase() === text.toLowerCase())
+    if (already) {
+      setStatusMsg('Ese tipo de evidencia ya existe.')
+      setStatusType('info')
+      return
+    }
+    const nextForm = { ...accreditationConfigForm, evidence_types: [...(accreditationConfigForm.evidence_types || []), text] }
+    const saved = await persistAccreditationSettings(nextForm, { successMessage: 'Tipo de evidencia agregado' })
+    if (!saved) return
+    setAccreditationNewEvidenceType('')
+    setAccreditationShowAddEvidenceType(false)
+    if (!accreditationIngestForm.evidence_type) {
+      setAccreditationIngestForm((prev) => ({ ...prev, evidence_type: text }))
+    }
+  }
+
+  const renameEvidenceTypeInConfig = async (target) => {
+    const current = String(target || '').trim()
+    if (!current) return
+    const nextLabel = String(window.prompt('Editar tipo de evidencia', current) || '').trim()
+    if (!nextLabel || nextLabel.toLowerCase() === current.toLowerCase()) return
+    const already = (accreditationConfigForm.evidence_types || []).some((item) => String(item).toLowerCase() === nextLabel.toLowerCase())
+    if (already) {
+      setStatusMsg('Ya existe un tipo con ese nombre.')
+      setStatusType('info')
+      return
+    }
+
+    const nextForm = {
+      ...accreditationConfigForm,
+      evidence_types: (accreditationConfigForm.evidence_types || []).map((item) => (item === target ? nextLabel : item))
+    }
+    const saved = await persistAccreditationSettings(nextForm, { successMessage: 'Tipo de evidencia actualizado' })
+    if (!saved) return
+
+    const linkedRows = (accreditationRecords || []).filter((item) => String(item.evidence_type || '').trim().toLowerCase() === current.toLowerCase())
+    if (!linkedRows.length) return
+    const patchRequests = linkedRows.map((row) =>
+      fetch(`${API_BASE_URL}/accreditation/evidences/${row.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          evidence_type: nextLabel,
+          actor: viewRole || 'usuario',
+          note: `Renombre de tipo de evidencia: ${current} -> ${nextLabel}`
+        })
+      })
+    )
+    const responses = await Promise.all(patchRequests)
+    const hasFailures = responses.some((res) => !res.ok)
+    if (hasFailures) {
+      setStatusMsg('El tipo se renombró en configuración, pero algunas evidencias no se pudieron actualizar.')
+      setStatusType('error')
+    } else {
+      await fetchAccreditationEvidences(activeCareer)
+      setStatusMsg(`Tipo actualizado y aplicado a ${linkedRows.length} evidencia(s).`)
+      setStatusType('success')
+    }
+  }
+
+  const removeEvidenceTypeFromConfig = async (target) => {
+    const linkedRows = (accreditationRecords || []).filter((item) => String(item.evidence_type || '').trim().toLowerCase() === String(target || '').trim().toLowerCase())
+    if (linkedRows.length > 0) {
+      setStatusMsg(`No se puede eliminar "${target}" porque está vinculado a ${linkedRows.length} evidencia(s).`)
+      setStatusType('error')
+      return
+    }
+    const nextList = (accreditationConfigForm.evidence_types || []).filter((item) => item !== target)
+    const nextForm = { ...accreditationConfigForm, evidence_types: nextList.length ? nextList : ['General'] }
+    const saved = await persistAccreditationSettings(nextForm, { successMessage: 'Tipo de evidencia eliminado' })
+    if (!saved) return
+    if (accreditationIngestForm.evidence_type === target) {
+      setAccreditationIngestForm((prev) => ({ ...prev, evidence_type: saved.evidence_types[0] || 'General' }))
+    }
+  }
+
+  const moveEvidenceTypeInConfig = async (index, direction) => {
+    const list = [...(accreditationConfigForm.evidence_types || [])]
+    const nextIndex = index + direction
+    if (index < 0 || nextIndex < 0 || index >= list.length || nextIndex >= list.length) return
+    ;[list[index], list[nextIndex]] = [list[nextIndex], list[index]]
+    await persistAccreditationSettings({ ...accreditationConfigForm, evidence_types: list }, { successMessage: 'Orden de tipos actualizado' })
+  }
+
+  const addRoleToConfig = async () => {
+    const text = String(accreditationNewRole || '').trim()
+    if (!text) return
+    const exists = (accreditationConfigForm.actor_roles || []).some((item) => String(item).toLowerCase() === text.toLowerCase())
+    if (exists) {
+      setStatusMsg('Ese rol ya existe.')
+      setStatusType('info')
+      return
+    }
+    const nextForm = { ...accreditationConfigForm, actor_roles: [...(accreditationConfigForm.actor_roles || []), text] }
+    const saved = await persistAccreditationSettings(nextForm, { successMessage: 'Rol agregado' })
+    if (!saved) return
+    setAccreditationSelectedActorRole(text)
+    setAccreditationNewRole('')
+    setAccreditationShowAddRole(false)
+  }
+
+  const renameRoleInConfig = async (target) => {
+    const current = String(target || '').trim()
+    if (!current) return
+    const nextLabel = String(window.prompt('Editar rol', current) || '').trim()
+    if (!nextLabel || nextLabel.toLowerCase() === current.toLowerCase()) return
+    const already = (accreditationConfigForm.actor_roles || []).some((item) => String(item).toLowerCase() === nextLabel.toLowerCase())
+    if (already) {
+      setStatusMsg('Ya existe un rol con ese nombre.')
+      setStatusType('info')
+      return
+    }
+    const nextForm = {
+      ...accreditationConfigForm,
+      actor_roles: (accreditationConfigForm.actor_roles || []).map((item) => (item === target ? nextLabel : item)),
+      actors: (accreditationConfigForm.actors || []).map((actor) => (
+        String(actor.role || '').trim().toLowerCase() === current.toLowerCase()
+          ? { ...actor, role: nextLabel }
+          : actor
+      ))
+    }
+    const saved = await persistAccreditationSettings(nextForm, { successMessage: 'Rol actualizado' })
+    if (!saved) return
+    if (String(accreditationSelectedActorRole || '').toLowerCase() === current.toLowerCase()) {
+      setAccreditationSelectedActorRole(nextLabel)
+    }
+  }
+
+  const removeRoleFromConfig = async (target) => {
+    const linkedActors = (accreditationConfigForm.actors || []).filter((actor) => String(actor.role || '').trim().toLowerCase() === String(target || '').trim().toLowerCase())
+    if (linkedActors.length > 0) {
+      setStatusMsg(`No se puede eliminar "${target}" porque está vinculado a ${linkedActors.length} actor(es).`)
+      setStatusType('error')
+      return
+    }
+    const nextForm = {
+      ...accreditationConfigForm,
+      actor_roles: (accreditationConfigForm.actor_roles || []).filter((item) => item !== target)
+    }
+    const saved = await persistAccreditationSettings(nextForm, { successMessage: 'Rol eliminado' })
+    if (!saved) return
+    if (accreditationSelectedActorRole === target) {
+      setAccreditationSelectedActorRole('')
+    }
+  }
+
+  const moveRoleInConfig = async (index, direction) => {
+    const list = [...(accreditationConfigForm.actor_roles || [])]
+    const nextIndex = index + direction
+    if (index < 0 || nextIndex < 0 || index >= list.length || nextIndex >= list.length) return
+    ;[list[index], list[nextIndex]] = [list[nextIndex], list[index]]
+    await persistAccreditationSettings({ ...accreditationConfigForm, actor_roles: list }, { successMessage: 'Orden de roles actualizado' })
+  }
+
+  const addActorToConfig = async () => {
+    const name = String(accreditationActorSearchName || '').trim()
+    if (!name) return
+    const role = String(accreditationSelectedActorRole || '').trim() || null
+    const teacher = (accreditationTeachers || []).find((item) => String(item.name || '').trim().toLowerCase() === name.toLowerCase())
+    const actorType = teacher ? 'teacher' : 'manual'
+    if (actorType === 'manual' && !role) {
+      setStatusMsg('Para actores externos debés seleccionar un rol.')
+      setStatusType('error')
+      return
+    }
+    const exists = (accreditationConfigForm.actors || []).some((actor) => {
+      if (actorType === 'teacher') {
+        return actor.type === 'teacher' && Number(actor.teacher_id) === Number(teacher.id)
+      }
+      return actor.type === 'manual' && String(actor.name || '').trim().toLowerCase() === name.toLowerCase()
+    })
+    if (exists) {
+      setStatusMsg('Ese actor ya existe en la configuración.')
+      setStatusType('info')
+      return
+    }
+
+    const nextActor = {
+      name: teacher ? teacher.name : name,
+      role: role || null,
+      type: actorType,
+      teacher_id: teacher ? teacher.id : null
+    }
+    const nextForm = {
+      ...accreditationConfigForm,
+      actors: [...(accreditationConfigForm.actors || []), nextActor]
+    }
+    const saved = await persistAccreditationSettings(nextForm, { successMessage: 'Actor agregado' })
+    if (!saved) return
+    setAccreditationActorSearchName('')
+    setAccreditationSelectedActorRole('')
+    setAccreditationShowAddActor(false)
+  }
+
+  const removeActorFromConfig = async (index) => {
+    const nextForm = {
+      ...accreditationConfigForm,
+      actors: (accreditationConfigForm.actors || []).filter((_, idx) => idx !== index)
+    }
+    await persistAccreditationSettings(nextForm, { successMessage: 'Actor eliminado' })
+  }
+
+  const openAccreditationRouteEditor = () => {
+    setAccreditationRouteDraft({
+      source_folder_url: accreditationConfigForm.source_folder_url || '',
+      destination_folder_url: accreditationConfigForm.destination_folder_url || ''
+    })
+    setAccreditationRouteEditMode(true)
+  }
+
+  const commitAccreditationRoutes = async () => {
+    const nextForm = {
+      ...accreditationConfigForm,
+      source_folder_url: accreditationRouteDraft.source_folder_url,
+      destination_folder_url: accreditationRouteDraft.destination_folder_url
+    }
+    await persistAccreditationSettings(nextForm, { successMessage: 'Rutas actualizadas', silentSuccess: true })
+  }
+
+  const updateAccreditationProcessMode = async (value) => {
+    const nextForm = { ...accreditationConfigForm, process_mode: value }
+    await persistAccreditationSettings(nextForm, { successMessage: 'Modo de proceso actualizado', silentSuccess: true })
+  }
+
+  const updateAccreditationRecursiveScan = async (value) => {
+    const nextForm = { ...accreditationConfigForm, recursive_scan: !!value }
+    await persistAccreditationSettings(nextForm, { successMessage: 'Escaneo recursivo actualizado', silentSuccess: true })
+  }
+
+  const loadAccreditationSettings = async (career = activeCareer) => {
+    const studyPlanName = getAccreditationStudyPlanName()
+    if (!career) {
+      setAccreditationConfigForm({ source_folder_url: '', destination_folder_url: '', process_mode: 'move', recursive_scan: true, evidence_types: ['General'], actor_roles: [], actors: [] })
+      setAccreditationRouteDraft({ source_folder_url: '', destination_folder_url: '' })
+      setAccreditationRouteEditMode(false)
+      setAccreditationConfigError('')
+      return null
+    }
+    if (!studyPlanName) {
+      setAccreditationConfigForm({ source_folder_url: '', destination_folder_url: '', process_mode: 'move', recursive_scan: true, evidence_types: ['General'], actor_roles: [], actors: [] })
+      setAccreditationRouteDraft({ source_folder_url: '', destination_folder_url: '' })
+      setAccreditationRouteEditMode(false)
+      setAccreditationConfigError('Seleccioná un plan de estudio activo para Acreditación.')
+      return null
+    }
+    try {
+      setAccreditationConfigLoading(true)
+      setAccreditationConfigError('')
+      const res = await fetch(`${API_BASE_URL}/accreditation/settings?career=${encodeURIComponent(career)}&study_plan=${encodeURIComponent(studyPlanName)}`)
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error((data && data.detail) || 'No se pudo cargar la configuración de acreditación')
+      }
+      const normalized = normalizeAccreditationSettingsFromApi(data)
+      setAccreditationConfigForm(normalized)
+      setAccreditationRouteDraft({
+        source_folder_url: normalized.source_folder_url,
+        destination_folder_url: normalized.destination_folder_url
+      })
+      setAccreditationRouteEditMode(!(normalized.source_folder_url || normalized.destination_folder_url))
+      setAccreditationIngestForm((prev) => ({
+        ...prev,
+        evidence_type: normalized.evidence_types.includes(prev.evidence_type) ? prev.evidence_type : (normalized.evidence_types[0] || 'General')
+      }))
+      return data
+    } catch (err) {
+      setAccreditationConfigError(err.message || 'Error desconocido al cargar configuración')
+      return null
+    } finally {
+      setAccreditationConfigLoading(false)
+    }
+  }
+
+  const runAccreditationIngest = async () => {
+    if (!activeCareer) {
+      setStatusMsg('Seleccioná una carrera activa para ejecutar la ingesta.')
+      setStatusType('error')
+      return
+    }
+    const studyPlanName = getAccreditationStudyPlanName()
+    if (!studyPlanName) {
+      setStatusMsg('Seleccioná un plan de estudio activo para ejecutar la ingesta.')
+      setStatusType('error')
+      return
+    }
+
+    const lines = String(accreditationIngestForm.referencesText || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    const selectedActor = String(accreditationIngestForm.actor || '').trim()
+    if (!selectedActor) {
+      setAccreditationIngestError('Seleccioná quién carga la evidencia (actor responsable).')
+      setStatusMsg('Seleccioná quién carga la evidencia (actor responsable).')
+      setStatusType('error')
+      return
+    }
+
+    if (lines.length === 0) {
+      setAccreditationIngestError('Ingresá al menos una referencia (una por línea).')
+      return
+    }
+
+    try {
+      setAccreditationIngestLoading(true)
+      setAccreditationIngestError('')
+      setAccreditationIngestResult(null)
+      const selectedEvidenceType = accreditationIngestForm.evidence_type || accreditationConfigForm.evidence_types?.[0] || 'General'
+      const payload = {
+        career: activeCareer,
+        study_plan: studyPlanName,
+        actor: selectedActor,
+        items: lines.map((reference) => ({
+          source_reference: reference,
+          evidence_type: selectedEvidenceType || null
+        }))
+      }
+      const res = await fetch(`${API_BASE_URL}/accreditation/ingest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo ejecutar la ingesta de evidencias')
+      }
+      setAccreditationIngestResult(data)
+      setStatusMsg(`Ingesta completada: ${data.created || 0} creadas, ${data.versioned || 0} versionadas.`)
+      setStatusType('success')
+      fetchAccreditationEvidences(activeCareer)
+    } catch (err) {
+      setAccreditationIngestError(err.message || 'Error desconocido en la ingesta')
+      setStatusMsg(err.message || 'Error desconocido en la ingesta')
+      setStatusType('error')
+    } finally {
+      setAccreditationIngestLoading(false)
+    }
+  }
+
+  const runAccreditationLocalIngest = async () => {
+    if (!activeCareer) {
+      setStatusMsg('Seleccioná una carrera activa para cargar archivos locales.')
+      setStatusType('error')
+      return
+    }
+    if (!accreditationLocalFiles.length) {
+      setAccreditationIngestError('Seleccioná al menos un archivo local.')
+      return
+    }
+    const selectedActor = String(accreditationIngestForm.actor || '').trim()
+    if (!selectedActor) {
+      setAccreditationIngestError('Seleccioná quién carga la evidencia (actor responsable).')
+      setStatusMsg('Seleccioná quién carga la evidencia (actor responsable).')
+      setStatusType('error')
+      return
+    }
+    try {
+      setAccreditationIngestLoading(true)
+      setAccreditationIngestError('')
+      setAccreditationIngestResult(null)
+      const selectedEvidenceType = accreditationIngestForm.evidence_type || accreditationConfigForm.evidence_types?.[0] || 'General'
+      const formData = new FormData()
+      formData.append('career', activeCareer)
+      formData.append('actor', selectedActor)
+      formData.append('evidence_type', selectedEvidenceType)
+      accreditationLocalFiles.forEach((file) => formData.append('files', file))
+
+      const res = await fetch(`${API_BASE_URL}/accreditation/ingest-local`, {
+        method: 'POST',
+        body: formData
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo ejecutar la carga local de evidencias')
+      }
+      setAccreditationIngestResult(data)
+      setStatusMsg(`Carga local completada: ${data.created || 0} creadas, ${data.versioned || 0} versionadas.`)
+      setStatusType('success')
+      setAccreditationLocalFiles([])
+      fetchAccreditationEvidences(activeCareer)
+    } catch (err) {
+      setAccreditationIngestError(err.message || 'Error desconocido en la carga local')
+      setStatusMsg(err.message || 'Error desconocido en la carga local')
+      setStatusType('error')
+    } finally {
+      setAccreditationIngestLoading(false)
+    }
+  }
+
+  const deleteAccreditationEvidence = async (id) => {
+    const confirmed = window.confirm('¿Eliminar evidencia seleccionada?')
+    if (!confirmed) return
+    try {
+      const res = await fetch(`${API_BASE_URL}/accreditation/evidences/${id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo eliminar la evidencia')
+      }
+      setAccreditationRecords((prev) => prev.filter((item) => item.id !== id))
+      setStatusMsg('Evidencia eliminada correctamente')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'Error desconocido al eliminar evidencia')
+      setStatusType('error')
+    }
+  }
+
+  const WORKPLAN_STATUS_OPTIONS = [
+    { value: 'pending', label: 'Pendiente', color: '#607d8b' },
+    { value: 'started', label: 'Iniciado', color: '#1976d2' },
+    { value: 'completed', label: 'Completado', color: '#2e7d32' },
+    { value: 'delayed', label: 'Retrasado', color: '#d32f2f' },
+    { value: 'cancelled', label: 'Cancelado', color: '#8d6e63' }
+  ]
+
+  const getWorkPlanStatusMeta = (value) => {
+    const item = WORKPLAN_STATUS_OPTIONS.find((opt) => opt.value === value)
+    return item || WORKPLAN_STATUS_OPTIONS[0]
+  }
+
+  const isWorkPlanOverdue = (deadlineValue, statusValue) => {
+    if (!deadlineValue) return false
+    const deadlineMs = new Date(deadlineValue).getTime()
+    if (Number.isNaN(deadlineMs)) return false
+    if (['completed', 'cancelled'].includes(String(statusValue || '').toLowerCase())) return false
+    return Date.now() > deadlineMs
+  }
+
+  const getWorkPlanDetailStatusOptions = () => {
+    if (!workPlanDetailRow || !workPlanDetailDraft) return WORKPLAN_STATUS_OPTIONS
+    const deadlineChanged = (workPlanDetailDraft.deadline || '') !== toDateTimeLocalValue(workPlanDetailRow.deadline)
+    const overdue = isWorkPlanOverdue(workPlanDetailRow.deadline, workPlanDetailRow.status)
+    if (overdue && !deadlineChanged) {
+      const restricted = WORKPLAN_STATUS_OPTIONS.filter((opt) => ['completed', 'cancelled'].includes(opt.value))
+      const current = String(workPlanDetailDraft.status || workPlanDetailRow.status || '').toLowerCase()
+      if (current && !restricted.some((opt) => opt.value === current)) {
+        const currentMeta = getWorkPlanStatusMeta(current)
+        return [currentMeta, ...restricted]
+      }
+      return restricted
+    }
+    return WORKPLAN_STATUS_OPTIONS
+  }
+
+  const toDateTimeLocalValue = (value) => {
+    if (!value) return ''
+    const raw = String(value).trim()
+    const parsed = new Date(raw.includes('Z') ? raw : `${raw}Z`)
+    if (Number.isNaN(parsed.getTime())) return ''
+    const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000)
+    return local.toISOString().slice(0, 16)
+  }
+
+  const toApiDateTime = (value) => {
+    if (!value) return null
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return null
+    return parsed.toISOString()
+  }
+
+  const fetchWorkPlanRows = async (career = activeCareer) => {
+    const studyPlanName = getAccreditationStudyPlanName()
+    if (!career) {
+      setWorkPlanRows([])
+      setWorkPlanError('')
+      return []
+    }
+    if (!studyPlanName) {
+      setWorkPlanRows([])
+      setWorkPlanError('Seleccioná un plan de estudio activo para ver el plan de trabajo.')
+      return []
+    }
+    try {
+      setWorkPlanLoading(true)
+      setWorkPlanError('')
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan?career=${encodeURIComponent(career)}&study_plan=${encodeURIComponent(studyPlanName)}`)
+      const data = await res.json().catch(() => [])
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo cargar el plan de trabajo')
+      }
+      const rows = Array.isArray(data) ? data : []
+      setWorkPlanRows(rows)
+      return rows
+    } catch (err) {
+      setWorkPlanError(err.message || 'Error desconocido al cargar plan de trabajo')
+      return []
+    } finally {
+      setWorkPlanLoading(false)
+    }
+  }
+
+  const getWorkPlanStageOptions = (rows = workPlanRows) => {
+    const map = new Map()
+    ;(rows || []).forEach((row) => {
+      const key = String(row.stage || '').trim()
+      if (!key) return
+      if (!map.has(key)) {
+        map.set(key, Number(row.stage_order) || 0)
+      }
+    })
+    return Array.from(map.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([name, order]) => ({ name, order }))
+  }
+
+  const getWorkPlanSubStageOptions = (stageName, rows = workPlanRows) => {
+    const stage = String(stageName || '').trim()
+    if (!stage) return []
+    const map = new Map()
+    ;(rows || []).forEach((row) => {
+      if (String(row.stage || '').trim() !== stage) return
+      const key = String(row.sub_stage || '').trim()
+      if (!key) return
+      if (!map.has(key)) {
+        map.set(key, Number(row.sub_stage_order) || 0)
+      }
+    })
+    return Array.from(map.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([name, order]) => ({ name, order }))
+  }
+
+  const openWorkPlanCreateModal = () => {
+    const sorted = [...(workPlanRows || [])].sort((a, b) => {
+      if ((a.stage_order || 0) !== (b.stage_order || 0)) return (a.stage_order || 0) - (b.stage_order || 0)
+      if ((a.sub_stage_order || 0) !== (b.sub_stage_order || 0)) return (a.sub_stage_order || 0) - (b.sub_stage_order || 0)
+      if ((a.activity_order || 0) !== (b.activity_order || 0)) return (a.activity_order || 0) - (b.activity_order || 0)
+      return (a.id || 0) - (b.id || 0)
+    })
+    const last = sorted[sorted.length - 1]
+    const defaultStage = last?.stage || ''
+    const subOptions = getWorkPlanSubStageOptions(defaultStage, workPlanRows)
+    const defaultSub = last?.sub_stage || subOptions[subOptions.length - 1]?.name || ''
+    setWorkPlanForm({
+      stage: defaultStage,
+      sub_stage: defaultSub,
+      activity: '',
+      responsible_actor: '',
+      selected_collaborators: [],
+      collaborators_text: '',
+      start_date: '',
+      deadline: '',
+      status: 'pending',
+      observations: ''
+    })
+    setWorkPlanCollaboratorInput('')
+    setWorkPlanCreateTaskDraft({ name: '', status: 'pending', status_date: '', notes: '' })
+    setWorkPlanCreateTasks([])
+    setWorkPlanCreateError('')
+    setShowWorkPlanCreateModal(true)
+  }
+
+  const closeWorkPlanCreateModal = () => {
+    if (workPlanSaving) return
+    setShowWorkPlanCreateModal(false)
+    setWorkPlanCreateError('')
+    setWorkPlanCreateTaskDraft({ name: '', status: 'pending', status_date: '', notes: '' })
+    setWorkPlanCreateTasks([])
+  }
+
+  const openWorkPlanDetailModal = (row) => {
+    if (!row) return
+    setWorkPlanDetailRow(row)
+    setWorkPlanDetailDraft({
+      stage: row.stage || '',
+      sub_stage: row.sub_stage || '',
+      activity: row.activity || '',
+      responsible_actor: row.responsible_actor || '',
+      selected_collaborators: Array.isArray(row.collaborators) ? row.collaborators : [],
+      collaborators_text: '',
+      start_date: toDateTimeLocalValue(row.start_date),
+      deadline: toDateTimeLocalValue(row.deadline),
+      status: row.status || 'pending',
+      observations: row.observations || ''
+    })
+    setWorkPlanDetailCollaboratorInput('')
+    setWorkPlanDetailError('')
+    setWorkPlanDetailEditMode(false)
+    setShowWorkPlanDetailModal(true)
+  }
+
+  const closeWorkPlanDetailModal = () => {
+    setShowWorkPlanDetailModal(false)
+    setWorkPlanDetailRow(null)
+    setWorkPlanDetailDraft(null)
+    setWorkPlanDetailCollaboratorInput('')
+    setWorkPlanDetailError('')
+    setWorkPlanDetailEditMode(false)
+  }
+
+  const startWorkPlanDetailEdit = () => {
+    if (!workPlanDetailRow) return
+    setWorkPlanDetailDraft({
+      stage: workPlanDetailRow.stage || '',
+      sub_stage: workPlanDetailRow.sub_stage || '',
+      activity: workPlanDetailRow.activity || '',
+      responsible_actor: workPlanDetailRow.responsible_actor || '',
+      selected_collaborators: Array.isArray(workPlanDetailRow.collaborators) ? workPlanDetailRow.collaborators : [],
+      collaborators_text: '',
+      start_date: toDateTimeLocalValue(workPlanDetailRow.start_date),
+      deadline: toDateTimeLocalValue(workPlanDetailRow.deadline),
+      status: workPlanDetailRow.status || 'pending',
+      observations: workPlanDetailRow.observations || ''
+    })
+    setWorkPlanDetailCollaboratorInput('')
+    setWorkPlanDetailError('')
+    setWorkPlanDetailEditMode(true)
+  }
+
+  const cancelWorkPlanDetailEdit = () => {
+    if (!workPlanDetailRow) {
+      setWorkPlanDetailEditMode(false)
+      return
+    }
+    setWorkPlanDetailDraft({
+      stage: workPlanDetailRow.stage || '',
+      sub_stage: workPlanDetailRow.sub_stage || '',
+      activity: workPlanDetailRow.activity || '',
+      responsible_actor: workPlanDetailRow.responsible_actor || '',
+      selected_collaborators: Array.isArray(workPlanDetailRow.collaborators) ? workPlanDetailRow.collaborators : [],
+      collaborators_text: '',
+      start_date: toDateTimeLocalValue(workPlanDetailRow.start_date),
+      deadline: toDateTimeLocalValue(workPlanDetailRow.deadline),
+      status: workPlanDetailRow.status || 'pending',
+      observations: workPlanDetailRow.observations || ''
+    })
+    setWorkPlanDetailCollaboratorInput('')
+    setWorkPlanDetailError('')
+    setWorkPlanDetailEditMode(false)
+  }
+
+  const openWorkPlanDeleteModal = () => {
+    if (!workPlanDetailRow) return
+    setWorkPlanDeleteModal({ isOpen: true, row: workPlanDetailRow, loading: false, error: '' })
+  }
+
+  const closeWorkPlanDeleteModal = () => {
+    if (workPlanDeleteModal.loading) return
+    setWorkPlanDeleteModal({ isOpen: false, row: null, loading: false, error: '' })
+  }
+
+  const confirmWorkPlanDelete = async () => {
+    if (!workPlanDeleteModal.row) return
+    const activityId = workPlanDeleteModal.row.id
+    try {
+      setWorkPlanDeleteModal((prev) => ({ ...prev, loading: true, error: '' }))
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan/activities/${activityId}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'No se pudo eliminar la actividad')
+      setWorkPlanRows((prev) => prev.filter((row) => row.id !== activityId))
+      setStatusMsg('Actividad eliminada correctamente')
+      setStatusType('success')
+      closeWorkPlanDeleteModal()
+      closeWorkPlanDetailModal()
+    } catch (err) {
+      setWorkPlanDeleteModal((prev) => ({ ...prev, loading: false, error: err.message || 'Error al eliminar actividad' }))
+      setStatusMsg(err.message || 'Error al eliminar actividad')
+      setStatusType('error')
+    }
+  }
+
+  const openWorkPlanTaskModal = (activityId) => {
+    if (!activityId) return
+    setWorkPlanTaskModalActivityId(activityId)
+    setWorkPlanTaskDraftByActivity((prev) => ({
+      ...prev,
+      [activityId]: prev[activityId] || { name: '', status: 'pending', status_date: '', notes: '' }
+    }))
+    setShowWorkPlanTaskModal(true)
+  }
+
+  const closeWorkPlanTaskModal = () => {
+    setShowWorkPlanTaskModal(false)
+    setWorkPlanTaskModalActivityId(null)
+  }
+
+  const resolveWorkPlanOrders = ({ stage, sub_stage }, rows = workPlanRows) => {
+    const cleanStage = String(stage || '').trim()
+    const cleanSub = String(sub_stage || '').trim()
+    const list = Array.isArray(rows) ? rows : []
+    const sameStage = list.filter((row) => String(row.stage || '').trim() === cleanStage)
+    const sameSub = sameStage.filter((row) => String(row.sub_stage || '').trim() === cleanSub)
+
+    const stageOrder = sameStage.length > 0
+      ? Number(sameStage[0].stage_order) || 1
+      : (Math.max(0, ...list.map((row) => Number(row.stage_order) || 0)) + 1)
+
+    const subStageOrder = sameSub.length > 0
+      ? Number(sameSub[0].sub_stage_order) || 1
+      : (Math.max(0, ...sameStage.map((row) => Number(row.sub_stage_order) || 0)) + 1)
+
+    const activityOrder = Math.max(0, ...sameSub.map((row) => Number(row.activity_order) || 0)) + 1
+
+    return { stageOrder, subStageOrder, activityOrder }
+  }
+
+  const buildCollaboratorList = (selected = [], freeText = '', responsible = '') => {
+    const selectedItems = Array.isArray(selected) ? selected.map((x) => String(x || '').trim()).filter(Boolean) : []
+    const freeItems = String(freeText || '').split(',').map((x) => x.trim()).filter(Boolean)
+    const responsibleLabel = String(responsible || '').trim().toLowerCase()
+    return Array.from(new Set([...selectedItems, ...freeItems])).filter((item) => String(item || '').trim().toLowerCase() !== responsibleLabel)
+  }
+
+  const addCreateCollaborator = (raw) => {
+    const value = String(raw || '').trim()
+    if (!value) return
+    setWorkPlanForm((prev) => {
+      const responsibleLabel = String(prev.responsible_actor || '').trim().toLowerCase()
+      if (value.toLowerCase() === responsibleLabel) return prev
+      if ((prev.selected_collaborators || []).some((item) => String(item || '').trim().toLowerCase() === value.toLowerCase())) return prev
+      return { ...prev, selected_collaborators: [...(prev.selected_collaborators || []), value] }
+    })
+    setWorkPlanCollaboratorInput('')
+  }
+
+  const removeCreateCollaborator = (value) => {
+    setWorkPlanForm((prev) => ({
+      ...prev,
+      selected_collaborators: (prev.selected_collaborators || []).filter((item) => item !== value)
+    }))
+  }
+
+  const addWorkPlanCreateTempTask = () => {
+    const name = String(workPlanCreateTaskDraft.name || '').trim()
+    if (!name) {
+      setWorkPlanCreateError('Ingresá el nombre de la tarea temporal.')
+      return
+    }
+    const statusDateValue = workPlanCreateTaskDraft.status_date || toDateTimeLocalValue(new Date().toISOString())
+    const statusDateIso = toApiDateTime(statusDateValue)
+    if (!statusDateIso) {
+      setWorkPlanCreateError('La fecha de estado de la tarea es inválida.')
+      return
+    }
+    setWorkPlanCreateError('')
+    setWorkPlanCreateTasks((prev) => ([
+      ...prev,
+      {
+        temp_id: `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name,
+        status: workPlanCreateTaskDraft.status || 'pending',
+        status_date: statusDateValue,
+        notes: String(workPlanCreateTaskDraft.notes || '').trim()
+      }
+    ]))
+    setWorkPlanCreateTaskDraft({ name: '', status: 'pending', status_date: '', notes: '' })
+  }
+
+  const removeWorkPlanCreateTempTask = (tempId) => {
+    setWorkPlanCreateTasks((prev) => prev.filter((task) => task.temp_id !== tempId))
+  }
+
+  const updateWorkPlanCreateTempTask = (tempId, patch) => {
+    setWorkPlanCreateTasks((prev) => prev.map((task) => {
+      if (task.temp_id !== tempId) return task
+      return { ...task, ...patch }
+    }))
+  }
+
+  const addDetailCollaborator = (raw) => {
+    const value = String(raw || '').trim()
+    if (!value) return
+    setWorkPlanDetailDraft((prev) => {
+      if (!prev) return prev
+      const responsibleLabel = String(prev.responsible_actor || '').trim().toLowerCase()
+      if (value.toLowerCase() === responsibleLabel) return prev
+      if ((prev.selected_collaborators || []).some((item) => String(item || '').trim().toLowerCase() === value.toLowerCase())) return prev
+      return { ...prev, selected_collaborators: [...(prev.selected_collaborators || []), value] }
+    })
+    setWorkPlanDetailCollaboratorInput('')
+  }
+
+  const removeDetailCollaborator = (value) => {
+    setWorkPlanDetailDraft((prev) => prev ? ({
+      ...prev,
+      selected_collaborators: (prev.selected_collaborators || []).filter((item) => item !== value)
+    }) : prev)
+  }
+
+  const saveWorkPlanActivity = async () => {
+    if (!activeCareer) {
+      setStatusMsg('Seleccioná una carrera activa para cargar plan de trabajo.')
+      setStatusType('error')
+      return
+    }
+    const studyPlanName = getAccreditationStudyPlanName()
+    if (!studyPlanName) {
+      setWorkPlanCreateError('Seleccioná un plan de estudio activo para crear actividades.')
+      setStatusMsg('Seleccioná un plan de estudio activo para crear actividades.')
+      setStatusType('error')
+      return
+    }
+    const startIso = toApiDateTime(workPlanForm.start_date)
+    const deadlineIso = toApiDateTime(workPlanForm.deadline)
+    if (!startIso || !deadlineIso) {
+      setWorkPlanCreateError('Completá Fecha Inicio y Deadline con valores válidos.')
+      setStatusMsg('Completá Fecha Inicio y Deadline con valores válidos.')
+      setStatusType('error')
+      return
+    }
+    if (new Date(deadlineIso).getTime() < new Date(startIso).getTime()) {
+      setWorkPlanCreateError('Deadline no puede ser anterior a Fecha Inicio.')
+      setStatusMsg('Deadline no puede ser anterior a Fecha Inicio.')
+      setStatusType('error')
+      return
+    }
+    const collaborators = buildCollaboratorList(workPlanForm.selected_collaborators, workPlanForm.collaborators_text, workPlanForm.responsible_actor)
+    const stageName = String(workPlanForm.stage || '').trim()
+    const subStageName = String(workPlanForm.sub_stage || '').trim()
+    const activityName = String(workPlanForm.activity || '').trim()
+    if (!stageName || !subStageName || !activityName) {
+      setWorkPlanCreateError('Completá Etapa, Sub Etapa y Actividad.')
+      setStatusMsg('Completá Etapa, Sub Etapa y Actividad.')
+      setStatusType('error')
+      return
+    }
+    const { stageOrder, subStageOrder, activityOrder } = resolveWorkPlanOrders({ stage: stageName, sub_stage: subStageName })
+
+    try {
+      setWorkPlanSaving(true)
+      const payload = {
+        career: activeCareer,
+        study_plan: studyPlanName,
+        stage: stageName,
+        stage_order: stageOrder,
+        sub_stage: subStageName,
+        sub_stage_order: subStageOrder,
+        activity: activityName,
+        activity_order: activityOrder,
+        responsible_actor: workPlanForm.responsible_actor || null,
+        collaborators,
+        start_date: startIso,
+        deadline: deadlineIso,
+        status: workPlanForm.status,
+        observations: workPlanForm.observations || null,
+      }
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan/activities`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo guardar la actividad')
+      }
+
+      const createdActivityId = data?.id
+      const tempTasks = Array.isArray(workPlanCreateTasks) ? workPlanCreateTasks : []
+      let createdTaskCount = 0
+      const failedTaskNames = []
+      if (tempTasks.length > 0) {
+        if (!createdActivityId) {
+          failedTaskNames.push(...tempTasks.map((task) => task.name))
+        } else {
+          for (const task of tempTasks) {
+            const statusDateIso = toApiDateTime(task.status_date || toDateTimeLocalValue(new Date().toISOString()))
+            if (!statusDateIso) {
+              failedTaskNames.push(task.name)
+              continue
+            }
+            const taskPayload = {
+              name: task.name,
+              status: task.status || 'pending',
+              status_date: statusDateIso,
+              notes: task.notes || null
+            }
+            try {
+              const taskRes = await fetch(`${API_BASE_URL}/accreditation/workplan/activities/${createdActivityId}/tasks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(taskPayload)
+              })
+              const taskData = await taskRes.json().catch(() => ({}))
+              if (!taskRes.ok) {
+                throw new Error(taskData.detail || 'No se pudo crear tarea temporal')
+              }
+              createdTaskCount += 1
+            } catch (_err) {
+              failedTaskNames.push(task.name)
+            }
+          }
+        }
+      }
+
+      let successMessage = 'Actividad agregada al plan de trabajo'
+      if (createdTaskCount > 0) {
+        successMessage += ` · ${createdTaskCount} tarea${createdTaskCount === 1 ? '' : 's'} creada${createdTaskCount === 1 ? '' : 's'}`
+      }
+      if (failedTaskNames.length > 0) {
+        successMessage += ` · ${failedTaskNames.length} tarea${failedTaskNames.length === 1 ? '' : 's'} no se pudo crear`
+      }
+      setStatusMsg(successMessage)
+      setStatusType('success')
+      setWorkPlanCreateError('')
+      const updatedRows = await fetchWorkPlanRows(activeCareer)
+      setShowWorkPlanCreateModal(false)
+      const stageOptions = getWorkPlanStageOptions(updatedRows)
+      const nextStage = stageOptions.find((opt) => opt.name === stageName)?.name || stageName
+      const subOptions = getWorkPlanSubStageOptions(nextStage, updatedRows)
+      const nextSub = subOptions.find((opt) => opt.name === subStageName)?.name || subStageName
+      setWorkPlanForm((prev) => ({
+        ...prev,
+        stage: nextStage,
+        sub_stage: nextSub,
+        activity: '',
+        selected_collaborators: [],
+        collaborators_text: '',
+        observations: '',
+        status: 'pending'
+      }))
+      setWorkPlanCollaboratorInput('')
+      setWorkPlanCreateTaskDraft({ name: '', status: 'pending', status_date: '', notes: '' })
+      setWorkPlanCreateTasks([])
+    } catch (err) {
+      setWorkPlanCreateError(err.message || 'Error desconocido al guardar actividad')
+      setStatusMsg(err.message || 'Error desconocido al guardar actividad')
+      setStatusType('error')
+    } finally {
+      setWorkPlanSaving(false)
+    }
+  }
+
+  const saveWorkPlanActivityDetail = async () => {
+    if (!workPlanDetailRow || !workPlanDetailDraft) return
+    const startIso = toApiDateTime(workPlanDetailDraft.start_date)
+    const deadlineIso = toApiDateTime(workPlanDetailDraft.deadline)
+    if (!startIso || !deadlineIso) {
+      setWorkPlanDetailError('Completá Fecha Inicio y Deadline con valores válidos.')
+      setStatusMsg('Completá Fecha Inicio y Deadline con valores válidos.')
+      setStatusType('error')
+      return
+    }
+    if (new Date(deadlineIso).getTime() < new Date(startIso).getTime()) {
+      setWorkPlanDetailError('Deadline no puede ser anterior a Fecha Inicio.')
+      setStatusMsg('Deadline no puede ser anterior a Fecha Inicio.')
+      setStatusType('error')
+      return
+    }
+
+    const collaborators = buildCollaboratorList(
+      workPlanDetailDraft.selected_collaborators,
+      workPlanDetailDraft.collaborators_text,
+      workPlanDetailDraft.responsible_actor
+    )
+
+    const stageName = String(workPlanDetailDraft.stage || '').trim()
+    const subStageName = String(workPlanDetailDraft.sub_stage || '').trim()
+    const activityName = String(workPlanDetailDraft.activity || '').trim()
+    if (!stageName || !subStageName || !activityName) {
+      setWorkPlanDetailError('Completá Etapa, Sub Etapa y Actividad.')
+      setStatusMsg('Completá Etapa, Sub Etapa y Actividad.')
+      setStatusType('error')
+      return
+    }
+
+    try {
+      setWorkPlanDetailSaving(true)
+      const detailStatusOptions = getWorkPlanDetailStatusOptions()
+      const normalizedDraftStatus = String(workPlanDetailDraft.status || '').toLowerCase()
+      const resolvedStatus = detailStatusOptions.some((opt) => opt.value === normalizedDraftStatus)
+        ? normalizedDraftStatus
+        : (detailStatusOptions[0]?.value || 'pending')
+      const stageChanged = stageName !== String(workPlanDetailRow.stage || '').trim()
+      const subStageChanged = subStageName !== String(workPlanDetailRow.sub_stage || '').trim()
+      const rowsForOrderResolution = (workPlanRows || []).filter((item) => item.id !== workPlanDetailRow.id)
+      const { stageOrder, subStageOrder, activityOrder } = resolveWorkPlanOrders({ stage: stageName, sub_stage: subStageName }, rowsForOrderResolution)
+      const payload = {
+        stage: stageName,
+        sub_stage: subStageName,
+        activity: activityName,
+        responsible_actor: workPlanDetailDraft.responsible_actor || null,
+        collaborators,
+        status: resolvedStatus,
+        observations: workPlanDetailDraft.observations || null,
+      }
+
+      if (stageChanged || subStageChanged) {
+        payload.stage_order = stageOrder
+        payload.sub_stage_order = subStageOrder
+        payload.activity_order = activityOrder
+      }
+
+      const originalStartLocal = toDateTimeLocalValue(workPlanDetailRow.start_date)
+      const originalDeadlineLocal = toDateTimeLocalValue(workPlanDetailRow.deadline)
+
+      if ((workPlanDetailDraft.start_date || '') !== originalStartLocal) {
+        payload.start_date = startIso
+      }
+      if ((workPlanDetailDraft.deadline || '') !== originalDeadlineLocal) {
+        payload.deadline = deadlineIso
+      }
+
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan/activities/${workPlanDetailRow.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'No se pudo actualizar la actividad')
+
+      setWorkPlanRows((prev) => prev.map((item) => (item.id === workPlanDetailRow.id ? data : item)))
+      setWorkPlanDetailRow(data)
+      setWorkPlanDetailError('')
+      setWorkPlanDetailDraft((prev) => ({
+        ...prev,
+        collaborators_text: '',
+        selected_collaborators: Array.isArray(data.collaborators) ? data.collaborators : [],
+        start_date: toDateTimeLocalValue(data.start_date),
+        deadline: toDateTimeLocalValue(data.deadline),
+      }))
+      setStatusMsg('Actividad actualizada')
+      setStatusType('success')
+      setWorkPlanDetailEditMode(false)
+    } catch (err) {
+      setWorkPlanDetailError(err.message || 'Error al actualizar actividad')
+      setStatusMsg(err.message || 'Error al actualizar actividad')
+      setStatusType('error')
+    } finally {
+      setWorkPlanDetailSaving(false)
+    }
+  }
+
+  const updateWorkPlanActivityStatus = async (row, nextStatus) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan/activities/${row.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'No se pudo actualizar estado')
+      setWorkPlanRows((prev) => prev.map((item) => (item.id === row.id ? data : item)))
+      setStatusMsg('Estado de actividad actualizado')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'Error al actualizar estado')
+      setStatusType('error')
+    }
+  }
+
+  const updateWorkPlanDeadline = async (row, deadlineValue) => {
+    const deadlineIso = toApiDateTime(deadlineValue)
+    if (!deadlineIso) return
+    if (new Date(deadlineIso).getTime() < new Date(row.start_date).getTime()) {
+      setStatusMsg('Deadline no puede ser anterior a Fecha Inicio.')
+      setStatusType('error')
+      return
+    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan/activities/${row.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deadline: deadlineIso })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'No se pudo actualizar deadline')
+      setWorkPlanRows((prev) => prev.map((item) => (item.id === row.id ? data : item)))
+      setStatusMsg('Deadline actualizado')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'Error al actualizar deadline')
+      setStatusType('error')
+    }
+  }
+
+  const addTaskToWorkPlanActivity = async (activityId, customDraft = null) => {
+    const draft = customDraft || workPlanTaskDraftByActivity[activityId] || { name: '', status: 'pending', status_date: '', notes: '' }
+    const name = String(draft.name || '').trim()
+    if (!name) return
+    const statusDateIso = toApiDateTime(draft.status_date || new Date().toISOString().slice(0, 16))
+    if (!statusDateIso) {
+      setStatusMsg('Fecha de tarea inválida')
+      setStatusType('error')
+      return
+    }
+    try {
+      setWorkPlanTaskSavingByActivity((prev) => ({ ...prev, [activityId]: true }))
+      const payload = {
+        name,
+        status: draft.status || 'pending',
+        status_date: statusDateIso,
+        notes: draft.notes || null,
+      }
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan/activities/${activityId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'No se pudo agregar tarea')
+      setWorkPlanRows((prev) => prev.map((row) => {
+        if (row.id !== activityId) return row
+        return { ...row, tasks: [...(row.tasks || []), data] }
+      }))
+
+      if (workPlanDetailRow?.id === activityId) {
+        setWorkPlanDetailRow((prev) => prev ? ({ ...prev, tasks: [...(prev.tasks || []), data] }) : prev)
+      }
+      setWorkPlanTaskDraftByActivity((prev) => ({
+        ...prev,
+        [activityId]: { name: '', status: 'pending', status_date: '', notes: '' }
+      }))
+      setStatusMsg('Tarea agregada')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'Error al agregar tarea')
+      setStatusType('error')
+    } finally {
+      setWorkPlanTaskSavingByActivity((prev) => ({ ...prev, [activityId]: false }))
+    }
+  }
+
+  const updateWorkPlanTask = async (activityId, task, patch) => {
+    const hasStatusChange = Object.prototype.hasOwnProperty.call(patch || {}, 'status')
+    const hasStatusDateChange = Object.prototype.hasOwnProperty.call(patch || {}, 'status_date')
+    const status = patch?.status ?? task?.status ?? 'pending'
+    const payload = { status }
+    if (!hasStatusChange && hasStatusDateChange) {
+      const statusDateIso = toApiDateTime(patch?.status_date)
+      if (!statusDateIso) {
+        setStatusMsg('Fecha de estado de tarea inválida')
+        setStatusType('error')
+        return
+      }
+      payload.status_date = statusDateIso
+    }
+    try {
+      setWorkPlanTaskBusyById((prev) => ({ ...prev, [task.id]: true }))
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'No se pudo actualizar tarea')
+      setWorkPlanRows((prev) => prev.map((row) => {
+        if (row.id !== activityId) return row
+        return {
+          ...row,
+          tasks: (row.tasks || []).map((item) => (item.id === task.id ? data : item))
+        }
+      }))
+      if (workPlanDetailRow?.id === activityId) {
+        setWorkPlanDetailRow((prev) => prev ? ({
+          ...prev,
+          tasks: (prev.tasks || []).map((item) => (item.id === task.id ? data : item))
+        }) : prev)
+      }
+      setStatusMsg('Tarea actualizada')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'Error al actualizar tarea')
+      setStatusType('error')
+    } finally {
+      setWorkPlanTaskBusyById((prev) => ({ ...prev, [task.id]: false }))
+    }
+  }
+
+  const deleteWorkPlanTask = async (activityId, taskId) => {
+    try {
+      setWorkPlanTaskBusyById((prev) => ({ ...prev, [taskId]: true }))
+      const res = await fetch(`${API_BASE_URL}/accreditation/workplan/tasks/${taskId}`, {
+        method: 'DELETE'
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'No se pudo eliminar tarea')
+      }
+      setWorkPlanRows((prev) => prev.map((row) => {
+        if (row.id !== activityId) return row
+        return {
+          ...row,
+          tasks: (row.tasks || []).filter((task) => task.id !== taskId)
+        }
+      }))
+      if (workPlanDetailRow?.id === activityId) {
+        setWorkPlanDetailRow((prev) => prev ? ({
+          ...prev,
+          tasks: (prev.tasks || []).filter((task) => task.id !== taskId)
+        }) : prev)
+      }
+      setStatusMsg('Tarea eliminada')
+      setStatusType('success')
+    } catch (err) {
+      setStatusMsg(err.message || 'Error al eliminar tarea')
+      setStatusType('error')
+    } finally {
+      setWorkPlanTaskBusyById((prev) => ({ ...prev, [taskId]: false }))
+    }
+  }
+
+  const getWorkPlanRowTone = (row) => {
+    const now = new Date()
+    const deadline = new Date(row.deadline)
+    const endDate = row.end_date ? new Date(row.end_date) : null
+    if (row.status === 'completed') {
+      if (endDate && deadline && endDate.getTime() > deadline.getTime()) {
+        return { background: '#fff3e0', border: '#ffb74d' }
+      }
+      return { background: '#e8f5e9', border: '#a5d6a7' }
+    }
+    if (deadline && now.getTime() > deadline.getTime()) {
+      return { background: '#ffebee', border: '#ef9a9a' }
+    }
+    return { background: '#fff', border: '#e5eaf2' }
+  }
+
+  const hasWorkPlanDetailPendingChanges = () => {
+    if (!workPlanDetailRow || !workPlanDetailDraft) return false
+    const statusChanged = String(workPlanDetailDraft.status || '').toLowerCase() !== String(workPlanDetailRow.status || '').toLowerCase()
+    const observationsChanged = String(workPlanDetailDraft.observations || '') !== String(workPlanDetailRow.observations || '')
+
+    if (statusChanged || observationsChanged) return true
+    if (!workPlanDetailEditMode) return false
+
+    const stageChanged = String(workPlanDetailDraft.stage || '').trim() !== String(workPlanDetailRow.stage || '').trim()
+    const subStageChanged = String(workPlanDetailDraft.sub_stage || '').trim() !== String(workPlanDetailRow.sub_stage || '').trim()
+    const activityChanged = String(workPlanDetailDraft.activity || '').trim() !== String(workPlanDetailRow.activity || '').trim()
+    const responsibleChanged = String(workPlanDetailDraft.responsible_actor || '') !== String(workPlanDetailRow.responsible_actor || '')
+    const startChanged = (workPlanDetailDraft.start_date || '') !== toDateTimeLocalValue(workPlanDetailRow.start_date)
+    const deadlineChanged = (workPlanDetailDraft.deadline || '') !== toDateTimeLocalValue(workPlanDetailRow.deadline)
+    const selectedCollab = (workPlanDetailDraft.selected_collaborators || []).map((x) => String(x || '').trim()).filter(Boolean).sort()
+    const originalCollab = (workPlanDetailRow.collaborators || []).map((x) => String(x || '').trim()).filter(Boolean).sort()
+    const collaboratorsChanged = selectedCollab.length !== originalCollab.length || selectedCollab.some((v, i) => v !== originalCollab[i])
+    const collaboratorsTextChanged = String(workPlanDetailDraft.collaborators_text || '').trim().length > 0
+
+    return stageChanged || subStageChanged || activityChanged || responsibleChanged || startChanged || deadlineChanged || collaboratorsChanged || collaboratorsTextChanged
+  }
+
+  const renderWorkPlanStatusCapsule = (status) => {
+    const meta = getWorkPlanStatusMeta(status)
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '2px 8px',
+          borderRadius: '999px',
+          fontSize: '11px',
+          fontWeight: 700,
+          color: '#fff',
+          background: meta.color,
+          textTransform: 'capitalize'
+        }}
+      >
+        {meta.label}
+      </span>
+    )
+  }
+
+  const buildWorkPlanGroupedRows = (rows) => {
+    const sorted = [...(rows || [])].sort((a, b) => {
+      if ((a.stage_order || 0) !== (b.stage_order || 0)) return (a.stage_order || 0) - (b.stage_order || 0)
+      if ((a.sub_stage_order || 0) !== (b.sub_stage_order || 0)) return (a.sub_stage_order || 0) - (b.sub_stage_order || 0)
+      if ((a.activity_order || 0) !== (b.activity_order || 0)) return (a.activity_order || 0) - (b.activity_order || 0)
+      return (a.id || 0) - (b.id || 0)
+    })
+
+    const stageSpanByKey = {}
+    const subSpanByKey = {}
+    sorted.forEach((row) => {
+      const stageKey = `${row.stage_order}__${row.stage}`
+      const subKey = `${row.stage_order}__${row.sub_stage_order}__${row.sub_stage}`
+      stageSpanByKey[stageKey] = (stageSpanByKey[stageKey] || 0) + 1
+      subSpanByKey[subKey] = (subSpanByKey[subKey] || 0) + 1
+    })
+
+    const seenStage = new Set()
+    const seenSub = new Set()
+    const output = []
+
+    sorted.forEach((row) => {
+      const stageKey = `${row.stage_order}__${row.stage}`
+      const subKey = `${row.stage_order}__${row.sub_stage_order}__${row.sub_stage}`
+      const showStage = !seenStage.has(stageKey)
+      const showSub = !seenSub.has(subKey)
+      output.push({
+        row,
+        showStage,
+        showSub,
+        stageRowSpan: stageSpanByKey[stageKey] || 1,
+        subRowSpan: subSpanByKey[subKey] || 1,
+      })
+      if (showStage) seenStage.add(stageKey)
+      if (showSub) seenSub.add(subKey)
+    })
+
+    return output
+  }
+
+  const toggleAccreditationHistory = async (evidenceId) => {
+    const isOpen = !!accreditationHistoryOpenById[evidenceId]
+    if (isOpen) {
+      setAccreditationHistoryOpenById((prev) => ({ ...prev, [evidenceId]: false }))
+      return
+    }
+
+    setAccreditationHistoryOpenById((prev) => ({ ...prev, [evidenceId]: true }))
+    if (accreditationHistoryById[evidenceId]) {
+      return
+    }
+
+    try {
+      setAccreditationHistoryLoadingById((prev) => ({ ...prev, [evidenceId]: true }))
+      setAccreditationHistoryErrorById((prev) => ({ ...prev, [evidenceId]: '' }))
+      const [versionsRes, auditRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/accreditation/evidences/${evidenceId}/versions`),
+        fetch(`${API_BASE_URL}/accreditation/evidences/${evidenceId}/audit`)
+      ])
+      const versionsData = await versionsRes.json().catch(() => [])
+      const auditData = await auditRes.json().catch(() => [])
+      if (!versionsRes.ok) {
+        throw new Error(versionsData.detail || 'No se pudieron cargar las versiones')
+      }
+      if (!auditRes.ok) {
+        throw new Error(auditData.detail || 'No se pudo cargar la auditoría')
+      }
+      setAccreditationHistoryById((prev) => ({
+        ...prev,
+        [evidenceId]: {
+          versions: Array.isArray(versionsData) ? versionsData : [],
+          audit: Array.isArray(auditData) ? auditData : []
+        }
+      }))
+    } catch (err) {
+      setAccreditationHistoryErrorById((prev) => ({
+        ...prev,
+        [evidenceId]: err.message || 'Error desconocido al cargar historial'
+      }))
+    } finally {
+      setAccreditationHistoryLoadingById((prev) => ({ ...prev, [evidenceId]: false }))
+    }
+  }
+
   const fetchGdocStatuses = async (items) => {
     const target = Array.isArray(items) ? items : proposals
     const ids = Array.from(new Set(target.filter((p) => p?.gdoc_url).map((p) => p.id).filter((id) => id != null)))
@@ -1278,6 +3000,27 @@ const App = () => {
     }, refreshMs)
     return () => clearInterval(timer)
   }, [activeMenu, proposals, activeCareer, viewRole, selectedTeacherId, selectedTeacherName, gdocStatusLoading, lastGdocCheckAt])
+
+  useEffect(() => {
+    if (activeMenu !== 'resoluciones') return
+    if (accreditationSection !== 'registro') return
+    fetchAccreditationEvidences(activeCareer)
+  }, [activeMenu, accreditationSection, activeCareer])
+
+  useEffect(() => {
+    if (activeMenu !== 'resoluciones') return
+    if (accreditationSection !== 'config') return
+    loadAccreditationSettings(activeCareer)
+    fetchAccreditationTeachers(activeCareer)
+  }, [activeMenu, accreditationSection, activeCareer, selectedPlanFilterId])
+
+  useEffect(() => {
+    if (activeMenu !== 'resoluciones') return
+    if (accreditationSection !== 'actividades') return
+    loadAccreditationSettings(activeCareer)
+    fetchAccreditationTeachers(activeCareer)
+    fetchWorkPlanRows(activeCareer)
+  }, [activeMenu, accreditationSection, activeCareer, selectedPlanFilterId])
 
   const mapCompetenciesToPlans = async (career) => {
     if (!career || competencyPlanMappedByCareer[career]) {
@@ -6952,7 +8695,7 @@ const App = () => {
         {!isDocenteView && (
           <MenuButton label="Docentes" onClick={() => handleMenuChange('docentes')} active={activeMenu === 'docentes'} />
         )}
-        <MenuButton label="Resoluciones" onClick={() => handleMenuChange('resoluciones')} active={activeMenu === 'resoluciones'} />
+        <MenuButton label="Acreditación" onClick={() => handleMenuChange('resoluciones')} active={activeMenu === 'resoluciones'} />
 
         <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
           <label style={{ ...styles.label, marginTop: 0 }}>Carrera activa</label>
@@ -7095,7 +8838,7 @@ const App = () => {
               </div>
               <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', padding: '16px', background: '#fafafa' }}>
                 <div style={{ fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '24px' }}>📄</span> Resoluciones
+                  <span style={{ fontSize: '24px' }}>📄</span> Acreditación
                 </div>
                 <div style={{ fontSize: '40px', fontWeight: 800 }}>0</div>
               </div>
@@ -8097,7 +9840,7 @@ const App = () => {
               </div>
 
               {/* SAVE BUTTONS - STICKY */}
-              <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 5000, display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {!formData.gdocUrl && (
                   <div style={{ background: '#ffffff', border: '1px solid #d9e1e6', borderRadius: '10px', padding: '10px 12px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)', minWidth: '260px' }}>
                     <div style={{ fontSize: '12px', color: '#445', marginBottom: '6px', fontWeight: 600 }}>Crear en Google Drive al guardar</div>
@@ -11866,11 +13609,1612 @@ const App = () => {
           </div>
         )}
 
-        {/* RESOLUCIONES - Placeholder */}
+        {/* ACREDITACIÓN */}
         {activeMenu === 'resoluciones' && (
           <div style={styles.section}>
-            <h2>Resoluciones</h2>
-            <p>Funcionalidad en desarrollo</p>
+            <h2>Acreditación</h2>
+            <p style={{ marginBottom: '12px' }}>
+              Módulo en construcción para gestión integral de evidencias, seguimiento de estándares y trazabilidad del proceso CONEAU por carrera.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(210px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+              {[
+                {
+                  key: 'actividades',
+                  emoji: '📝',
+                  title: 'Plan de Trabajo',
+                  description: 'Cronograma por etapas y subetapas con responsables, tareas, estados y fechas clave.',
+                  color: { bg: '#fff8e1', border: '#ffd54f', activeBg: '#ffefc2', shadow: 'rgba(255, 193, 7, 0.25)' }
+                },
+                {
+                  key: 'registro',
+                  emoji: '📚',
+                  title: 'Registro de evidencias',
+                  description: 'Visualización, filtros, edición, historial y trazabilidad de evidencias registradas.',
+                  color: { bg: '#e8f0fe', border: '#90caf9', activeBg: '#d7e7ff', shadow: 'rgba(26, 115, 232, 0.25)' }
+                },
+                {
+                  key: 'ingesta',
+                  emoji: '📥',
+                  title: 'Ingesta',
+                  description: 'Carga de referencias de Drive o archivos locales para registrar nuevas evidencias.',
+                  color: { bg: '#e8f5e9', border: '#a5d6a7', activeBg: '#d9f0dc', shadow: 'rgba(0, 168, 84, 0.22)' }
+                },
+                {
+                  key: 'config',
+                  emoji: '⚙️',
+                  title: 'Configuración por carrera',
+                  description: 'Rutas de procesamiento, tipos de evidencia, roles y actores responsables.',
+                  color: { bg: '#f3e5f5', border: '#ce93d8', activeBg: '#ead7ee', shadow: 'rgba(156, 39, 176, 0.2)' }
+                },
+              ].map((item) => {
+                const isActive = accreditationSection === item.key
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => setAccreditationSection(item.key)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.boxShadow = `0 4px 12px ${item.color.shadow}`
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.boxShadow = isActive ? `0 4px 12px ${item.color.shadow}` : 'none'
+                    }}
+                    style={{
+                      textAlign: 'center',
+                      border: isActive ? `2px solid ${item.color.border}` : `1px solid ${item.color.border}`,
+                      borderRadius: '8px',
+                      background: isActive ? item.color.activeBg : item.color.bg,
+                      padding: '20px',
+                      cursor: 'pointer',
+                      minHeight: '180px',
+                      transition: 'all 0.3s ease',
+                      boxShadow: isActive ? `0 4px 12px ${item.color.shadow}` : 'none'
+                    }}
+                  >
+                    <div style={{ fontSize: '32px', marginBottom: '10px' }}>{item.emoji}</div>
+                    <h3 style={{ margin: '0 0 10px 0', color: '#1a3d5c', fontSize: '22px', fontWeight: 700 }}>{item.title}</h3>
+                    <p style={{ color: '#555', margin: 0, fontSize: '14px', lineHeight: 1.35 }}>{item.description}</p>
+                  </button>
+                )
+              })}
+            </div>
+
+            {accreditationSection === 'actividades' && (
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <div style={{ border: '1px solid #cfe0ff', borderRadius: '12px', background: 'linear-gradient(135deg, #f3f8ff 0%, #eef7ff 55%, #f8f2ff 100%)', padding: '14px', boxShadow: '0 8px 20px rgba(26,115,232,0.08)' }}>
+                  <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '8px' }}>Plan de Trabajo (cronograma)</div>
+                  <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
+                    Cargá actividades por Etapa/Sub Etapa con número automático (Etapa.SubEtapa.Actividad), responsables, fechas y tareas.
+                  </div>
+                  {!activeCareer && (
+                    <div style={{ padding: '8px 10px', borderRadius: '6px', background: '#fff8e1', color: '#8d6e00', border: '1px solid #ffe082' }}>
+                      Seleccioná una carrera activa para gestionar el plan de trabajo.
+                    </div>
+                  )}
+                  {workPlanError && (
+                    <div style={{ marginTop: '8px', padding: '8px 10px', borderRadius: '6px', background: '#ffebee', color: '#b71c1c', border: '1px solid #ffcdd2' }}>
+                      {workPlanError}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ fontWeight: 700, color: '#1a3d5c' }}>Cronograma</div>
+                    <button
+                      style={{ ...styles.button, marginRight: 0, background: 'linear-gradient(135deg, #1a73e8 0%, #6a5acd 100%)' }}
+                      onClick={openWorkPlanCreateModal}
+                      disabled={!activeCareer}
+                    >
+                      + Agregar actividad
+                    </button>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#0066cc', color: 'white' }}>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Etapa</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>N°</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Sub Etapa</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Actividad</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Responsable</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Colaboradores</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Fecha Inicio</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Deadline</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Estado</th>
+                          <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Fecha Fin</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {workPlanLoading && (
+                          <tr>
+                            <td colSpan={10} style={{ padding: '10px', color: '#607d8b' }}>Cargando plan de trabajo...</td>
+                          </tr>
+                        )}
+                        {!workPlanLoading && workPlanRows.length === 0 && (
+                          <tr>
+                            <td colSpan={10} style={{ padding: '10px', color: '#607d8b' }}>Sin actividades cargadas.</td>
+                          </tr>
+                        )}
+                        {!workPlanLoading && buildWorkPlanGroupedRows(workPlanRows).map((entry, idx) => {
+                          const row = entry.row
+                          const tone = getWorkPlanRowTone(row)
+                          const collaboratorsCount = Array.isArray(row.collaborators) ? row.collaborators.length : 0
+                          const responsibleMissing = !String(row.responsible_actor || '').trim()
+                          return (
+                            <tr
+                              key={`wp-${row.id}-${idx}`}
+                              style={{ background: tone.background, borderBottom: `1px solid ${tone.border}`, cursor: 'pointer' }}
+                              onClick={() => openWorkPlanDetailModal(row)}
+                              title="Abrir detalle de actividad"
+                            >
+                              {entry.showStage && (
+                                <td rowSpan={entry.stageRowSpan} style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center' }}>
+                                  <strong>{row.stage}</strong>
+                                </td>
+                              )}
+                              <td style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center' }}>{row.activity_number}</td>
+                              {entry.showSub && (
+                                <td rowSpan={entry.subRowSpan} style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center' }}>{row.sub_stage}</td>
+                              )}
+                              <td style={{ padding: '8px', verticalAlign: 'top', color: '#0d47a1', textAlign: 'center' }}>
+                                <strong>{row.activity}</strong>
+                              </td>
+                              <td style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center' }}>
+                                {responsibleMissing ? (
+                                  <span style={{ color: '#c62828', fontWeight: 700 }}>Sin asignar</span>
+                                ) : (
+                                  row.responsible_actor
+                                )}
+                              </td>
+                              <td style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center' }}>{collaboratorsCount > 0 ? collaboratorsCount : '-'}</td>
+                              <td style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center' }}>{formatDateTimeBuenosAires(row.start_date)}</td>
+                              <td style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center' }}>{formatDateTimeBuenosAires(row.deadline)}</td>
+                              <td style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center', color: getWorkPlanStatusMeta(row.status).color, fontWeight: 700 }}>
+                                {getWorkPlanStatusMeta(row.status).label}
+                              </td>
+                              <td style={{ padding: '8px', verticalAlign: 'top', textAlign: 'center' }}>{row.end_date ? formatDateTimeBuenosAires(row.end_date) : '-'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showWorkPlanCreateModal && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}>
+                <div style={{ width: 'min(980px, 96vw)', maxHeight: '88vh', overflow: 'auto', background: '#fff', borderRadius: '12px', padding: '18px', border: '1px solid #dfe8f6' }} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <div style={{ fontWeight: 800, color: '#1a3d5c', fontSize: '18px' }}>Nueva actividad</div>
+                    <button style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }} onClick={closeWorkPlanCreateModal}>Cerrar</button>
+                  </div>
+
+                  {(() => {
+                    const stageOptions = getWorkPlanStageOptions(workPlanRows)
+                    const subOptions = getWorkPlanSubStageOptions(workPlanForm.stage, workPlanRows)
+                    const actors = (accreditationConfigForm.actors || []).map((actor) => `${actor.name}${actor.role ? ` · ${actor.role}` : ''}`)
+                    const filteredActorOptions = actors.filter((label) => label !== (workPlanForm.responsible_actor || ''))
+                    return (
+                      <>
+                        {workPlanCreateError && (
+                          <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ffcdd2', background: '#ffebee', color: '#b71c1c' }}>
+                            {workPlanCreateError}
+                          </div>
+                        )}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '10px' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Etapa</div>
+                            <input
+                              list="workplan-stage-list"
+                              style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                              placeholder="Escribí o seleccioná etapa"
+                              value={workPlanForm.stage}
+                              onChange={(e) => {
+                                const nextStage = e.target.value
+                                const nextSubOptions = getWorkPlanSubStageOptions(nextStage, workPlanRows)
+                                setWorkPlanForm((prev) => ({
+                                  ...prev,
+                                  stage: nextStage,
+                                  sub_stage: nextSubOptions.some((item) => item.name === prev.sub_stage) ? prev.sub_stage : (nextSubOptions[0]?.name || '')
+                                }))
+                              }}
+                              disabled={workPlanSaving}
+                            />
+                            <datalist id="workplan-stage-list">
+                              {stageOptions.map((stage) => <option key={`stage-opt-${stage.name}`} value={stage.name} />)}
+                            </datalist>
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Sub etapa</div>
+                            <input
+                              list="workplan-substage-list"
+                              style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                              placeholder="Escribí o seleccioná sub etapa"
+                              value={workPlanForm.sub_stage}
+                              onChange={(e) => setWorkPlanForm((prev) => ({ ...prev, sub_stage: e.target.value }))}
+                              disabled={workPlanSaving}
+                            />
+                            <datalist id="workplan-substage-list">
+                              {subOptions.map((sub) => <option key={`sub-opt-${sub.name}`} value={sub.name} />)}
+                            </datalist>
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Actividad</div>
+                            <input style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }} placeholder="Nombre de actividad" value={workPlanForm.activity} onChange={(e) => setWorkPlanForm((prev) => ({ ...prev, activity: e.target.value }))} disabled={workPlanSaving} />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px 200px 200px', gap: '12px', marginBottom: '10px' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Responsable</div>
+                            <select
+                              style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                              value={workPlanForm.responsible_actor}
+                              onChange={(e) => {
+                                const nextResponsible = e.target.value
+                                setWorkPlanForm((prev) => ({
+                                  ...prev,
+                                  responsible_actor: nextResponsible,
+                                  selected_collaborators: (prev.selected_collaborators || []).filter((name) => name !== nextResponsible)
+                                }))
+                              }}
+                              disabled={workPlanSaving}
+                            >
+                              <option value="">Sin asignar</option>
+                              {actors.map((label, idx) => <option key={`resp-create-${idx}`} value={label}>{label}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Fecha inicio</div>
+                            <input
+                              style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                              type="datetime-local"
+                              value={workPlanForm.start_date}
+                              max={workPlanForm.deadline || undefined}
+                              onChange={(e) => {
+                                const nextStart = e.target.value
+                                if (workPlanForm.deadline && nextStart && new Date(nextStart).getTime() > new Date(workPlanForm.deadline).getTime()) {
+                                  setWorkPlanCreateError('Fecha Inicio no puede ser posterior a Deadline.')
+                                  return
+                                }
+                                setWorkPlanCreateError('')
+                                setWorkPlanForm((prev) => ({ ...prev, start_date: nextStart }))
+                              }}
+                              disabled={workPlanSaving}
+                            />
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Deadline</div>
+                            <input
+                              style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                              type="datetime-local"
+                              value={workPlanForm.deadline}
+                              min={workPlanForm.start_date || undefined}
+                              onChange={(e) => {
+                                const nextDeadline = e.target.value
+                                if (workPlanForm.start_date && nextDeadline && new Date(nextDeadline).getTime() < new Date(workPlanForm.start_date).getTime()) {
+                                  setWorkPlanCreateError('Deadline no puede ser anterior a Fecha Inicio.')
+                                  return
+                                }
+                                setWorkPlanCreateError('')
+                                setWorkPlanForm((prev) => ({ ...prev, deadline: nextDeadline }))
+                              }}
+                              disabled={workPlanSaving}
+                            />
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Estado</div>
+                            <select style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff', color: getWorkPlanStatusMeta(workPlanForm.status).color, fontWeight: 700 }} value={workPlanForm.status} onChange={(e) => setWorkPlanForm((prev) => ({ ...prev, status: e.target.value }))} disabled={workPlanSaving}>
+                              {WORKPLAN_STATUS_OPTIONS.map((opt) => <option key={`st-new-${opt.value}`} value={opt.value}>{opt.label}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ border: '1px solid #d7e6ff', borderRadius: '10px', padding: '12px', marginBottom: '10px', background: '#f7fbff' }}>
+                          <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Colaboradores</div>
+                          <input
+                            list="workplan-collaborators-list"
+                            style={{ ...styles.input, border: '1px solid #cbdcff', background: '#fff' }}
+                            placeholder="Escribí un colaborador y Enter"
+                            value={workPlanCollaboratorInput}
+                            onChange={(e) => setWorkPlanCollaboratorInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                addCreateCollaborator(workPlanCollaboratorInput)
+                              }
+                            }}
+                            disabled={workPlanSaving}
+                          />
+                          <datalist id="workplan-collaborators-list">
+                            {filteredActorOptions.map((label, idx) => <option key={`collab-opt-create-${idx}`} value={label} />)}
+                          </datalist>
+                          <div style={{ marginTop: '8px', border: '1px solid #dbe7ff', borderRadius: '8px', overflow: 'hidden' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                              <thead>
+                                <tr style={{ background: '#eef4ff' }}>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid #dbe7ff' }}>Colaborador</th>
+                                  <th style={{ textAlign: 'center', padding: '6px 8px', borderBottom: '1px solid #dbe7ff', width: '90px' }}>Acción</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(workPlanForm.selected_collaborators || []).length === 0 ? (
+                                  <tr>
+                                    <td colSpan={2} style={{ padding: '8px', color: '#78909c' }}>Sin colaboradores seleccionados.</td>
+                                  </tr>
+                                ) : (
+                                  (workPlanForm.selected_collaborators || []).map((name) => (
+                                    <tr key={`create-collab-row-${name}`}>
+                                      <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', color: '#355070' }}>{name}</td>
+                                      <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', textAlign: 'center' }}>
+                                        <button style={{ ...styles.button, marginRight: 0, padding: '2px 8px', background: '#90a4ae' }} onClick={() => removeCreateCollaborator(name)}>Quitar</button>
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                          <input
+                            style={{ ...styles.input, marginTop: '8px' }}
+                            placeholder="Opcional: también podés pegar nombres separados por coma"
+                            value={workPlanForm.collaborators_text}
+                            onChange={(e) => setWorkPlanForm((prev) => ({ ...prev, collaborators_text: e.target.value }))}
+                            disabled={workPlanSaving}
+                          />
+                        </div>
+
+                        <div style={{ border: '1px solid #d7e6ff', borderRadius: '10px', padding: '12px', marginBottom: '10px', background: '#f7fbff' }}>
+                          <div style={{ fontWeight: 700, marginBottom: '8px', color: '#1a3d5c' }}>Tareas temporales</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.9fr', gap: '8px', marginBottom: '8px' }}>
+                            <input
+                              style={{ ...styles.input, marginBottom: 0, border: '1px solid #cbdcff', background: '#fff' }}
+                              placeholder="Nombre de tarea"
+                              value={workPlanCreateTaskDraft.name}
+                              onChange={(e) => setWorkPlanCreateTaskDraft((prev) => ({ ...prev, name: e.target.value }))}
+                              disabled={workPlanSaving}
+                            />
+                            <select
+                              style={{ ...styles.input, marginBottom: 0, border: '1px solid #cbdcff', background: '#fff', color: getWorkPlanStatusMeta(workPlanCreateTaskDraft.status).color, fontWeight: 700 }}
+                              value={workPlanCreateTaskDraft.status}
+                              onChange={(e) => setWorkPlanCreateTaskDraft((prev) => ({ ...prev, status: e.target.value }))}
+                              disabled={workPlanSaving}
+                            >
+                              {WORKPLAN_STATUS_OPTIONS.map((opt) => <option key={`wp-create-task-status-${opt.value}`} value={opt.value}>{opt.label}</option>)}
+                            </select>
+                            <input
+                              type="datetime-local"
+                              style={{ ...styles.input, marginBottom: 0, border: '1px solid #cbdcff', background: '#fff' }}
+                              value={workPlanCreateTaskDraft.status_date}
+                              onChange={(e) => setWorkPlanCreateTaskDraft((prev) => ({ ...prev, status_date: e.target.value }))}
+                              disabled={workPlanSaving}
+                            />
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', marginBottom: '8px' }}>
+                            <textarea
+                              style={{ ...styles.input, marginBottom: 0, minHeight: '62px', border: '1px solid #cbdcff', background: '#fff' }}
+                              placeholder="Notas de la tarea (opcional)"
+                              value={workPlanCreateTaskDraft.notes}
+                              onChange={(e) => setWorkPlanCreateTaskDraft((prev) => ({ ...prev, notes: e.target.value }))}
+                              disabled={workPlanSaving}
+                            />
+                            <button
+                              style={{ ...styles.button, marginRight: 0, background: '#1a73e8', alignSelf: 'center', height: '38px' }}
+                              onClick={addWorkPlanCreateTempTask}
+                              disabled={workPlanSaving}
+                            >
+                              + Agregar tarea
+                            </button>
+                          </div>
+
+                          <div style={{ marginTop: '8px', border: '1px solid #dbe7ff', borderRadius: '8px', overflow: 'hidden' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                              <thead>
+                                <tr style={{ background: '#eef4ff' }}>
+                                  <th style={{ textAlign: 'center', padding: '6px 8px', borderBottom: '1px solid #dbe7ff' }}>Tarea</th>
+                                  <th style={{ textAlign: 'center', padding: '6px 8px', borderBottom: '1px solid #dbe7ff' }}>Estado</th>
+                                  <th style={{ textAlign: 'center', padding: '6px 8px', borderBottom: '1px solid #dbe7ff' }}>Fecha estado</th>
+                                  <th style={{ textAlign: 'center', padding: '6px 8px', borderBottom: '1px solid #dbe7ff' }}>Notas</th>
+                                  <th style={{ textAlign: 'center', padding: '6px 8px', borderBottom: '1px solid #dbe7ff', width: '90px' }}>Acción</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {workPlanCreateTasks.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={5} style={{ padding: '8px', color: '#78909c' }}>Sin tareas temporales.</td>
+                                  </tr>
+                                ) : (
+                                  workPlanCreateTasks.map((task) => (
+                                    <tr key={task.temp_id}>
+                                      <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', color: '#355070', fontWeight: 600, textAlign: 'center' }}>
+                                        <input
+                                          style={{ ...styles.input, marginBottom: 0, fontSize: '11px' }}
+                                          value={task.name || ''}
+                                          onChange={(e) => updateWorkPlanCreateTempTask(task.temp_id, { name: e.target.value })}
+                                          disabled={workPlanSaving}
+                                        />
+                                      </td>
+                                      <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', color: getWorkPlanStatusMeta(task.status).color, fontWeight: 700, textAlign: 'center' }}>
+                                        <select
+                                          style={{ ...styles.input, marginBottom: 0, fontSize: '11px', color: getWorkPlanStatusMeta(task.status).color, fontWeight: 700 }}
+                                          value={task.status || 'pending'}
+                                          onChange={(e) => updateWorkPlanCreateTempTask(task.temp_id, { status: e.target.value })}
+                                          disabled={workPlanSaving}
+                                        >
+                                          {WORKPLAN_STATUS_OPTIONS.map((opt) => <option key={`wp-temp-task-status-${task.temp_id}-${opt.value}`} value={opt.value}>{opt.label}</option>)}
+                                        </select>
+                                      </td>
+                                      <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', color: '#355070', textAlign: 'center' }}>
+                                        <input
+                                          type="datetime-local"
+                                          style={{ ...styles.input, marginBottom: 0, fontSize: '11px' }}
+                                          value={task.status_date || ''}
+                                          onChange={(e) => updateWorkPlanCreateTempTask(task.temp_id, { status_date: e.target.value })}
+                                          disabled={workPlanSaving}
+                                        />
+                                      </td>
+                                      <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', color: '#546e7a', textAlign: 'center' }}>
+                                        <textarea
+                                          style={{ ...styles.input, marginBottom: 0, minHeight: '42px', fontSize: '11px' }}
+                                          value={task.notes || ''}
+                                          onChange={(e) => updateWorkPlanCreateTempTask(task.temp_id, { notes: e.target.value })}
+                                          disabled={workPlanSaving}
+                                        />
+                                      </td>
+                                      <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', textAlign: 'center' }}>
+                                        <button style={{ ...styles.button, marginRight: 0, padding: '2px 8px', background: '#90a4ae' }} onClick={() => removeWorkPlanCreateTempTask(task.temp_id)} disabled={workPlanSaving}>Quitar</button>
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <textarea
+                          style={{ ...styles.input, minHeight: '84px' }}
+                          placeholder="Observaciones"
+                          value={workPlanForm.observations}
+                          onChange={(e) => setWorkPlanForm((prev) => ({ ...prev, observations: e.target.value }))}
+                          disabled={workPlanSaving}
+                        />
+
+                        <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                          <button style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }} onClick={closeWorkPlanCreateModal}>Cancelar</button>
+                          <button style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }} onClick={saveWorkPlanActivity} disabled={workPlanSaving}>
+                            {workPlanSaving ? 'Guardando...' : 'Crear actividad'}
+                          </button>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {showWorkPlanDetailModal && workPlanDetailRow && workPlanDetailDraft && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}>
+                <div style={{ width: 'min(1080px, 96vw)', maxHeight: '88vh', overflow: 'auto', background: '#fff', borderRadius: '12px', padding: '18px', border: '1px solid #dfe8f6' }} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <div>
+                      <div style={{ fontWeight: 800, color: '#1a3d5c', fontSize: '18px' }}>{workPlanDetailRow.activity}</div>
+                      <div style={{ fontSize: '12px', color: '#607d8b' }}>#{workPlanDetailRow.activity_number} · {workPlanDetailRow.stage} / {workPlanDetailRow.sub_stage}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {!workPlanDetailEditMode ? (
+                        <button style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }} onClick={startWorkPlanDetailEdit}>Editar</button>
+                      ) : (
+                        <button style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }} onClick={cancelWorkPlanDetailEdit}>Cancelar edición</button>
+                      )}
+                      <button
+                        style={{ ...styles.button, marginRight: 0, background: '#c62828' }}
+                        onClick={openWorkPlanDeleteModal}
+                        disabled={workPlanDetailEditMode && workPlanDetailSaving}
+                      >
+                        Eliminar
+                      </button>
+                      <button style={{ ...styles.button, marginRight: 0, background: '#607d8b' }} onClick={closeWorkPlanDetailModal}>Cerrar</button>
+                    </div>
+                  </div>
+
+                  {workPlanDetailError && (
+                    <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ffcdd2', background: '#ffebee', color: '#b71c1c' }}>
+                      {workPlanDetailError}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Etapa</div>
+                      <input
+                        list="workplan-stage-options-detail"
+                        style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                        value={workPlanDetailDraft.stage}
+                        onChange={(e) => setWorkPlanDetailDraft((prev) => ({ ...prev, stage: e.target.value }))}
+                        disabled={!workPlanDetailEditMode}
+                      />
+                      <datalist id="workplan-stage-options-detail">
+                        {getWorkPlanStageOptions(workPlanRows).map((opt, idx) => <option key={`stage-detail-${idx}`} value={opt.name} />)}
+                      </datalist>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Sub Etapa</div>
+                      <input
+                        list="workplan-substage-options-detail"
+                        style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                        value={workPlanDetailDraft.sub_stage}
+                        onChange={(e) => setWorkPlanDetailDraft((prev) => ({ ...prev, sub_stage: e.target.value }))}
+                        disabled={!workPlanDetailEditMode}
+                      />
+                      <datalist id="workplan-substage-options-detail">
+                        {getWorkPlanSubStageOptions(workPlanDetailDraft.stage, workPlanRows).map((opt, idx) => <option key={`substage-detail-${idx}`} value={opt.name} />)}
+                      </datalist>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Actividad</div>
+                      <input style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }} value={workPlanDetailDraft.activity} onChange={(e) => setWorkPlanDetailDraft((prev) => ({ ...prev, activity: e.target.value }))} disabled={!workPlanDetailEditMode} />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Responsable</div>
+                      <select
+                        style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                        value={workPlanDetailDraft.responsible_actor}
+                        onChange={(e) => {
+                          const nextResponsible = e.target.value
+                          setWorkPlanDetailDraft((prev) => prev ? ({
+                            ...prev,
+                            responsible_actor: nextResponsible,
+                            selected_collaborators: (prev.selected_collaborators || []).filter((name) => name !== nextResponsible)
+                          }) : prev)
+                        }}
+                        disabled={!workPlanDetailEditMode}
+                      >
+                        <option value="">Sin asignar</option>
+                        {(accreditationConfigForm.actors || []).map((actor, idx) => {
+                          const label = `${actor.name}${actor.role ? ` · ${actor.role}` : ''}`
+                          return <option key={`resp-detail-${idx}`} value={label}>{label}</option>
+                        })}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Fecha inicio</div>
+                      <input
+                        type="datetime-local"
+                        style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                        value={workPlanDetailDraft.start_date}
+                        max={workPlanDetailDraft.deadline || undefined}
+                        onChange={(e) => {
+                          const nextStart = e.target.value
+                          if (workPlanDetailDraft.deadline && nextStart && new Date(nextStart).getTime() > new Date(workPlanDetailDraft.deadline).getTime()) {
+                            setWorkPlanDetailError('Fecha Inicio no puede ser posterior a Deadline.')
+                            return
+                          }
+                          setWorkPlanDetailError('')
+                          setWorkPlanDetailDraft((prev) => ({ ...prev, start_date: nextStart }))
+                        }}
+                        disabled={!workPlanDetailEditMode}
+                      />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Deadline</div>
+                      <input
+                        type="datetime-local"
+                        style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff' }}
+                        value={workPlanDetailDraft.deadline}
+                        min={workPlanDetailDraft.start_date || undefined}
+                        onChange={(e) => {
+                          const nextDeadline = e.target.value
+                          if (workPlanDetailDraft.start_date && nextDeadline && new Date(nextDeadline).getTime() < new Date(workPlanDetailDraft.start_date).getTime()) {
+                            setWorkPlanDetailError('Deadline no puede ser anterior a Fecha Inicio.')
+                            return
+                          }
+                          setWorkPlanDetailError('')
+                          setWorkPlanDetailDraft((prev) => ({ ...prev, deadline: nextDeadline }))
+                        }}
+                        disabled={!workPlanDetailEditMode}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Estado</div>
+                      <select style={{ ...styles.input, border: '1px solid #cbdcff', background: '#f8fbff', color: getWorkPlanStatusMeta(workPlanDetailDraft.status).color, fontWeight: 700 }} value={(() => {
+                        const options = getWorkPlanDetailStatusOptions()
+                        const current = String(workPlanDetailDraft.status || '').toLowerCase()
+                        return options.some((opt) => opt.value === current) ? current : (options[0]?.value || 'pending')
+                      })()} onChange={(e) => setWorkPlanDetailDraft((prev) => ({ ...prev, status: e.target.value }))}>
+                        {getWorkPlanDetailStatusOptions().map((opt) => <option key={`st-detail-${opt.value}`} value={opt.value}>{opt.label}</option>)}
+                      </select>
+                      {(() => {
+                        const deadlineChanged = (workPlanDetailDraft.deadline || '') !== toDateTimeLocalValue(workPlanDetailRow?.deadline)
+                        const overdue = isWorkPlanOverdue(workPlanDetailRow?.deadline, workPlanDetailRow?.status)
+                        if (overdue && !deadlineChanged) {
+                          return <div style={{ marginTop: '4px', fontSize: '11px', color: '#8d6e63' }}>Actividad vencida: estados habilitados solo Completado o Cancelado. Cambiá deadline para habilitar todos.</div>
+                        }
+                        return null
+                      })()}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', color: '#546e7a', fontSize: '12px' }}>
+                      Fecha fin: {workPlanDetailRow.end_date ? formatDateTimeBuenosAires(workPlanDetailRow.end_date) : '-'}
+                    </div>
+                  </div>
+
+                  <div style={{ border: '1px solid #d7e6ff', borderRadius: '10px', padding: '12px', marginBottom: '10px', background: '#f7fbff' }}>
+                    <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Colaboradores</div>
+                    <input
+                      list="workplan-collaborators-list-detail"
+                      style={{ ...styles.input, border: '1px solid #cbdcff', background: '#fff' }}
+                      placeholder="Escribí un colaborador y Enter"
+                      value={workPlanDetailCollaboratorInput}
+                      onChange={(e) => setWorkPlanDetailCollaboratorInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && workPlanDetailEditMode) {
+                          e.preventDefault()
+                          addDetailCollaborator(workPlanDetailCollaboratorInput)
+                        }
+                      }}
+                      disabled={!workPlanDetailEditMode}
+                    />
+                    <datalist id="workplan-collaborators-list-detail">
+                      {(accreditationConfigForm.actors || [])
+                        .map((actor) => `${actor.name}${actor.role ? ` · ${actor.role}` : ''}`)
+                        .filter((name) => name !== (workPlanDetailDraft.responsible_actor || ''))
+                        .map((label, idx) => <option key={`collab-opt-detail-${idx}`} value={label} />)}
+                    </datalist>
+                    <div style={{ marginTop: '8px', border: '1px solid #dbe7ff', borderRadius: '8px', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ background: '#eef4ff' }}>
+                            <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid #dbe7ff' }}>Colaborador</th>
+                            <th style={{ textAlign: 'center', padding: '6px 8px', borderBottom: '1px solid #dbe7ff', width: '90px' }}>Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(workPlanDetailDraft.selected_collaborators || []).length === 0 ? (
+                            <tr>
+                              <td colSpan={2} style={{ padding: '8px', color: '#78909c' }}>Sin colaboradores seleccionados.</td>
+                            </tr>
+                          ) : (
+                            (workPlanDetailDraft.selected_collaborators || []).map((name) => (
+                              <tr key={`detail-collab-row-${name}`}>
+                                <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', color: '#355070' }}>{name}</td>
+                                <td style={{ padding: '8px', borderBottom: '1px solid #eef3fb', textAlign: 'center' }}>
+                                  {workPlanDetailEditMode ? (
+                                    <button style={{ ...styles.button, marginRight: 0, padding: '2px 8px', background: '#90a4ae' }} onClick={() => removeDetailCollaborator(name)}>Quitar</button>
+                                  ) : (
+                                    <span style={{ color: '#90a4ae' }}>-</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <input
+                      style={{ ...styles.input, marginTop: '8px' }}
+                      placeholder="Opcional: también podés pegar nombres separados por coma"
+                      value={workPlanDetailDraft.collaborators_text}
+                      onChange={(e) => setWorkPlanDetailDraft((prev) => ({ ...prev, collaborators_text: e.target.value }))}
+                      disabled={!workPlanDetailEditMode}
+                    />
+                    <div style={{ marginTop: '6px', color: '#607d8b', fontSize: '12px' }}>
+                      Guardados actualmente: {(workPlanDetailRow.collaborators || []).length > 0 ? (workPlanDetailRow.collaborators || []).join(', ') : '-'}
+                    </div>
+                  </div>
+
+                  <div style={{ border: '1px solid #e5eaf2', borderRadius: '8px', padding: '10px', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c' }}>Tareas</div>
+                      <button style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }} onClick={() => openWorkPlanTaskModal(workPlanDetailRow.id)}>
+                        + Agregar tarea
+                      </button>
+                    </div>
+                    {(workPlanDetailRow.tasks || []).length === 0 && <div style={{ color: '#90a4ae', fontSize: '12px' }}>Sin tareas cargadas.</div>}
+                    {(workPlanDetailRow.tasks || []).length > 0 && (
+                      <div style={{ border: '1px solid #edf2fa', borderRadius: '8px', overflow: 'hidden' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead>
+                            <tr style={{ background: '#f5f8fd' }}>
+                              <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Tarea</th>
+                              <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Estado</th>
+                              <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Fecha estado</th>
+                              <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(workPlanDetailRow.tasks || []).map((task) => (
+                              <tr key={`task-detail-${task.id}`}>
+                                <td style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #f1f4f8', color: '#355070', fontWeight: 600 }}>{task.name}</td>
+                                <td style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #f1f4f8' }}>
+                                  <select
+                                    style={{ ...styles.input, marginBottom: 0, fontSize: '11px', color: getWorkPlanStatusMeta(task.status).color, fontWeight: 700 }}
+                                    value={task.status}
+                                    onChange={(e) => updateWorkPlanTask(workPlanDetailRow.id, task, { status: e.target.value })}
+                                    disabled={!!workPlanTaskBusyById[task.id]}
+                                  >
+                                    {WORKPLAN_STATUS_OPTIONS.map((opt) => <option key={`task-modal-st-${task.id}-${opt.value}`} value={opt.value}>{opt.label}</option>)}
+                                  </select>
+                                </td>
+                                <td style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #f1f4f8' }}>
+                                  <input
+                                    type="datetime-local"
+                                    style={{ ...styles.input, marginBottom: 0, fontSize: '11px' }}
+                                    defaultValue={toDateTimeLocalValue(task.status_date)}
+                                    onBlur={(e) => updateWorkPlanTask(workPlanDetailRow.id, task, { status_date: e.target.value })}
+                                    disabled={!!workPlanTaskBusyById[task.id]}
+                                  />
+                                </td>
+                                <td style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #f1f4f8' }}>
+                                  <button
+                                    style={{ ...styles.button, marginRight: 0, background: '#d32f2f', padding: '4px 8px' }}
+                                    onClick={() => deleteWorkPlanTask(workPlanDetailRow.id, task.id)}
+                                    disabled={!!workPlanTaskBusyById[task.id]}
+                                  >
+                                    Eliminar
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {(workPlanDetailRow.deadline_history || []).length > 0 && (
+                    <div style={{ border: '1px solid #ffe0b2', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: '#fffaf2' }}>
+                      <div style={{ fontWeight: 700, color: '#bf6a00', marginBottom: '4px' }}>Historial de prórrogas</div>
+                      {(workPlanDetailRow.deadline_history || []).slice().reverse().map((item, idx) => (
+                        <div key={`detail-deadline-${idx}`} style={{ fontSize: '12px', color: '#795548', marginBottom: '2px' }}>
+                          {formatDateTimeBuenosAires(item.previous_deadline)} → {formatDateTimeBuenosAires(item.new_deadline)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <textarea style={{ ...styles.input, minHeight: '84px' }} value={workPlanDetailDraft.observations} placeholder="Observaciones" onChange={(e) => setWorkPlanDetailDraft((prev) => ({ ...prev, observations: e.target.value }))} />
+
+                  <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                    <button style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }} onClick={closeWorkPlanDetailModal}>Cancelar</button>
+                    {hasWorkPlanDetailPendingChanges() && (
+                      <button style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }} onClick={saveWorkPlanActivityDetail} disabled={workPlanDetailSaving}>
+                        {workPlanDetailSaving ? 'Guardando...' : 'Guardar cambios'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showWorkPlanTaskModal && workPlanTaskModalActivityId && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2150 }}>
+                <div style={{ width: 'min(620px, 94vw)', background: '#fff', borderRadius: '12px', padding: '16px', border: '1px solid #dfe8f6' }} onClick={(e) => e.stopPropagation()}>
+                  {(() => {
+                    const draft = workPlanTaskDraftByActivity[workPlanTaskModalActivityId] || { name: '', status: 'pending', status_date: '', notes: '' }
+                    return (
+                      <>
+                        <div style={{ fontWeight: 800, color: '#1a3d5c', marginBottom: '8px' }}>Agregar tarea</div>
+                        <input
+                          style={styles.input}
+                          placeholder="Nombre de tarea"
+                          value={draft.name}
+                          onChange={(e) => setWorkPlanTaskDraftByActivity((prev) => ({ ...prev, [workPlanTaskModalActivityId]: { ...draft, name: e.target.value } }))}
+                        />
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                          <select
+                            style={{ ...styles.input, color: getWorkPlanStatusMeta(draft.status).color, fontWeight: 700 }}
+                            value={draft.status}
+                            onChange={(e) => setWorkPlanTaskDraftByActivity((prev) => ({ ...prev, [workPlanTaskModalActivityId]: { ...draft, status: e.target.value } }))}
+                            disabled={!!workPlanTaskSavingByActivity[workPlanTaskModalActivityId]}
+                          >
+                            {WORKPLAN_STATUS_OPTIONS.map((opt) => <option key={`task-modal-create-st-${opt.value}`} value={opt.value}>{opt.label}</option>)}
+                          </select>
+                          <input
+                            type="datetime-local"
+                            style={styles.input}
+                            value={draft.status_date}
+                            onChange={(e) => setWorkPlanTaskDraftByActivity((prev) => ({ ...prev, [workPlanTaskModalActivityId]: { ...draft, status_date: e.target.value } }))}
+                          />
+                        </div>
+                        <textarea
+                          style={{ ...styles.input, minHeight: '72px' }}
+                          placeholder="Notas"
+                          value={draft.notes || ''}
+                          onChange={(e) => setWorkPlanTaskDraftByActivity((prev) => ({ ...prev, [workPlanTaskModalActivityId]: { ...draft, notes: e.target.value } }))}
+                        />
+                        <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                          <button style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }} onClick={closeWorkPlanTaskModal}>Cancelar</button>
+                          <button
+                            style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }}
+                            onClick={async () => {
+                              await addTaskToWorkPlanActivity(workPlanTaskModalActivityId)
+                              closeWorkPlanTaskModal()
+                            }}
+                            disabled={!!workPlanTaskSavingByActivity[workPlanTaskModalActivityId]}
+                          >
+                            {workPlanTaskSavingByActivity[workPlanTaskModalActivityId] ? 'Guardando...' : 'Agregar'}
+                          </button>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {workPlanDeleteModal.isOpen && workPlanDeleteModal.row && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
+                <div style={{ width: 'min(760px, 94vw)', background: '#fff', borderRadius: '12px', padding: '18px' }}>
+                  <div style={{ fontSize: '18px', fontWeight: 700, color: '#b00020', marginBottom: '8px' }}>
+                    Confirmar eliminación de actividad
+                  </div>
+                  <p style={{ margin: '0 0 8px 0' }}>
+                    Vas a eliminar la actividad <strong>{workPlanDeleteModal.row.activity}</strong> (#{workPlanDeleteModal.row.activity_number}).
+                  </p>
+
+                  {workPlanDeleteModal.loading ? (
+                    <div style={{ marginTop: '8px', color: '#546e7a' }}>Eliminando actividad...</div>
+                  ) : workPlanDeleteModal.error ? (
+                    <div style={{ marginTop: '8px', color: '#b00020' }}>{workPlanDeleteModal.error}</div>
+                  ) : (workPlanDeleteModal.row.tasks || []).length === 0 ? (
+                    <div style={{ marginTop: '8px', color: '#546e7a' }}>No tiene tareas asociadas.</div>
+                  ) : (
+                    <div style={{ marginTop: '8px' }}>
+                      <div style={{ fontSize: '13px', color: '#355070', marginBottom: '6px' }}>
+                        Tareas asociadas ({(workPlanDeleteModal.row.tasks || []).length}):
+                      </div>
+                      <div style={{ maxHeight: '220px', overflow: 'auto', border: '1px solid #e5eaf2', borderRadius: '8px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead>
+                            <tr style={{ background: '#f5f8fd' }}>
+                              <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Tarea</th>
+                              <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(workPlanDeleteModal.row.tasks || []).map((task) => (
+                              <tr key={`delete-task-${task.id}`}>
+                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8' }}>{task.name}</td>
+                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', color: getWorkPlanStatusMeta(task.status).color, fontWeight: 700 }}>
+                                  {getWorkPlanStatusMeta(task.status).label}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '14px' }}>
+                    <button style={{ ...styles.button, background: '#999' }} onClick={closeWorkPlanDeleteModal} disabled={workPlanDeleteModal.loading}>
+                      Cancelar
+                    </button>
+                    <button style={{ ...styles.button, background: '#b00020' }} onClick={confirmWorkPlanDelete} disabled={workPlanDeleteModal.loading}>
+                      Sí, eliminar actividad
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {accreditationSection === 'config' && (
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
+                  <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Rutas y procesamiento</div>
+                  <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
+                    Configuración base por carrera para ingesta y trazabilidad (guardado automático).
+                  </div>
+                  {!activeCareer && (
+                    <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#fff8e1', color: '#8d6e00', border: '1px solid #ffe082' }}>
+                      Seleccioná una carrera activa para configurar acreditación.
+                    </div>
+                  )}
+                  {accreditationConfigError && (
+                    <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#ffebee', color: '#b71c1c', border: '1px solid #ffcdd2' }}>
+                      {accreditationConfigError}
+                    </div>
+                  )}
+                  {(accreditationConfigForm.source_folder_url || accreditationConfigForm.destination_folder_url) && !accreditationRouteEditMode ? (
+                    <div style={{ display: 'grid', gap: '8px' }}>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          style={{ ...styles.button, marginRight: 0, background: '#455a64' }}
+                          onClick={() => openDriveUrl(accreditationConfigForm.source_folder_url)}
+                          disabled={!accreditationConfigForm.source_folder_url}
+                          title={!accreditationConfigForm.source_folder_url ? 'No configurado' : ''}
+                        >
+                          {accreditationConfigForm.source_folder_url ? 'Abrir carpeta origen' : 'Origen no configurado'}
+                        </button>
+                        <button
+                          style={{ ...styles.button, marginRight: 0, background: '#455a64' }}
+                          onClick={() => openDriveUrl(accreditationConfigForm.destination_folder_url)}
+                          disabled={!accreditationConfigForm.destination_folder_url}
+                          title={!accreditationConfigForm.destination_folder_url ? 'No configurado' : ''}
+                        >
+                          {accreditationConfigForm.destination_folder_url ? 'Abrir carpeta destino' : 'Destino no configurado'}
+                        </button>
+                      </div>
+                      <div style={{ color: '#455a64', fontSize: '12px' }}>
+                        Modo: <strong>{accreditationConfigForm.process_mode || 'move'}</strong> · Recursivo: <strong>{accreditationConfigForm.recursive_scan ? 'Sí' : 'No'}</strong>
+                      </div>
+                      <div>
+                        <button
+                          style={{ ...styles.button, marginRight: 0, background: '#607d8b' }}
+                          onClick={openAccreditationRouteEditor}
+                          disabled={accreditationConfigLoading || accreditationConfigSaving || !activeCareer}
+                        >
+                          Editar rutas
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
+                      <input
+                        style={styles.input}
+                        value={accreditationRouteDraft.source_folder_url}
+                        onChange={(e) => setAccreditationRouteDraft((prev) => ({ ...prev, source_folder_url: e.target.value }))}
+                        onBlur={commitAccreditationRoutes}
+                        placeholder="Carpeta origen (Drive URL o ID)"
+                        disabled={accreditationConfigLoading || accreditationConfigSaving || !activeCareer}
+                      />
+                      <input
+                        style={styles.input}
+                        value={accreditationRouteDraft.destination_folder_url}
+                        onChange={(e) => setAccreditationRouteDraft((prev) => ({ ...prev, destination_folder_url: e.target.value }))}
+                        onBlur={commitAccreditationRoutes}
+                        placeholder="Carpeta destino (Drive URL o ID)"
+                        disabled={accreditationConfigLoading || accreditationConfigSaving || !activeCareer}
+                      />
+                      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr auto', gap: '10px', alignItems: 'center' }}>
+                        <select
+                          style={styles.input}
+                          value={accreditationConfigForm.process_mode}
+                          onChange={(e) => updateAccreditationProcessMode(e.target.value)}
+                          disabled={accreditationConfigLoading || accreditationConfigSaving || !activeCareer}
+                        >
+                          <option value="move">move (mover)</option>
+                          <option value="copy">copy (copiar)</option>
+                        </select>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#455a64', fontSize: '13px' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!accreditationConfigForm.recursive_scan}
+                            onChange={(e) => updateAccreditationRecursiveScan(e.target.checked)}
+                            disabled={accreditationConfigLoading || accreditationConfigSaving || !activeCareer}
+                          />
+                          Escaneo recursivo de subcarpetas
+                        </label>
+                        <button
+                          style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }}
+                          onClick={() => setAccreditationRouteEditMode(false)}
+                          disabled={accreditationConfigLoading || accreditationConfigSaving}
+                        >
+                          Cerrar edición
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c' }}>Tipos de evidencia</div>
+                      {!accreditationShowAddEvidenceType && (
+                        <button style={{ ...styles.button, marginRight: 0 }} onClick={() => setAccreditationShowAddEvidenceType(true)} disabled={!activeCareer}>
+                          + Agregar
+                        </button>
+                      )}
+                    </div>
+                  {!accreditationShowAddEvidenceType ? (
+                    <div style={{ color: '#607d8b', fontSize: '12px', marginBottom: '8px' }}>Podés ordenar con flechas ↑ ↓</div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                      <input
+                        style={styles.input}
+                        value={accreditationNewEvidenceType}
+                        onChange={(e) => setAccreditationNewEvidenceType(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            addEvidenceTypeToConfig()
+                          }
+                        }}
+                        placeholder="Nuevo tipo de evidencia"
+                        disabled={accreditationConfigSaving || !activeCareer}
+                      />
+                      <button style={{ ...styles.button, marginRight: 0 }} onClick={addEvidenceTypeToConfig} disabled={!activeCareer || !accreditationNewEvidenceType.trim()}>Agregar</button>
+                      <button style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }} onClick={() => { setAccreditationShowAddEvidenceType(false); setAccreditationNewEvidenceType('') }}>Cancelar</button>
+                    </div>
+                  )}
+                  <div style={{ border: '1px solid #edf2fa', borderRadius: '8px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead>
+                        <tr style={{ background: '#f5f8fd' }}>
+                          <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2', width: '56px' }}>#</th>
+                          <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Tipo</th>
+                          <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2', width: '140px' }}>Orden</th>
+                          <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2', width: '150px' }}>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(accreditationConfigForm.evidence_types || []).length === 0 ? (
+                          <tr><td colSpan={4} style={{ padding: '10px', color: '#78909c' }}>Sin tipos configurados.</td></tr>
+                        ) : (
+                          (accreditationConfigForm.evidence_types || []).map((item, index) => (
+                            <tr key={`ev-row-${item}-${index}`}>
+                              <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', textAlign: 'center', color: '#607d8b' }}>{index + 1}</td>
+                              <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', color: '#355070' }}>{item}</td>
+                              <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', textAlign: 'center' }}>
+                                <button style={{ ...styles.button, marginRight: '4px', padding: '2px 8px', background: '#607d8b' }} disabled={accreditationConfigSaving || index === 0} onClick={() => moveEvidenceTypeInConfig(index, -1)}>↑</button>
+                                <button style={{ ...styles.button, marginRight: 0, padding: '2px 8px', background: '#607d8b' }} disabled={accreditationConfigSaving || index === (accreditationConfigForm.evidence_types || []).length - 1} onClick={() => moveEvidenceTypeInConfig(index, 1)}>↓</button>
+                              </td>
+                              <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', textAlign: 'center' }}>
+                                <button style={{ ...styles.button, marginRight: '4px', padding: '2px 8px', background: '#5c6bc0' }} onClick={() => renameEvidenceTypeInConfig(item)} disabled={accreditationConfigSaving}>Editar</button>
+                                <button style={{ ...styles.button, marginRight: 0, padding: '2px 8px', background: '#90a4ae' }} onClick={() => removeEvidenceTypeFromConfig(item)} disabled={accreditationConfigSaving}>Quitar</button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                  <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c' }}>Roles</div>
+                      {!accreditationShowAddRole && (
+                        <button style={{ ...styles.button, marginRight: 0 }} onClick={() => setAccreditationShowAddRole(true)} disabled={!activeCareer}>
+                          + Agregar
+                        </button>
+                      )}
+                    </div>
+                    {!accreditationShowAddRole ? (
+                      <div style={{ color: '#607d8b', fontSize: '12px', marginBottom: '8px' }}>Podés ordenar con flechas ↑ ↓</div>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '8px', marginBottom: '8px' }}>
+                        <input
+                          style={styles.input}
+                          value={accreditationNewRole}
+                          onChange={(e) => setAccreditationNewRole(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              addRoleToConfig()
+                            }
+                          }}
+                          placeholder="Nuevo rol"
+                          disabled={accreditationConfigSaving || !activeCareer}
+                        />
+                        <button style={{ ...styles.button, marginRight: 0 }} onClick={addRoleToConfig} disabled={!activeCareer || !accreditationNewRole.trim()}>Agregar</button>
+                        <button style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }} onClick={() => { setAccreditationShowAddRole(false); setAccreditationNewRole('') }}>Cancelar</button>
+                      </div>
+                    )}
+                    <div style={{ border: '1px solid #edf2fa', borderRadius: '8px', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ background: '#f5f8fd' }}>
+                            <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2', width: '56px' }}>#</th>
+                            <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Rol</th>
+                            <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2', width: '140px' }}>Orden</th>
+                            <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #e5eaf2', width: '150px' }}>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(accreditationConfigForm.actor_roles || []).length === 0 ? (
+                            <tr><td colSpan={4} style={{ padding: '10px', color: '#78909c' }}>Sin roles configurados.</td></tr>
+                          ) : (
+                            (accreditationConfigForm.actor_roles || []).map((role, index) => (
+                              <tr key={`role-row-${role}-${index}`}>
+                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', textAlign: 'center', color: '#607d8b' }}>{index + 1}</td>
+                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', color: '#355070' }}>{role}</td>
+                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', textAlign: 'center' }}>
+                                  <button style={{ ...styles.button, marginRight: '4px', padding: '2px 8px', background: '#607d8b' }} disabled={accreditationConfigSaving || index === 0} onClick={() => moveRoleInConfig(index, -1)}>↑</button>
+                                  <button style={{ ...styles.button, marginRight: 0, padding: '2px 8px', background: '#607d8b' }} disabled={accreditationConfigSaving || index === (accreditationConfigForm.actor_roles || []).length - 1} onClick={() => moveRoleInConfig(index, 1)}>↓</button>
+                                </td>
+                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', textAlign: 'center' }}>
+                                  <button style={{ ...styles.button, marginRight: '4px', padding: '2px 8px', background: '#607d8b' }} onClick={() => renameRoleInConfig(role)} disabled={accreditationConfigSaving}>Editar</button>
+                                  <button style={{ ...styles.button, marginRight: 0, padding: '2px 8px', background: '#90a4ae' }} onClick={() => removeRoleFromConfig(role)} disabled={accreditationConfigSaving}>Quitar</button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ fontWeight: 700, color: '#1a3d5c' }}>Actores</div>
+                    {!accreditationShowAddActor ? (
+                      <button style={{ ...styles.button, marginRight: 0 }} onClick={() => setAccreditationShowAddActor(true)} disabled={!activeCareer}>
+                        + Agregar actor
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {accreditationShowAddActor && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px auto auto', gap: '8px', marginBottom: '10px' }}>
+                      <div>
+                        <input
+                          list="accreditation-teacher-names"
+                          style={styles.input}
+                          value={accreditationActorSearchName}
+                          onChange={(e) => setAccreditationActorSearchName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              addActorToConfig()
+                            }
+                          }}
+                          placeholder={accreditationTeachersLoading ? 'Cargando docentes...' : 'Buscar por nombre y apellido (si no existe, será externo)'}
+                          disabled={accreditationConfigSaving || !activeCareer}
+                        />
+                        <datalist id="accreditation-teacher-names">
+                          {accreditationTeachers.map((teacher) => (
+                            <option key={`teacher-name-${teacher.id}`} value={teacher.name} />
+                          ))}
+                        </datalist>
+                      </div>
+                      <select
+                        style={styles.input}
+                        value={accreditationSelectedActorRole}
+                        onChange={(e) => setAccreditationSelectedActorRole(e.target.value)}
+                        disabled={accreditationConfigSaving || !activeCareer}
+                      >
+                        <option value="">Rol (obligatorio para externo)</option>
+                        {(accreditationConfigForm.actor_roles || []).map((role) => (
+                          <option key={`opt-role-${role}`} value={role}>{role}</option>
+                        ))}
+                      </select>
+                      <button style={{ ...styles.button, marginRight: 0 }} onClick={addActorToConfig} disabled={!activeCareer || !accreditationActorSearchName.trim()}>
+                        Agregar
+                      </button>
+                      <button
+                        style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }}
+                        onClick={() => {
+                          setAccreditationShowAddActor(false)
+                          setAccreditationActorSearchName('')
+                          setAccreditationSelectedActorRole('')
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+
+                  <div style={{ border: '1px solid #edf2fa', borderRadius: '8px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead>
+                        <tr style={{ background: '#f5f8fd' }}>
+                          <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Nombre</th>
+                          <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Tipo</th>
+                          <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Rol</th>
+                          <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(accreditationConfigForm.actors || []).length === 0 ? (
+                          <tr>
+                            <td colSpan={4} style={{ color: '#78909c', fontSize: '12px', padding: '10px' }}>Sin actores configurados.</td>
+                          </tr>
+                        ) : (
+                          (accreditationConfigForm.actors || []).map((actor, index) => (
+                            <tr key={`actor-${index}`}>
+                              <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', color: '#355070' }}>{actor.name || '-'}</td>
+                              <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', color: '#355070' }}>{actor.type === 'teacher' ? 'Docente' : 'Externo'}</td>
+                              <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8', color: '#355070' }}>{actor.role || '-'}</td>
+                              <td style={{ padding: '8px', borderBottom: '1px solid #f1f4f8' }}>
+                                <button style={{ ...styles.button, marginRight: 0, padding: '2px 8px', background: '#b0bec5' }} onClick={() => removeActorFromConfig(index)} disabled={accreditationConfigSaving}>Quitar</button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    style={{ ...styles.button, marginRight: 0, background: '#90a4ae' }}
+                    onClick={() => { loadAccreditationSettings(activeCareer); fetchAccreditationTeachers(activeCareer) }}
+                    disabled={accreditationConfigLoading || accreditationConfigSaving || !activeCareer}
+                  >
+                    {accreditationConfigLoading ? 'Recargando...' : 'Recargar configuración'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {accreditationSection === 'ingesta' && (
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
+                  <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Ingesta desde Drive (una referencia por línea)</div>
+                  <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
+                    Pegá links de documento o carpeta de Drive indistintamente. El sistema detecta automáticamente el tipo de fuente.
+                  </div>
+
+                  {!activeCareer && (
+                    <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#fff8e1', color: '#8d6e00', border: '1px solid #ffe082' }}>
+                      Seleccioná una carrera activa para ejecutar la ingesta.
+                    </div>
+                  )}
+
+                  {accreditationIngestError && (
+                    <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#ffebee', color: '#b71c1c', border: '1px solid #ffcdd2' }}>
+                      {accreditationIngestError}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '10px', alignItems: 'end', marginBottom: '10px' }}>
+                  <div>
+                    <label style={{ ...styles.label, marginBottom: '4px' }}>Tipo de evidencia</label>
+                    <select
+                      style={styles.input}
+                      value={accreditationIngestForm.evidence_type}
+                      onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, evidence_type: e.target.value }))}
+                      disabled={accreditationIngestLoading || !activeCareer}
+                    >
+                      {(accreditationConfigForm.evidence_types || ['General']).map((type) => (
+                        <option key={`ing-type-${type}`} value={type}>{type}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ ...styles.label, marginBottom: '4px' }}>Actor responsable *</label>
+                    <select
+                      style={styles.input}
+                      value={accreditationIngestForm.actor}
+                      onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, actor: e.target.value }))}
+                      disabled={accreditationIngestLoading || !activeCareer}
+                    >
+                      <option value="">Seleccionar actor...</option>
+                      {(accreditationConfigForm.actors || []).map((actor, index) => {
+                        const label = `${actor.name}${actor.role ? ` · ${actor.role}` : ''}`
+                        return <option key={`actor-opt-${index}`} value={label}>{label}</option>
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '10px' }}>
+                  <label style={{ ...styles.label, marginBottom: '4px' }}>Referencias (una por línea)</label>
+                  <textarea
+                    style={{ ...styles.input, minHeight: '120px', fontSize: '12px' }}
+                    value={accreditationIngestForm.referencesText}
+                    onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, referencesText: e.target.value }))}
+                    placeholder={"https://drive.google.com/file/d/...\nhttps://drive.google.com/drive/folders/..."}
+                    disabled={accreditationIngestLoading || !activeCareer}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }}
+                    onClick={runAccreditationIngest}
+                    disabled={accreditationIngestLoading || !activeCareer || !String(accreditationIngestForm.actor || '').trim()}
+                  >
+                    {accreditationIngestLoading ? 'Procesando...' : 'Ejecutar ingesta Drive'}
+                  </button>
+                </div>
+                </div>
+
+                <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
+                  <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Carga local desde la computadora</div>
+                  <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
+                    Seleccioná archivos locales para registrar evidencia de forma directa.
+                  </div>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(e) => setAccreditationLocalFiles(Array.from(e.target.files || []))}
+                    disabled={accreditationIngestLoading || !activeCareer}
+                    style={{ marginBottom: '10px' }}
+                  />
+                  {accreditationLocalFiles.length > 0 && (
+                    <div style={{ marginBottom: '10px', color: '#455a64', fontSize: '12px' }}>
+                      {accreditationLocalFiles.length} archivo(s) seleccionados.
+                    </div>
+                  )}
+                  <button
+                    style={{ ...styles.button, marginRight: 0, background: '#2e7d32' }}
+                    onClick={runAccreditationLocalIngest}
+                    disabled={accreditationIngestLoading || !activeCareer || accreditationLocalFiles.length === 0 || !String(accreditationIngestForm.actor || '').trim()}
+                  >
+                    {accreditationIngestLoading ? 'Procesando...' : 'Cargar archivos locales'}
+                  </button>
+                </div>
+
+                {accreditationIngestResult && (
+                  <div style={{ marginTop: '12px', border: '1px solid #d9e7ff', borderRadius: '8px', background: '#f8fbff', padding: '10px' }}>
+                    <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '6px' }}>Resultado de ingesta</div>
+                    <div style={{ fontSize: '12px', color: '#355070' }}>
+                      Procesados: {accreditationIngestResult.processed || 0} · Creados: {accreditationIngestResult.created || 0} · Versionados: {accreditationIngestResult.versioned || 0} · Omitidos: {accreditationIngestResult.skipped || 0}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {accreditationSection === 'registro' && (
+              <div style={{ border: '1px solid #dfe8f6', borderRadius: '8px', background: '#fff', padding: '12px' }}>
+                <div style={{ fontWeight: 700, marginBottom: '8px', color: '#1a3d5c' }}>Registro de evidencias</div>
+                <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
+                  Debe mostrar metadatos iniciales + link en carpeta de evidencias y permitir corrección manual de inconsistencias.
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+                  <button
+                    style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }}
+                    onClick={() => fetchAccreditationEvidences(activeCareer)}
+                    disabled={accreditationLoading}
+                  >
+                    {accreditationLoading ? 'Actualizando...' : 'Actualizar registro'}
+                  </button>
+                </div>
+                {accreditationError && (
+                  <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#ffebee', color: '#b71c1c', border: '1px solid #ffcdd2' }}>
+                    {accreditationError}
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px 180px 170px', gap: '8px', marginBottom: '10px' }}>
+                  <input
+                    style={styles.input}
+                    value={accreditationFilters.text}
+                    onChange={(e) => setAccreditationFilters((prev) => ({ ...prev, text: e.target.value }))}
+                    placeholder="Buscar evidencia, origen o tipo"
+                  />
+                  <select
+                    style={styles.input}
+                    value={accreditationFilters.status}
+                    onChange={(e) => setAccreditationFilters((prev) => ({ ...prev, status: e.target.value }))}
+                  >
+                    <option value="all">Estado: todos</option>
+                    {accreditationStatusOptions.map((value) => (
+                      <option key={`st-${value}`} value={value}>{getAccreditationStatusLabel(value)}</option>
+                    ))}
+                  </select>
+                  <select
+                    style={styles.input}
+                    value={accreditationFilters.evidenceType}
+                    onChange={(e) => setAccreditationFilters((prev) => ({ ...prev, evidenceType: e.target.value }))}
+                  >
+                    <option value="all">Tipo: todos</option>
+                    {accreditationTypeOptions.map((value) => (
+                      <option key={`tp-${value}`} value={value}>{value}</option>
+                    ))}
+                  </select>
+                  <div />
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ background: '#f5f8fd' }}>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Evidencia</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Tipo</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Actor</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Estado</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Metadata</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Link evidencia</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {accreditationLoading && accreditationRecords.length === 0 && (
+                        <tr>
+                          <td colSpan={7} style={{ padding: '10px', color: '#607d8b' }}>
+                            Cargando evidencias...
+                          </td>
+                        </tr>
+                      )}
+                      {!accreditationLoading && filteredAccreditationRecords.length === 0 && (
+                        <tr>
+                          <td colSpan={7} style={{ padding: '10px', color: '#607d8b' }}>
+                            Sin registros para los filtros aplicados.
+                          </td>
+                        </tr>
+                      )}
+                      {filteredAccreditationRecords.map((row) => {
+                        const draft = accreditationEditingById[row.id]
+                        const isEditing = !!draft
+                        const isSaving = !!accreditationSavingById[row.id]
+                        const isHistoryOpen = !!accreditationHistoryOpenById[row.id]
+                        const historyLoading = !!accreditationHistoryLoadingById[row.id]
+                        const historyError = accreditationHistoryErrorById[row.id]
+                        const history = accreditationHistoryById[row.id] || { versions: [], audit: [] }
+                        return (
+                          <React.Fragment key={row.id}>
+                          <tr>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #eef2f8', minWidth: '220px' }}>
+                              {isEditing ? (
+                                <input
+                                  style={{ ...styles.input, marginBottom: 0, fontSize: '12px' }}
+                                  value={draft.title || ''}
+                                  onChange={(e) => updateAccreditationDraftField(row.id, 'title', e.target.value)}
+                                />
+                              ) : (
+                                <div>
+                                  <div style={{ fontWeight: 600 }}>{row.title || '-'}</div>
+                                  <div style={{ color: '#607d8b', marginTop: '2px' }}>{row.normalized_filename || row.source_filename || '-'}</div>
+                                  <div style={{ color: '#90a4ae', marginTop: '2px', fontSize: '11px' }}>
+                                    Alta: {formatDateTimeBuenosAires(row.created_at)} (GMT-3)
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #eef2f8', minWidth: '130px' }}>
+                              {isEditing ? (
+                                <input
+                                  style={{ ...styles.input, marginBottom: 0, fontSize: '12px' }}
+                                  value={draft.evidence_type || ''}
+                                  onChange={(e) => updateAccreditationDraftField(row.id, 'evidence_type', e.target.value)}
+                                />
+                              ) : (
+                                row.evidence_type || '-'
+                              )}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #eef2f8', minWidth: '180px' }}>
+                              {isEditing ? (
+                                <input
+                                  style={{ ...styles.input, marginBottom: 0, fontSize: '12px' }}
+                                  value={draft.created_by || ''}
+                                  onChange={(e) => updateAccreditationDraftField(row.id, 'created_by', e.target.value)}
+                                  placeholder="Actor responsable"
+                                />
+                              ) : (
+                                <div style={{ color: '#455a64', fontWeight: 600 }}>{row.created_by || '-'}</div>
+                              )}
+                              {row.access_error && (
+                                <div style={{ marginTop: '4px', color: '#b71c1c', fontSize: '11px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                  {row.access_error}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #eef2f8', minWidth: '120px' }}>
+                              {isEditing ? (
+                                <select
+                                  style={{ ...styles.input, marginBottom: 0, fontSize: '12px' }}
+                                  value={draft.status || 'pending'}
+                                  onChange={(e) => updateAccreditationDraftField(row.id, 'status', e.target.value)}
+                                >
+                                  <option value="pending">Pendiente</option>
+                                  <option value="processed">Procesada</option>
+                                  <option value="error">Error</option>
+                                </select>
+                              ) : (
+                                renderCapsule(getAccreditationStatusLabel(row.status || 'pending'), 'default')
+                              )}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #eef2f8', minWidth: '260px' }}>
+                              {isEditing ? (
+                                <textarea
+                                  style={{ ...styles.input, minHeight: '86px', fontSize: '11px', fontFamily: 'monospace' }}
+                                  value={draft.metadataText || ''}
+                                  onChange={(e) => updateAccreditationDraftField(row.id, 'metadataText', e.target.value)}
+                                  placeholder={`{\n  "clave": "valor"\n}`}
+                                />
+                              ) : (
+                                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#455a64', fontSize: '11px' }}>
+                                  {row.metadata ? JSON.stringify(row.metadata, null, 2) : '{}'}
+                                </pre>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #eef2f8', minWidth: '180px' }}>
+                              {isEditing ? (
+                                <input
+                                  style={{ ...styles.input, marginBottom: 0, fontSize: '12px' }}
+                                  value={draft.destination_file_url || ''}
+                                  onChange={(e) => updateAccreditationDraftField(row.id, 'destination_file_url', e.target.value)}
+                                />
+                              ) : row.destination_file_url ? (
+                                <a href={row.destination_file_url} target="_blank" rel="noreferrer">Abrir evidencia</a>
+                              ) : (
+                                <span style={{ color: '#90a4ae' }}>Sin link</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #eef2f8', minWidth: '170px' }}>
+                              {!isEditing ? (
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button
+                                    style={{ ...styles.button, marginRight: 0, padding: '6px 10px', background: '#546e7a' }}
+                                    onClick={() => startAccreditationEdit(row)}
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    style={{ ...styles.button, marginRight: 0, padding: '6px 10px', background: '#5c6bc0' }}
+                                    onClick={() => toggleAccreditationHistory(row.id)}
+                                  >
+                                    {isHistoryOpen ? 'Ocultar historial' : 'Historial'}
+                                  </button>
+                                  <button
+                                    style={{ ...styles.button, marginRight: 0, padding: '6px 10px', background: '#d32f2f' }}
+                                    onClick={() => deleteAccreditationEvidence(row.id)}
+                                  >
+                                    Eliminar
+                                  </button>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button
+                                    style={{ ...styles.button, marginRight: 0, padding: '6px 10px', background: '#2e7d32' }}
+                                    onClick={() => saveAccreditationEdit(row.id)}
+                                    disabled={isSaving}
+                                  >
+                                    {isSaving ? 'Guardando...' : 'Guardar'}
+                                  </button>
+                                  <button
+                                    style={{ ...styles.button, marginRight: 0, padding: '6px 10px', background: '#90a4ae' }}
+                                    onClick={() => cancelAccreditationEdit(row.id)}
+                                    disabled={isSaving}
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                          {isHistoryOpen && (
+                            <tr>
+                              <td colSpan={7} style={{ padding: '10px', background: '#f8fbff', borderBottom: '1px solid #e0e8f5' }}>
+                                {historyLoading ? (
+                                  <div style={{ color: '#607d8b', fontSize: '12px' }}>Cargando historial...</div>
+                                ) : historyError ? (
+                                  <div style={{ color: '#b71c1c', fontSize: '12px' }}>{historyError}</div>
+                                ) : (
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                    <div>
+                                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '6px' }}>Versiones</div>
+                                      {!history.versions.length ? (
+                                        <div style={{ color: '#607d8b', fontSize: '12px' }}>Sin versiones registradas.</div>
+                                      ) : (
+                                        <ul style={{ margin: 0, paddingLeft: '18px', color: '#355070', fontSize: '12px' }}>
+                                          {history.versions.map((item) => (
+                                            <li key={`v-${row.id}-${item.id}`}>
+                                              v{item.version_number} · {item.status || '-'} · {formatDateTimeBuenosAires(item.created_at)} (GMT-3)
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </div>
+                                    <div>
+                                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '6px' }}>Auditoría</div>
+                                      {!history.audit.length ? (
+                                        <div style={{ color: '#607d8b', fontSize: '12px' }}>Sin eventos de auditoría.</div>
+                                      ) : (
+                                        <ul style={{ margin: 0, paddingLeft: '18px', color: '#355070', fontSize: '12px' }}>
+                                          {history.audit.map((event) => (
+                                            <li key={`a-${row.id}-${event.id}`}>
+                                              {event.action || '-'} · {event.actor || 'sistema'} · {formatDateTimeBuenosAires(event.created_at)} (GMT-3)
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

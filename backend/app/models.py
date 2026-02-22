@@ -304,3 +304,114 @@ class IntelligentControlSettings(Base):
     ballena_temperature = Column(Float, nullable=False, default=0.1)
     ballena_max_tokens = Column(Integer, nullable=False, default=700)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class AccreditationEvidenceRegistry(Base):
+    __tablename__ = "accreditation_evidence_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career = Column(String(255), nullable=False, index=True)
+    title = Column(String(500), nullable=True)
+    evidence_type = Column(String(50), nullable=True, index=True)
+    source_kind = Column(String(50), nullable=False, default="local", index=True)  # local|drive-url|drive-folder
+    source_reference = Column(String(1500), nullable=True)
+    source_file_id = Column(String(255), nullable=True, index=True)
+    source_filename = Column(String(500), nullable=True)
+    normalized_filename = Column(String(500), nullable=True)
+    destination_folder_url = Column(String(1500), nullable=True)
+    destination_file_url = Column(String(1500), nullable=True)
+    destination_file_id = Column(String(255), nullable=True, index=True)
+    checksum_sha256 = Column(String(64), nullable=True, index=True)
+    version_number = Column(Integer, nullable=False, default=1)
+    status = Column(String(50), nullable=False, default="registered", index=True)
+    ocr_applied = Column(Boolean, nullable=False, default=False)
+    access_error = Column(Text, nullable=True)
+    metadata_json = Column("metadata", JSON, nullable=True)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class AccreditationEvidenceVersion(Base):
+    __tablename__ = "accreditation_evidence_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    evidence_id = Column(Integer, ForeignKey("accreditation_evidence_registry.id"), nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    source_reference = Column(String(1500), nullable=True)
+    source_file_id = Column(String(255), nullable=True)
+    source_filename = Column(String(500), nullable=True)
+    destination_file_url = Column(String(1500), nullable=True)
+    destination_file_id = Column(String(255), nullable=True)
+    checksum_sha256 = Column(String(64), nullable=True)
+    status = Column(String(50), nullable=False, default="registered")
+    note = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class AccreditationEvidenceAuditLog(Base):
+    __tablename__ = "accreditation_evidence_audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    evidence_id = Column(Integer, ForeignKey("accreditation_evidence_registry.id"), nullable=False, index=True)
+    action = Column(String(50), nullable=False, index=True)  # create|update|version
+    changed_fields = Column(JSON, nullable=True)
+    note = Column(Text, nullable=True)
+    actor = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class AccreditationSettings(Base):
+    __tablename__ = "accreditation_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career = Column(String(255), nullable=False, index=True)
+    study_plan = Column(String(255), nullable=True, index=True)
+    source_folder_url = Column(String(1500), nullable=True)
+    destination_folder_url = Column(String(1500), nullable=True)
+    process_mode = Column(String(20), nullable=False, default="move")
+    recursive_scan = Column(Boolean, nullable=False, default=True)
+    evidence_types = Column(JSON, nullable=True)
+    actor_roles = Column(JSON, nullable=True)
+    actors = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class AccreditationWorkPlanActivity(Base):
+    __tablename__ = "accreditation_work_plan_activities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career = Column(String(255), nullable=False, index=True)
+    study_plan = Column(String(255), nullable=True, index=True)
+    stage = Column(String(255), nullable=False, index=True)
+    stage_order = Column(Integer, nullable=False, default=1, index=True)
+    sub_stage = Column(String(255), nullable=False, index=True)
+    sub_stage_order = Column(Integer, nullable=False, default=1, index=True)
+    activity = Column(String(500), nullable=False)
+    activity_order = Column(Integer, nullable=False, default=1, index=True)
+    activity_number = Column(String(30), nullable=False, index=True)
+    responsible_actor = Column(String(255), nullable=True)
+    collaborators = Column(JSON, nullable=True)
+    start_date = Column(DateTime(timezone=False), nullable=False)
+    deadline = Column(DateTime(timezone=False), nullable=False)
+    end_date = Column(DateTime(timezone=False), nullable=True)
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    deadline_history = Column(JSON, nullable=True)
+    observations = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class AccreditationWorkPlanTask(Base):
+    __tablename__ = "accreditation_work_plan_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    activity_id = Column(Integer, ForeignKey("accreditation_work_plan_activities.id"), nullable=False, index=True)
+    name = Column(String(500), nullable=False)
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    status_date = Column(DateTime(timezone=False), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

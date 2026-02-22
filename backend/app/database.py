@@ -24,6 +24,8 @@ def init_db():
     ensure_drive_settings_columns()
     ensure_intelligent_controls_columns()
     ensure_intelligent_settings_columns()
+    ensure_accreditation_settings_columns()
+    ensure_accreditation_workplan_columns()
 
 
 def ensure_proposals_columns():
@@ -263,6 +265,54 @@ def ensure_intelligent_settings_columns():
                     'gpt-4o', 0.1, 700
                 )
             """))
+            conn.commit()
+
+
+def ensure_accreditation_settings_columns():
+    """Ensure accreditation_settings table has required columns (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        result = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='accreditation_settings'"
+        ))
+        table_exists = result.fetchone() is not None
+        if not table_exists:
+            return
+
+        columns_result = conn.execute(text("PRAGMA table_info(accreditation_settings)"))
+        columns = {row[1] for row in columns_result}
+
+        if "evidence_types" not in columns:
+            conn.execute(text("ALTER TABLE accreditation_settings ADD COLUMN evidence_types JSON"))
+            conn.commit()
+        if "actor_roles" not in columns:
+            conn.execute(text("ALTER TABLE accreditation_settings ADD COLUMN actor_roles JSON"))
+            conn.commit()
+        if "actors" not in columns:
+            conn.execute(text("ALTER TABLE accreditation_settings ADD COLUMN actors JSON"))
+            conn.commit()
+        if "study_plan" not in columns:
+            conn.execute(text("ALTER TABLE accreditation_settings ADD COLUMN study_plan VARCHAR(255)"))
+            conn.commit()
+
+
+def ensure_accreditation_workplan_columns():
+    """Ensure accreditation workplan tables have required columns (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        result = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='accreditation_work_plan_activities'"
+        ))
+        table_exists = result.fetchone() is not None
+        if not table_exists:
+            return
+
+        columns_result = conn.execute(text("PRAGMA table_info(accreditation_work_plan_activities)"))
+        columns = {row[1] for row in columns_result}
+        if "study_plan" not in columns:
+            conn.execute(text("ALTER TABLE accreditation_work_plan_activities ADD COLUMN study_plan VARCHAR(255)"))
             conn.commit()
 
 def get_db():

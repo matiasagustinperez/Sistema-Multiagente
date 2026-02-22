@@ -469,3 +469,245 @@ class ProposalIntelligentControlsSummary(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AccreditationEvidenceBase(BaseModel):
+    career: str
+    title: Optional[str] = None
+    evidence_type: Optional[str] = None
+    source_kind: str = "local"
+    source_reference: Optional[str] = None
+    source_file_id: Optional[str] = None
+    source_filename: Optional[str] = None
+    normalized_filename: Optional[str] = None
+    destination_folder_url: Optional[str] = None
+    destination_file_url: Optional[str] = None
+    destination_file_id: Optional[str] = None
+    checksum_sha256: Optional[str] = None
+    status: str = "registered"
+    ocr_applied: bool = False
+    access_error: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class AccreditationEvidenceCreate(AccreditationEvidenceBase):
+    created_by: Optional[str] = None
+    version_note: Optional[str] = None
+
+
+class AccreditationEvidenceUpdate(BaseModel):
+    title: Optional[str] = None
+    evidence_type: Optional[str] = None
+    created_by: Optional[str] = None
+    source_reference: Optional[str] = None
+    source_filename: Optional[str] = None
+    normalized_filename: Optional[str] = None
+    destination_folder_url: Optional[str] = None
+    destination_file_url: Optional[str] = None
+    status: Optional[str] = None
+    ocr_applied: Optional[bool] = None
+    access_error: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    note: Optional[str] = None
+    actor: Optional[str] = None
+
+
+class AccreditationEvidenceOut(AccreditationEvidenceBase):
+    id: int
+    version_number: int
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AccreditationEvidenceVersionOut(BaseModel):
+    id: int
+    evidence_id: int
+    version_number: int
+    source_reference: Optional[str] = None
+    source_file_id: Optional[str] = None
+    source_filename: Optional[str] = None
+    destination_file_url: Optional[str] = None
+    destination_file_id: Optional[str] = None
+    checksum_sha256: Optional[str] = None
+    status: str
+    note: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AccreditationEvidenceAuditOut(BaseModel):
+    id: int
+    evidence_id: int
+    action: str
+    changed_fields: Optional[Dict[str, Any]] = None
+    note: Optional[str] = None
+    actor: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AccreditationSettingsBase(BaseModel):
+    career: str
+    study_plan: Optional[str] = None
+    source_folder_url: Optional[str] = None
+    destination_folder_url: Optional[str] = None
+    process_mode: str = "move"
+    recursive_scan: bool = True
+    evidence_types: List[str] = Field(default_factory=list)
+    actor_roles: List[str] = Field(default_factory=list)
+    actors: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class AccreditationSettingsCreate(AccreditationSettingsBase):
+    pass
+
+
+class AccreditationSettingsOut(AccreditationSettingsBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AccreditationIngestItem(BaseModel):
+    source_kind: Optional[str] = None
+    source_reference: str
+    source_file_id: Optional[str] = None
+    source_filename: Optional[str] = None
+    title: Optional[str] = None
+    evidence_type: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class AccreditationIngestRequest(BaseModel):
+    career: str
+    study_plan: Optional[str] = None
+    actor: Optional[str] = None
+    version_note: Optional[str] = None
+    items: List[AccreditationIngestItem] = Field(default_factory=list)
+
+
+class AccreditationIngestResultItem(BaseModel):
+    evidence_id: int
+    version_number: int
+    action: str
+    source_kind: str
+    source_reference: str
+    source_file_id: Optional[str] = None
+    normalized_filename: Optional[str] = None
+    status: str
+    access_error: Optional[str] = None
+
+
+class AccreditationIngestResult(BaseModel):
+    processed: int
+    created: int
+    versioned: int
+    skipped: int
+    items: List[AccreditationIngestResultItem] = Field(default_factory=list)
+
+
+class AccreditationWorkPlanTaskBase(BaseModel):
+    name: str
+    status: str = "pending"
+    status_date: datetime
+    notes: Optional[str] = None
+
+
+class AccreditationWorkPlanTaskCreate(AccreditationWorkPlanTaskBase):
+    pass
+
+
+class AccreditationWorkPlanTaskUpdate(BaseModel):
+    name: Optional[str] = None
+    status: Optional[str] = None
+    status_date: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class AccreditationWorkPlanTaskOut(AccreditationWorkPlanTaskBase):
+    id: int
+    activity_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AccreditationWorkPlanActivityBase(BaseModel):
+    career: str
+    study_plan: Optional[str] = None
+    stage: str
+    stage_order: int
+    sub_stage: str
+    sub_stage_order: int
+    activity: str
+    activity_order: int
+    responsible_actor: Optional[str] = None
+    collaborators: List[str] = Field(default_factory=list)
+    start_date: datetime
+    deadline: datetime
+    status: str = "pending"
+    observations: Optional[str] = None
+
+
+class AccreditationWorkPlanActivityCreate(AccreditationWorkPlanActivityBase):
+    pass
+
+
+class AccreditationWorkPlanActivityUpdate(BaseModel):
+    stage: Optional[str] = None
+    stage_order: Optional[int] = None
+    sub_stage: Optional[str] = None
+    sub_stage_order: Optional[int] = None
+    activity: Optional[str] = None
+    activity_order: Optional[int] = None
+    responsible_actor: Optional[str] = None
+    collaborators: Optional[List[str]] = None
+    start_date: Optional[datetime] = None
+    deadline: Optional[datetime] = None
+    status: Optional[str] = None
+    observations: Optional[str] = None
+
+
+class AccreditationDeadlineHistoryOut(BaseModel):
+    changed_at: datetime
+    previous_deadline: datetime
+    new_deadline: datetime
+
+
+class AccreditationWorkPlanActivityOut(BaseModel):
+    id: int
+    career: str
+    study_plan: Optional[str] = None
+    stage: str
+    stage_order: int
+    sub_stage: str
+    sub_stage_order: int
+    activity: str
+    activity_order: int
+    activity_number: str
+    responsible_actor: Optional[str] = None
+    collaborators: List[str] = Field(default_factory=list)
+    start_date: datetime
+    deadline: datetime
+    end_date: Optional[datetime] = None
+    status: str
+    deadline_history: List[AccreditationDeadlineHistoryOut] = Field(default_factory=list)
+    observations: Optional[str] = None
+    tasks: List[AccreditationWorkPlanTaskOut] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
