@@ -1,4 +1,5 @@
 import os
+import glob
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Body
 from fastapi.responses import FileResponse
@@ -18,6 +19,7 @@ import re
 import hashlib
 import json
 import ast
+import mimetypes
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
@@ -137,6 +139,265 @@ def normalize_subject_name(value: str | None) -> str:
 
 def normalize_title_name(value: str | None) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def split_preview_lines(text: str, max_lines: int = 20, max_chars: int = 3000) -> list[str]:
+    if not text:
+        return []
+    clean = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(clean) > max_chars:
+        clean = clean[:max_chars]
+    lines = [line.strip() for line in clean.split("\n") if line.strip()]
+    if not lines:
+        return []
+    return lines[:max_lines]
+
+
+def _extract_docx_text(content: bytes) -> str:
+    try:
+        from docx import Document  # type: ignore
+    except Exception:
+        return ""
+    try:
+        document = Document(BytesIO(content))
+        chunks: list[str] = []
+        chunks.extend([p.text for p in document.paragraphs if str(p.text or "").strip()])
+        for table in document.tables:
+            for row in table.rows:
+                row_cells = [str(cell.text or "").strip() for cell in row.cells if str(cell.text or "").strip()]
+                if row_cells:
+                    chunks.append(" | ".join(row_cells))
+        return "\n".join(chunks).strip()
+    except Exception:
+        return ""
+
+
+def _extract_xlsx_text(content: bytes) -> str:
+    try:
+        import openpyxl  # type: ignore
+    except Exception:
+        return ""
+    try:
+        wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+        chunks: list[str] = []
+        for ws in wb.worksheets:
+            chunks.append(f"[Hoja] {ws.title}")
+            for row in ws.iter_rows(values_only=True):
+                values = [str(v).strip() for v in row if v is not None and str(v).strip()]
+                if values:
+                    chunks.append(" | ".join(values))
+        return "\n".join(chunks).strip()
+    except Exception:
+        return ""
+
+
+def _extract_pdf_text(content: bytes, max_pages: int | None = None) -> str:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except Exception:
+        try:
+            from PyPDF2 import PdfReader  # type: ignore
+        except Exception:
+            return ""
+    try:
+        reader = PdfReader(BytesIO(content))
+        chunks: list[str] = []
+        for page_index, page in enumerate(reader.pages):
+            if max_pages is not None and page_index >= max_pages:
+                break
+            page_text = page.extract_text() or ""
+            if page_text.strip():
+                chunks.append(page_text)
+        return "\n".join(chunks).strip()
+    except Exception:
+        return ""
+
+
+def _extract_text_from_image_ocr(content: bytes) -> str:
+    try:
+        from PIL import Image  # type: ignore
+        import pytesseract  # type: ignore
+    except Exception:
+        return ""
+    try:
+        tesseract_cmd = resolve_tesseract_executable()
+        if tesseract_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+        image = Image.open(BytesIO(content))
+        return (pytesseract.image_to_string(image, lang="spa+eng") or "").strip()
+    except Exception:
+        return ""
+
+
+def resolve_tesseract_executable() -> str | None:
+    env_candidates = [
+        os.getenv("TESSERACT_CMD"),
+        os.getenv("PYTESSERACT_TESSERACT_CMD"),
+    ]
+    for candidate in env_candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+
+    in_path = shutil.which("tesseract")
+    if in_path:
+        return in_path
+
+    common_paths = [
+        r"C:/Program Files/Tesseract-OCR/tesseract.exe",
+        r"C:/Program Files (x86)/Tesseract-OCR/tesseract.exe",
+    ]
+    for candidate in common_paths:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def resolve_poppler_bin_dir() -> str | None:
+    env_candidate = os.getenv("POPPLER_PATH")
+    if env_candidate:
+        if os.path.isdir(env_candidate):
+            return env_candidate
+        if os.path.isfile(env_candidate):
+            return os.path.dirname(env_candidate)
+
+    pdftoppm_in_path = shutil.which("pdftoppm")
+    if pdftoppm_in_path:
+        return os.path.dirname(pdftoppm_in_path)
+
+    local_app_data = os.getenv("LOCALAPPDATA")
+    if local_app_data:
+        winget_glob = os.path.join(
+            local_app_data,
+            "Microsoft",
+            "WinGet",
+            "Packages",
+            "oschwartz10612.Poppler*",
+            "poppler-*",
+            "Library",
+            "bin",
+        )
+        matches = sorted(glob.glob(winget_glob), reverse=True)
+        for candidate in matches:
+            if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "pdftoppm.exe")):
+                return candidate
+
+    common_dirs = [
+        r"C:/Program Files/poppler/Library/bin",
+        r"C:/Program Files (x86)/poppler/Library/bin",
+    ]
+    for candidate in common_dirs:
+        if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "pdftoppm.exe")):
+            return candidate
+
+    return None
+
+
+def _extract_pdf_text_with_ocr(content: bytes, max_pages: int | None = None) -> str:
+    try:
+        import pytesseract  # type: ignore
+    except Exception:
+        return ""
+
+    # 1) Try pdf2image + Poppler (when available)
+    try:
+        tesseract_cmd = resolve_tesseract_executable()
+        if tesseract_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+        poppler_bin_dir = resolve_poppler_bin_dir()
+        kwargs = {"dpi": 200}
+        if poppler_bin_dir:
+            kwargs["poppler_path"] = poppler_bin_dir
+
+        from pdf2image import convert_from_bytes  # type: ignore
+        images = convert_from_bytes(content, **kwargs)
+        chunks: list[str] = []
+        for page_index, image in enumerate(images):
+            if max_pages is not None and page_index >= max_pages:
+                break
+            txt = (pytesseract.image_to_string(image, lang="spa+eng") or "").strip()
+            if txt:
+                chunks.append(txt)
+        merged = "\n".join(chunks).strip()
+        if merged:
+            return merged
+    except Exception:
+        pass
+
+    # 2) Fallback: pypdfium2 render (no Poppler required)
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+        pdf = pdfium.PdfDocument(content)
+        chunks: list[str] = []
+        for page_index in range(len(pdf)):
+            if max_pages is not None and page_index >= max_pages:
+                break
+            page = pdf[page_index]
+            bitmap = page.render(scale=2.0)
+            pil_image = bitmap.to_pil()
+            txt = (pytesseract.image_to_string(pil_image, lang="spa+eng") or "").strip()
+            if txt:
+                chunks.append(txt)
+        return "\n".join(chunks).strip()
+    except Exception:
+        return ""
+
+
+def extract_document_preview(filename: str, content: bytes, preview_mode: bool = False) -> dict:
+    name = str(filename or "").strip().lower()
+    guessed_mime, _ = mimetypes.guess_type(name)
+
+    text = ""
+    method = "none"
+    ocr_applied = False
+    pdf_text_pages = 1 if preview_mode else None
+    pdf_ocr_pages = 1 if preview_mode else None
+
+    if name.endswith(".docx"):
+        text = _extract_docx_text(content)
+        method = "docx"
+    elif name.endswith(".xlsx") or name.endswith(".xlsm") or name.endswith(".xls"):
+        text = _extract_xlsx_text(content)
+        method = "xlsx"
+    elif name.endswith(".pdf"):
+        text = _extract_pdf_text(content, max_pages=pdf_text_pages)
+        method = "pdf-text"
+        if len(text.strip()) < 40:
+            has_tesseract = bool(resolve_tesseract_executable())
+            if has_tesseract:
+                ocr_text = _extract_pdf_text_with_ocr(content, max_pages=pdf_ocr_pages)
+                if ocr_text:
+                    text = ocr_text
+                    method = "pdf-ocr"
+                    ocr_applied = True
+                else:
+                    method = "pdf-ocr-empty"
+            else:
+                method = "pdf-ocr-unavailable"
+    elif guessed_mime and guessed_mime.startswith("image/"):
+        text = _extract_text_from_image_ocr(content)
+        method = "image-ocr"
+        ocr_applied = bool(text)
+    else:
+        # Fallback for txt/csv/json and unknown text-like files
+        try:
+            text = content.decode("utf-8")
+            method = "text-utf8"
+        except Exception:
+            try:
+                text = content.decode("latin-1")
+                method = "text-latin1"
+            except Exception:
+                text = ""
+                method = "binary-unsupported"
+
+    preview_lines = split_preview_lines(text)
+    return {
+        "extraction_method": method,
+        "ocr_applied": ocr_applied,
+        "extracted_char_count": len(text or ""),
+        "preview_lines": preview_lines,
+    }
 
 
 def normalize_hash_value(value):
@@ -2656,6 +2917,80 @@ def infer_evidence_source_kind(source_reference: str, source_kind: str | None = 
     return "local"
 
 
+def is_http_reference(source_reference: str | None) -> bool:
+    value = str(source_reference or "").strip().lower()
+    return value.startswith("http://") or value.startswith("https://")
+
+
+def upload_binary_to_drive_folder(
+    drive_service,
+    *,
+    destination_folder_id: str,
+    filename: str,
+    content: bytes,
+    mime_type: str | None = None,
+) -> tuple[str | None, str | None]:
+    from googleapiclient.http import MediaInMemoryUpload
+
+    guessed_mime, _ = mimetypes.guess_type(filename)
+    upload_mime = mime_type or guessed_mime or "application/octet-stream"
+    media = MediaInMemoryUpload(content or b"", mimetype=upload_mime, resumable=False)
+    created = drive_service.files().create(
+        body={"name": filename, "parents": [destination_folder_id]},
+        media_body=media,
+        fields="id, webViewLink",
+        supportsAllDrives=True,
+    ).execute()
+    file_id = created.get("id")
+    file_url = created.get("webViewLink") or (f"https://drive.google.com/file/d/{file_id}/view" if file_id else None)
+    return file_id, file_url
+
+
+def transfer_drive_file_to_destination(
+    drive_service,
+    *,
+    source_file_id: str,
+    destination_folder_id: str,
+    move_source_file: bool,
+    source_folder_id: str | None = None,
+) -> tuple[str | None, str | None]:
+    if move_source_file:
+        current = drive_service.files().get(
+            fileId=source_file_id,
+            fields="id, parents, webViewLink",
+            supportsAllDrives=True,
+        ).execute()
+        parents = current.get("parents") or []
+        if source_folder_id and source_folder_id in parents:
+            remove_parents = source_folder_id
+        else:
+            remove_candidates = [parent for parent in parents if parent and parent != destination_folder_id]
+            remove_parents = ",".join(remove_candidates) if remove_candidates else None
+
+        move_kwargs = {
+            "fileId": source_file_id,
+            "addParents": destination_folder_id,
+            "fields": "id, webViewLink",
+            "supportsAllDrives": True,
+        }
+        if remove_parents:
+            move_kwargs["removeParents"] = remove_parents
+        moved = drive_service.files().update(**move_kwargs).execute()
+        moved_id = moved.get("id") or source_file_id
+        moved_url = moved.get("webViewLink") or f"https://drive.google.com/file/d/{moved_id}/view"
+        return moved_id, moved_url
+
+    copied = drive_service.files().copy(
+        fileId=source_file_id,
+        body={"parents": [destination_folder_id]},
+        fields="id, webViewLink",
+        supportsAllDrives=True,
+    ).execute()
+    copied_id = copied.get("id")
+    copied_url = copied.get("webViewLink") or (f"https://drive.google.com/file/d/{copied_id}/view" if copied_id else None)
+    return copied_id, copied_url
+
+
 def normalize_simple_list(values, fallback: list[str]) -> list[str]:
     if not isinstance(values, list):
         return fallback
@@ -2747,6 +3082,60 @@ def list_drive_folder_files(drive_service, folder_id: str, recursive: bool = Tru
 
     traverse(folder_id)
     return collected
+
+
+def download_drive_file_bytes(drive_service, file_id: str) -> tuple[bytes, str | None, str | None, str | None]:
+    try:
+        metadata = drive_service.files().get(
+            fileId=file_id,
+            fields="id, name, mimeType, webViewLink",
+            supportsAllDrives=True,
+        ).execute()
+    except Exception as exc:
+        raise RuntimeError(f"No se pudo consultar metadatos del archivo de Drive: {exc}")
+
+    mime_type = str(metadata.get("mimeType") or "")
+    file_name = metadata.get("name")
+    web_link = metadata.get("webViewLink")
+
+    try:
+        from googleapiclient.http import MediaIoBaseDownload  # type: ignore
+    except Exception:
+        raise RuntimeError("Faltan dependencias de Google Drive (google-api-python-client)")
+
+    request = None
+    if mime_type == "application/vnd.google-apps.document":
+        request = drive_service.files().export_media(
+            fileId=file_id,
+            mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        if file_name and not str(file_name).lower().endswith(".docx"):
+            file_name = f"{file_name}.docx"
+    elif mime_type == "application/vnd.google-apps.spreadsheet":
+        request = drive_service.files().export_media(
+            fileId=file_id,
+            mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        if file_name and not str(file_name).lower().endswith(".xlsx"):
+            file_name = f"{file_name}.xlsx"
+    elif mime_type == "application/vnd.google-apps.presentation":
+        request = drive_service.files().export_media(
+            fileId=file_id,
+            mimeType="application/pdf",
+        )
+        if file_name and not str(file_name).lower().endswith(".pdf"):
+            file_name = f"{file_name}.pdf"
+    elif mime_type == "application/vnd.google-apps.folder":
+        raise RuntimeError("La referencia corresponde a una carpeta, no a un archivo")
+    else:
+        request = drive_service.files().get_media(fileId=file_id, supportsAllDrives=True)
+
+    output = BytesIO()
+    downloader = MediaIoBaseDownload(output, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return output.getvalue(), file_name, mime_type, web_link
 
 
 @app.get("/accreditation/evidences", response_model=list[schemas.AccreditationEvidenceOut])
@@ -2913,7 +3302,13 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
     actor = (payload.actor or "").strip()
     if not actor:
         raise HTTPException(status_code=400, detail="Actor es obligatorio para la ingesta de evidencias")
+    source_folder_url = settings.source_folder_url
     destination_folder_url = settings.destination_folder_url
+    process_mode = (settings.process_mode or "move").strip().lower()
+    source_folder_id = extract_drive_folder_id(source_folder_url)
+    destination_folder_id = extract_drive_folder_id(destination_folder_url)
+    if not destination_folder_id:
+        raise HTTPException(status_code=400, detail="Configurá una carpeta DESTINO válida en Acreditación > Configuración")
 
     drive_service = None
     drive_service_error = None
@@ -3102,6 +3497,9 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
         source_kind = infer_evidence_source_kind(source_reference, item_payload.get("source_kind"))
         source_file_id = item_payload.get("source_file_id")
         source_filename = item_payload.get("source_filename")
+        destination_file_id = None
+        destination_file_url = None
+        transfer_error = None
 
         if source_kind == "drive-url":
             file_id = source_file_id or extract_drive_file_id(source_reference)
@@ -3111,11 +3509,24 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
                     service = get_drive_service_for_ingest()
                     drive_file = service.files().get(
                         fileId=file_id,
-                        fields="id, name, webViewLink",
+                        fields="id, name, webViewLink, parents",
                         supportsAllDrives=True,
                     ).execute()
                     source_filename = source_filename or drive_file.get("name")
                     source_reference = drive_file.get("webViewLink") or source_reference
+                    parents = drive_file.get("parents") or []
+                    if destination_folder_id:
+                        move_source_file = bool(process_mode == "move" and source_folder_id and source_folder_id in parents)
+                        try:
+                            destination_file_id, destination_file_url = transfer_drive_file_to_destination(
+                                service,
+                                source_file_id=source_file_id,
+                                destination_folder_id=destination_folder_id,
+                                move_source_file=move_source_file,
+                                source_folder_id=source_folder_id,
+                            )
+                        except Exception as transfer_exc:
+                            transfer_error = f"No se pudo transferir a carpeta destino: {transfer_exc}"
                 except Exception as exc:
                     incident_item = create_incident(
                         source_kind=source_kind,
@@ -3130,6 +3541,23 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
                     created += 1
                     result_items.append(incident_item)
                     continue
+        elif destination_folder_id and is_http_reference(source_reference):
+            try:
+                response = requests.get(source_reference, timeout=45)
+                response.raise_for_status()
+                content = response.content or b""
+                parsed_name = source_filename or os.path.basename(source_reference.split("?", 1)[0]) or "archivo_remoto"
+                guessed_mime = response.headers.get("Content-Type") or None
+                service = get_drive_service_for_ingest()
+                destination_file_id, destination_file_url = upload_binary_to_drive_folder(
+                    service,
+                    destination_folder_id=destination_folder_id,
+                    filename=parsed_name,
+                    content=content,
+                    mime_type=guessed_mime,
+                )
+            except Exception as transfer_exc:
+                transfer_error = f"No se pudo descargar/subir URL remota a destino: {transfer_exc}"
 
         normalized_filename = normalize_evidence_filename(source_filename, source_reference)
 
@@ -3156,7 +3584,10 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
             existing.normalized_filename = normalized_filename or existing.normalized_filename
             existing.source_file_id = source_file_id or existing.source_file_id
             existing.destination_folder_url = destination_folder_url or existing.destination_folder_url
+            existing.destination_file_id = destination_file_id or existing.destination_file_id
+            existing.destination_file_url = destination_file_url or existing.destination_file_url
             existing.status = "versioned"
+            existing.access_error = transfer_error
             if item_payload.get("title"):
                 existing.title = item_payload.get("title")
             if item_payload.get("evidence_type"):
@@ -3171,10 +3602,10 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
                 source_reference=source_reference,
                 source_file_id=source_file_id or existing.source_file_id,
                 source_filename=source_filename or existing.source_filename,
-                destination_file_url=existing.destination_file_url,
-                destination_file_id=existing.destination_file_id,
+                destination_file_url=destination_file_url or existing.destination_file_url,
+                destination_file_id=destination_file_id or existing.destination_file_id,
                 checksum_sha256=existing.checksum_sha256,
-                status="versioned",
+                status="error" if transfer_error else "versioned",
                 note=payload.version_note or "Nueva versión por ingesta",
                 created_by=actor,
             ))
@@ -3197,8 +3628,8 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
                 "source_reference": source_reference,
                 "source_file_id": source_file_id,
                 "normalized_filename": normalized_filename,
-                "status": "versioned",
-                "access_error": None,
+                "status": "error" if transfer_error else "versioned",
+                "access_error": transfer_error,
             })
             continue
 
@@ -3212,13 +3643,13 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
             source_filename=source_filename,
             normalized_filename=normalized_filename,
             destination_folder_url=destination_folder_url,
-            destination_file_url=None,
-            destination_file_id=None,
+            destination_file_url=destination_file_url,
+            destination_file_id=destination_file_id,
             checksum_sha256=None,
             version_number=1,
-            status="registered",
+            status="error" if transfer_error else "registered",
             ocr_applied=False,
-            access_error=None,
+            access_error=transfer_error,
             metadata_json=item_payload.get("metadata"),
             created_by=actor,
         )
@@ -3231,10 +3662,10 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
             source_reference=source_reference,
             source_file_id=source_file_id,
             source_filename=source_filename,
-            destination_file_url=None,
-            destination_file_id=None,
+            destination_file_url=destination_file_url,
+            destination_file_id=destination_file_id,
             checksum_sha256=None,
-            status="registered",
+            status="error" if transfer_error else "registered",
             note=payload.version_note or "Registro inicial por ingesta",
             created_by=actor,
         ))
@@ -3254,8 +3685,8 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
             "source_reference": source_reference,
             "source_file_id": source_file_id,
             "normalized_filename": normalized_filename,
-            "status": "registered",
-            "access_error": None,
+            "status": "error" if transfer_error else "registered",
+            "access_error": transfer_error,
         })
 
     db.commit()
@@ -3263,6 +3694,201 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
         "processed": len(expanded_items),
         "created": created,
         "versioned": versioned,
+        "skipped": skipped,
+        "items": result_items,
+    }
+
+
+@app.post("/accreditation/ingest-preview", response_model=schemas.AccreditationPreviewResult)
+def preview_accreditation_evidences(payload: schemas.AccreditationPreviewRequest, db: Session = Depends(get_db)):
+    career = (payload.career or "").strip()
+    study_plan = (payload.study_plan or "").strip() or None
+    if not career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not study_plan:
+        raise HTTPException(status_code=400, detail="Study plan is required")
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="At least one item is required")
+
+    settings = db.query(models.AccreditationSettings).filter(
+        models.AccreditationSettings.career == career,
+        models.AccreditationSettings.study_plan == study_plan,
+    ).first()
+    if not settings:
+        raise HTTPException(status_code=400, detail="No hay configuración de acreditación para la carrera")
+
+    drive_service = None
+    drive_service_error = None
+
+    def get_drive_service_for_preview():
+        nonlocal drive_service, drive_service_error
+        if drive_service is not None:
+            return drive_service
+        if drive_service_error:
+            raise RuntimeError(drive_service_error)
+        try:
+            drive_service = get_google_drive_service()
+            return drive_service
+        except Exception as exc:
+            drive_service_error = str(getattr(exc, "detail", "") or exc)
+            raise RuntimeError(drive_service_error)
+
+    expanded_items: list[dict] = []
+    for item_payload in payload.items:
+        source_reference = (item_payload.source_reference or "").strip()
+        if not source_reference:
+            continue
+        source_kind = infer_evidence_source_kind(source_reference, item_payload.source_kind)
+
+        if source_kind == "drive-folder":
+            folder_id = extract_drive_folder_id(source_reference)
+            if not folder_id:
+                expanded_items.append({
+                    "kind": "incident",
+                    "source_kind": source_kind,
+                    "source_reference": source_reference,
+                    "source_file_id": None,
+                    "source_filename": None,
+                    "error": "No se pudo extraer ID de carpeta de Drive",
+                })
+                continue
+            try:
+                service = get_drive_service_for_preview()
+                folder_files = list_drive_folder_files(service, folder_id, recursive=bool(settings.recursive_scan))
+                for folder_item in folder_files:
+                    file_id = folder_item.get("id")
+                    file_name = folder_item.get("name")
+                    web_url = folder_item.get("webViewLink") or (f"https://drive.google.com/file/d/{file_id}/view" if file_id else source_reference)
+                    expanded_items.append({
+                        "kind": "item",
+                        "source_kind": "drive-url",
+                        "source_reference": web_url,
+                        "source_file_id": file_id,
+                        "source_filename": file_name,
+                    })
+                if not folder_files:
+                    expanded_items.append({
+                        "kind": "incident",
+                        "source_kind": source_kind,
+                        "source_reference": source_reference,
+                        "source_file_id": None,
+                        "source_filename": None,
+                        "error": "No se encontraron archivos en la carpeta indicada",
+                    })
+            except Exception as exc:
+                expanded_items.append({
+                    "kind": "incident",
+                    "source_kind": source_kind,
+                    "source_reference": source_reference,
+                    "source_file_id": None,
+                    "source_filename": None,
+                    "error": f"No se pudo listar carpeta de Drive: {exc}",
+                })
+            continue
+
+        expanded_items.append({
+            "kind": "item",
+            "source_kind": source_kind,
+            "source_reference": source_reference,
+            "source_file_id": item_payload.source_file_id,
+            "source_filename": item_payload.source_filename,
+        })
+
+    skipped = 0
+    result_items: list[dict] = []
+
+    for item_payload in expanded_items:
+        source_reference = (item_payload.get("source_reference") or "").strip()
+        if not source_reference:
+            skipped += 1
+            continue
+
+        if item_payload.get("kind") == "incident":
+            result_items.append({
+                "source_kind": item_payload.get("source_kind") or "drive-url",
+                "source_reference": source_reference,
+                "source_file_id": item_payload.get("source_file_id"),
+                "source_filename": item_payload.get("source_filename"),
+                "normalized_filename": normalize_evidence_filename(item_payload.get("source_filename"), source_reference),
+                "status": "error",
+                "access_error": item_payload.get("error") or "Incidencia desconocida",
+                "extraction_method": None,
+                "extracted_char_count": 0,
+                "ocr_applied": False,
+                "preview_lines": [],
+            })
+            continue
+
+        source_kind = infer_evidence_source_kind(source_reference, item_payload.get("source_kind"))
+        if source_kind != "drive-url":
+            result_items.append({
+                "source_kind": source_kind,
+                "source_reference": source_reference,
+                "source_file_id": item_payload.get("source_file_id"),
+                "source_filename": item_payload.get("source_filename"),
+                "normalized_filename": normalize_evidence_filename(item_payload.get("source_filename"), source_reference),
+                "status": "error",
+                "access_error": "Solo se admite preview para referencias de Drive en esta operación",
+                "extraction_method": None,
+                "extracted_char_count": 0,
+                "ocr_applied": False,
+                "preview_lines": [],
+            })
+            continue
+
+        file_id = item_payload.get("source_file_id") or extract_drive_file_id(source_reference)
+        if not file_id:
+            result_items.append({
+                "source_kind": source_kind,
+                "source_reference": source_reference,
+                "source_file_id": None,
+                "source_filename": item_payload.get("source_filename"),
+                "normalized_filename": normalize_evidence_filename(item_payload.get("source_filename"), source_reference),
+                "status": "error",
+                "access_error": "No se pudo extraer ID de archivo de Drive",
+                "extraction_method": None,
+                "extracted_char_count": 0,
+                "ocr_applied": False,
+                "preview_lines": [],
+            })
+            continue
+
+        try:
+            service = get_drive_service_for_preview()
+            content, resolved_name, _, resolved_ref = download_drive_file_bytes(service, file_id)
+            source_filename = resolved_name or item_payload.get("source_filename")
+            final_reference = resolved_ref or source_reference
+            extraction_preview = extract_document_preview(source_filename or source_reference, content, preview_mode=True)
+            result_items.append({
+                "source_kind": "drive-url",
+                "source_reference": final_reference,
+                "source_file_id": file_id,
+                "source_filename": source_filename,
+                "normalized_filename": normalize_evidence_filename(source_filename, final_reference),
+                "status": "previewed",
+                "access_error": None,
+                "extraction_method": extraction_preview.get("extraction_method"),
+                "extracted_char_count": extraction_preview.get("extracted_char_count"),
+                "ocr_applied": bool(extraction_preview.get("ocr_applied")),
+                "preview_lines": extraction_preview.get("preview_lines") or [],
+            })
+        except Exception as exc:
+            result_items.append({
+                "source_kind": "drive-url",
+                "source_reference": source_reference,
+                "source_file_id": file_id,
+                "source_filename": item_payload.get("source_filename"),
+                "normalized_filename": normalize_evidence_filename(item_payload.get("source_filename"), source_reference),
+                "status": "error",
+                "access_error": f"No se pudo previsualizar archivo de Drive: {exc}",
+                "extraction_method": None,
+                "extracted_char_count": 0,
+                "ocr_applied": False,
+                "preview_lines": [],
+            })
+
+    return {
+        "processed": len(expanded_items),
         "skipped": skipped,
         "items": result_items,
     }
@@ -3290,8 +3916,27 @@ async def ingest_accreditation_local_files(
     if not actor_value:
         raise HTTPException(status_code=400, detail="Actor es obligatorio para la carga local de evidencias")
     evidence_type_value = (evidence_type or "").strip() or "General"
+    destination_folder_id = extract_drive_folder_id(settings.destination_folder_url)
+    if not destination_folder_id:
+        raise HTTPException(status_code=400, detail="Configurá una carpeta DESTINO válida en Acreditación > Configuración")
     accreditation_local_dir = os.path.join(UPLOAD_FOLDER, "accreditation")
     os.makedirs(accreditation_local_dir, exist_ok=True)
+
+    drive_service = None
+    drive_service_error = None
+
+    def get_drive_service_for_local_ingest():
+        nonlocal drive_service, drive_service_error
+        if drive_service is not None:
+            return drive_service
+        if drive_service_error:
+            raise RuntimeError(drive_service_error)
+        try:
+            drive_service = get_google_drive_service()
+            return drive_service
+        except Exception as exc:
+            drive_service_error = str(getattr(exc, "detail", "") or exc)
+            raise RuntimeError(drive_service_error)
 
     created = 0
     versioned = 0
@@ -3311,8 +3956,25 @@ async def ingest_accreditation_local_files(
         target_path = os.path.join(accreditation_local_dir, target_name)
 
         content = await upload.read()
+        extraction_preview = extract_document_preview(original_name, content, preview_mode=True)
         with open(target_path, "wb") as handler:
             handler.write(content)
+
+        destination_file_id = None
+        destination_file_url = None
+        transfer_error = None
+        if destination_folder_id:
+            try:
+                service = get_drive_service_for_local_ingest()
+                destination_file_id, destination_file_url = upload_binary_to_drive_folder(
+                    service,
+                    destination_folder_id=destination_folder_id,
+                    filename=original_name,
+                    content=content,
+                    mime_type=upload.content_type,
+                )
+            except Exception as transfer_exc:
+                transfer_error = f"No se pudo subir archivo local a carpeta destino: {transfer_exc}"
 
         source_reference = target_path.replace("\\", "/")
         checksum = hashlib.sha256(content).hexdigest() if content else None
@@ -3329,10 +3991,13 @@ async def ingest_accreditation_local_files(
             existing.source_reference = source_reference
             existing.source_filename = original_name
             existing.destination_folder_url = settings.destination_folder_url or existing.destination_folder_url
-            existing.status = "versioned"
+            existing.destination_file_id = destination_file_id or existing.destination_file_id
+            existing.destination_file_url = destination_file_url or existing.destination_file_url
+            existing.status = "error" if transfer_error else "versioned"
             existing.evidence_type = evidence_type_value
             existing.checksum_sha256 = checksum
-            existing.access_error = None
+            existing.access_error = transfer_error
+            existing.ocr_applied = bool(extraction_preview.get("ocr_applied"))
             db.add(existing)
 
             db.add(models.AccreditationEvidenceVersion(
@@ -3341,10 +4006,10 @@ async def ingest_accreditation_local_files(
                 source_reference=source_reference,
                 source_file_id=None,
                 source_filename=original_name,
-                destination_file_url=existing.destination_file_url,
-                destination_file_id=existing.destination_file_id,
+                destination_file_url=destination_file_url or existing.destination_file_url,
+                destination_file_id=destination_file_id or existing.destination_file_id,
                 checksum_sha256=checksum,
-                status="versioned",
+                status="error" if transfer_error else "versioned",
                 note="Nueva versión por carga local",
                 created_by=actor_value,
             ))
@@ -3364,8 +4029,12 @@ async def ingest_accreditation_local_files(
                 "source_reference": source_reference,
                 "source_file_id": None,
                 "normalized_filename": normalized_filename,
-                "status": "versioned",
-                "access_error": None,
+                "status": "error" if transfer_error else "versioned",
+                "access_error": transfer_error,
+                "extraction_method": extraction_preview.get("extraction_method"),
+                "ocr_applied": bool(extraction_preview.get("ocr_applied")),
+                "extracted_char_count": extraction_preview.get("extracted_char_count"),
+                "preview_lines": extraction_preview.get("preview_lines") or [],
             })
             continue
 
@@ -3379,13 +4048,13 @@ async def ingest_accreditation_local_files(
             source_filename=original_name,
             normalized_filename=normalized_filename,
             destination_folder_url=settings.destination_folder_url,
-            destination_file_url=None,
-            destination_file_id=None,
+            destination_file_url=destination_file_url,
+            destination_file_id=destination_file_id,
             checksum_sha256=checksum,
             version_number=1,
-            status="registered",
-            ocr_applied=False,
-            access_error=None,
+            status="error" if transfer_error else "registered",
+            ocr_applied=bool(extraction_preview.get("ocr_applied")),
+            access_error=transfer_error,
             metadata_json=None,
             created_by=actor_value,
         )
@@ -3397,10 +4066,10 @@ async def ingest_accreditation_local_files(
             source_reference=source_reference,
             source_file_id=None,
             source_filename=original_name,
-            destination_file_url=None,
-            destination_file_id=None,
+            destination_file_url=destination_file_url,
+            destination_file_id=destination_file_id,
             checksum_sha256=checksum,
-            status="registered",
+            status="error" if transfer_error else "registered",
             note="Registro inicial por carga local",
             created_by=actor_value,
         ))
@@ -3420,8 +4089,12 @@ async def ingest_accreditation_local_files(
             "source_reference": source_reference,
             "source_file_id": None,
             "normalized_filename": normalized_filename,
-            "status": "registered",
-            "access_error": None,
+            "status": "error" if transfer_error else "registered",
+            "access_error": transfer_error,
+            "extraction_method": extraction_preview.get("extraction_method"),
+            "ocr_applied": bool(extraction_preview.get("ocr_applied")),
+            "extracted_char_count": extraction_preview.get("extracted_char_count"),
+            "preview_lines": extraction_preview.get("preview_lines") or [],
         })
 
     db.commit()
@@ -3429,6 +4102,62 @@ async def ingest_accreditation_local_files(
         "processed": len(files),
         "created": created,
         "versioned": versioned,
+        "skipped": skipped,
+        "items": result_items,
+    }
+
+
+@app.post("/accreditation/ingest-local-preview", response_model=schemas.AccreditationPreviewResult)
+async def preview_accreditation_local_files(
+    career: str = Form(...),
+    files: list[UploadFile] = File(...),
+):
+    normalized_career = (career or "").strip()
+    if not normalized_career:
+        raise HTTPException(status_code=400, detail="Career is required")
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one local file is required")
+
+    skipped = 0
+    result_items: list[dict] = []
+    for upload in files:
+        original_name = str(upload.filename or "").strip()
+        if not original_name:
+            skipped += 1
+            continue
+        try:
+            content = await upload.read()
+            extraction_preview = extract_document_preview(original_name, content, preview_mode=True)
+            result_items.append({
+                "source_kind": "local",
+                "source_reference": original_name,
+                "source_file_id": None,
+                "source_filename": original_name,
+                "normalized_filename": normalize_evidence_filename(original_name, original_name),
+                "status": "previewed",
+                "access_error": None,
+                "extraction_method": extraction_preview.get("extraction_method"),
+                "extracted_char_count": extraction_preview.get("extracted_char_count"),
+                "ocr_applied": bool(extraction_preview.get("ocr_applied")),
+                "preview_lines": extraction_preview.get("preview_lines") or [],
+            })
+        except Exception as exc:
+            result_items.append({
+                "source_kind": "local",
+                "source_reference": original_name,
+                "source_file_id": None,
+                "source_filename": original_name,
+                "normalized_filename": normalize_evidence_filename(original_name, original_name),
+                "status": "error",
+                "access_error": f"No se pudo previsualizar el archivo local: {exc}",
+                "extraction_method": None,
+                "extracted_char_count": 0,
+                "ocr_applied": False,
+                "preview_lines": [],
+            })
+
+    return {
+        "processed": len(files),
         "skipped": skipped,
         "items": result_items,
     }

@@ -17,9 +17,11 @@ const LEGACY_API_BASE_URLS = [
 ]
 
 const careerOptions = [
-  'Ingeniería en Sistemas',
   'Ingeniería Mecatrónica',
-  'Licenciatura en Sistemas'
+  'Ingeniería en Sistemas',
+  'Licenciatura en Sistemas',
+  'Tecnicatura Universitaria en Ciencia de Datos',
+  'Tecnicatura Universitaria en Desarrollo Web'
 ]
 
 const App = () => {
@@ -34,7 +36,7 @@ const App = () => {
       })
       return nextUrl
     }
-    window.fetch = async (input, init) => {
+    const fetchWithFallback = async (input, init) => {
       if (typeof input === 'string') {
         let lastError = null
         for (const candidateBase of API_BASE_FALLBACKS) {
@@ -64,6 +66,7 @@ const App = () => {
       }
       return await nativeFetch(input, init)
     }
+    window.fetch = fetchWithFallback
     return () => {
       window.fetch = nativeFetch
     }
@@ -380,6 +383,8 @@ const App = () => {
   const [accreditationIngestResult, setAccreditationIngestResult] = useState(null)
   const [accreditationIngestError, setAccreditationIngestError] = useState('')
   const [accreditationLocalFiles, setAccreditationLocalFiles] = useState([])
+  const [accreditationPreviewLoading, setAccreditationPreviewLoading] = useState(false)
+  const [accreditationPreviewResult, setAccreditationPreviewResult] = useState(null)
   const [accreditationHistoryById, setAccreditationHistoryById] = useState({})
   const [accreditationHistoryLoadingById, setAccreditationHistoryLoadingById] = useState({})
   const [accreditationHistoryErrorById, setAccreditationHistoryErrorById] = useState({})
@@ -1324,6 +1329,37 @@ const App = () => {
     }
   }
 
+  const getAccreditationBriefDescription = (metadata) => {
+    if (!metadata || typeof metadata !== 'object') return '-'
+    const summaryFields = [
+      metadata.summary,
+      metadata.resumen,
+      metadata.description,
+      metadata.descripcion,
+      metadata.brief_summary,
+      metadata.short_summary
+    ]
+    const directSummary = summaryFields.find((item) => typeof item === 'string' && item.trim())
+    if (directSummary) return directSummary.trim()
+
+    if (Array.isArray(metadata.preview_lines) && metadata.preview_lines.length > 0) {
+      const firstLines = metadata.preview_lines
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, 2)
+      if (firstLines.length > 0) {
+        return firstLines.join(' · ')
+      }
+    }
+
+    if (typeof metadata.text === 'string' && metadata.text.trim()) {
+      const normalized = metadata.text.trim().replace(/\s+/g, ' ')
+      return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized
+    }
+
+    return '-'
+  }
+
   const formatDateTimeBuenosAires = (value) => {
     if (!value) return '-'
     const raw = String(value).trim()
@@ -1827,7 +1863,17 @@ const App = () => {
     }
   }
 
-  const runAccreditationIngest = async () => {
+  const buildAccreditationReferenceLines = (overrideReferences = null) => {
+    if (Array.isArray(overrideReferences)) {
+      return overrideReferences.map((line) => String(line || '').trim()).filter(Boolean)
+    }
+    return String(accreditationIngestForm.referencesText || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+  }
+
+  const runAccreditationIngest = async (overrideReferences = null) => {
     if (!activeCareer) {
       setStatusMsg('Seleccioná una carrera activa para ejecutar la ingesta.')
       setStatusType('error')
@@ -1840,10 +1886,7 @@ const App = () => {
       return
     }
 
-    const lines = String(accreditationIngestForm.referencesText || '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
+    const lines = buildAccreditationReferenceLines(overrideReferences)
 
     const selectedActor = String(accreditationIngestForm.actor || '').trim()
     if (!selectedActor) {
@@ -1855,6 +1898,8 @@ const App = () => {
 
     if (lines.length === 0) {
       setAccreditationIngestError('Ingresá al menos una referencia (una por línea).')
+      setStatusMsg('Ingresá al menos una referencia (una por línea).')
+      setStatusType('error')
       return
     }
 
@@ -1894,6 +1939,135 @@ const App = () => {
     }
   }
 
+  const runAccreditationSourceFolderIngest = async () => {
+    const sourceFolder = String(accreditationConfigForm.source_folder_url || '').trim()
+    if (!sourceFolder) {
+      setAccreditationIngestError('No hay carpeta de origen configurada en Acreditación > Configuración.')
+      setStatusMsg('No hay carpeta de origen configurada en Acreditación > Configuración.')
+      setStatusType('error')
+      return
+    }
+    setAccreditationIngestForm((prev) => ({ ...prev, referencesText: sourceFolder }))
+    await runAccreditationIngest([sourceFolder])
+  }
+
+  const runAccreditationDrivePreview = async (overrideReferences = null) => {
+    if (!activeCareer) {
+      setStatusMsg('Seleccioná una carrera activa para previsualizar evidencias de Drive.')
+      setStatusType('error')
+      return
+    }
+    const studyPlanName = getAccreditationStudyPlanName()
+    if (!studyPlanName) {
+      setStatusMsg('Seleccioná un plan de estudio activo para previsualizar evidencias de Drive.')
+      setStatusType('error')
+      return
+    }
+
+    const lines = buildAccreditationReferenceLines(overrideReferences)
+
+    if (lines.length === 0) {
+      setAccreditationIngestError('Ingresá al menos una referencia (una por línea).')
+      setStatusMsg('Ingresá al menos una referencia (una por línea).')
+      setStatusType('error')
+      return
+    }
+
+    try {
+      setAccreditationPreviewLoading(true)
+      setAccreditationIngestError('')
+      const selectedEvidenceType = accreditationIngestForm.evidence_type || accreditationConfigForm.evidence_types?.[0] || 'General'
+      const payload = {
+        career: activeCareer,
+        study_plan: studyPlanName,
+        items: lines.map((reference) => ({
+          source_reference: reference,
+          evidence_type: selectedEvidenceType || null
+        }))
+      }
+      const res = await fetch(`${API_BASE_URL}/accreditation/ingest-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo generar la previsualización de Drive')
+      }
+      setAccreditationPreviewResult(data)
+      setStatusMsg(`Preview Drive listo: ${data.processed || 0} archivo(s) analizados.`)
+      setStatusType('success')
+    } catch (err) {
+      setAccreditationIngestError(err.message || 'Error desconocido en previsualización Drive')
+      setStatusMsg(err.message || 'Error desconocido en previsualización Drive')
+      setStatusType('error')
+    } finally {
+      setAccreditationPreviewLoading(false)
+    }
+  }
+
+  const runAccreditationSourceFolderPreview = async () => {
+    const sourceFolder = String(accreditationConfigForm.source_folder_url || '').trim()
+    if (!sourceFolder) {
+      setAccreditationIngestError('No hay carpeta de origen configurada en Acreditación > Configuración.')
+      setStatusMsg('No hay carpeta de origen configurada en Acreditación > Configuración.')
+      setStatusType('error')
+      return
+    }
+    setAccreditationIngestForm((prev) => ({ ...prev, referencesText: sourceFolder }))
+    await runAccreditationDrivePreview([sourceFolder])
+  }
+
+  const runAccreditationLocalPreview = async (filesToPreview = null) => {
+    if (!activeCareer) {
+      setStatusMsg('Seleccioná una carrera activa para previsualizar archivos locales.')
+      setStatusType('error')
+      return
+    }
+    const targetFiles = Array.isArray(filesToPreview) ? filesToPreview : accreditationLocalFiles
+    if (!targetFiles.length) {
+      setAccreditationIngestError('Seleccioná al menos un archivo local.')
+      setStatusMsg('Seleccioná al menos un archivo local.')
+      setStatusType('error')
+      return
+    }
+
+    try {
+      setAccreditationPreviewLoading(true)
+      setAccreditationIngestError('')
+      const formData = new FormData()
+      formData.append('career', activeCareer)
+      targetFiles.forEach((file) => formData.append('files', file))
+      const res = await fetch(`${API_BASE_URL}/accreditation/ingest-local-preview`, {
+        method: 'POST',
+        body: formData
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.detail || 'No se pudo generar la previsualización local')
+      }
+      setAccreditationPreviewResult(data)
+      setStatusMsg(`Preview local listo: ${data.processed || 0} archivo(s) analizados.`)
+      setStatusType('success')
+    } catch (err) {
+      setAccreditationIngestError(err.message || 'Error desconocido en previsualización local')
+      setStatusMsg(err.message || 'Error desconocido en previsualización local')
+      setStatusType('error')
+    } finally {
+      setAccreditationPreviewLoading(false)
+    }
+  }
+
+  const handleAccreditationLocalFilesChange = (e) => {
+    const selectedFiles = Array.from(e.target.files || [])
+    setAccreditationLocalFiles(selectedFiles)
+    if (!selectedFiles.length) {
+      setAccreditationPreviewResult(null)
+      return
+    }
+    runAccreditationLocalPreview(selectedFiles)
+  }
+
   const runAccreditationLocalIngest = async () => {
     if (!activeCareer) {
       setStatusMsg('Seleccioná una carrera activa para cargar archivos locales.')
@@ -1902,6 +2076,8 @@ const App = () => {
     }
     if (!accreditationLocalFiles.length) {
       setAccreditationIngestError('Seleccioná al menos un archivo local.')
+      setStatusMsg('Seleccioná al menos un archivo local.')
+      setStatusType('error')
       return
     }
     const selectedActor = String(accreditationIngestForm.actor || '').trim()
@@ -1931,6 +2107,7 @@ const App = () => {
         throw new Error(data.detail || 'No se pudo ejecutar la carga local de evidencias')
       }
       setAccreditationIngestResult(data)
+      console.log('Carga de Documentación - preview extracción local:', data)
       setStatusMsg(`Carga local completada: ${data.created || 0} creadas, ${data.versioned || 0} versionadas.`)
       setStatusType('success')
       setAccreditationLocalFiles([])
@@ -4264,7 +4441,7 @@ const App = () => {
   async function fetchStudyPlans(career) {
     if (!career) return
     try {
-      const res = await fetch(`http://localhost:8001/study-plans-storage?career=${encodeURIComponent(career)}`)
+      const res = await fetch(`${API_BASE_URL}/study-plans-storage?career=${encodeURIComponent(career)}`)
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
         throw new Error(errorData.detail || `Error ${res.status}`)
@@ -4304,7 +4481,7 @@ const App = () => {
     }
     if (plan.id) payload.id = plan.id
 
-    const res = await fetch('http://localhost:8001/study-plans-storage', {
+    const res = await fetch(`${API_BASE_URL}/study-plans-storage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -4320,7 +4497,7 @@ const App = () => {
 
   async function activateStudyPlanBackend(planId) {
     if (!planId) return
-    const res = await fetch(`http://localhost:8001/study-plans-storage/${planId}/activate`, {
+    const res = await fetch(`${API_BASE_URL}/study-plans-storage/${planId}/activate`, {
       method: 'POST'
     })
     if (!res.ok) {
@@ -4332,7 +4509,7 @@ const App = () => {
 
   async function deleteStudyPlanBackend(planId) {
     if (!planId) return
-    const res = await fetch(`http://localhost:8001/study-plans-storage/${planId}`, {
+    const res = await fetch(`${API_BASE_URL}/study-plans-storage/${planId}`, {
       method: 'DELETE'
     })
     if (!res.ok) {
@@ -13629,15 +13806,15 @@ const App = () => {
                 {
                   key: 'registro',
                   emoji: '📚',
-                  title: 'Registro de evidencias',
+                  title: 'Registro de Documentación',
                   description: 'Visualización, filtros, edición, historial y trazabilidad de evidencias registradas.',
                   color: { bg: '#e8f0fe', border: '#90caf9', activeBg: '#d7e7ff', shadow: 'rgba(26, 115, 232, 0.25)' }
                 },
                 {
                   key: 'ingesta',
                   emoji: '📥',
-                  title: 'Ingesta',
-                  description: 'Carga de referencias de Drive o archivos locales para registrar nuevas evidencias.',
+                  title: 'Carga de Documentación',
+                  description: 'Carga documentación desde Drive o archivos locales para registrar evidencias y extraer texto.',
                   color: { bg: '#e8f5e9', border: '#a5d6a7', activeBg: '#d9f0dc', shadow: 'rgba(0, 168, 84, 0.22)' }
                 },
                 {
@@ -14840,109 +15017,212 @@ const App = () => {
 
             {accreditationSection === 'ingesta' && (
               <div style={{ display: 'grid', gap: '12px' }}>
-                <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
-                  <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Ingesta desde Drive (una referencia por línea)</div>
-                  <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
-                    Pegá links de documento o carpeta de Drive indistintamente. El sistema detecta automáticamente el tipo de fuente.
+                {!activeCareer && (
+                  <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#fff8e1', color: '#8d6e00', border: '1px solid #ffe082' }}>
+                    Seleccioná una carrera activa para ejecutar la carga de documentación.
                   </div>
+                )}
 
-                  {!activeCareer && (
-                    <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#fff8e1', color: '#8d6e00', border: '1px solid #ffe082' }}>
-                      Seleccioná una carrera activa para ejecutar la ingesta.
-                    </div>
-                  )}
-
-                  {accreditationIngestError && (
-                    <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#ffebee', color: '#b71c1c', border: '1px solid #ffcdd2' }}>
-                      {accreditationIngestError}
-                    </div>
-                  )}
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '10px', alignItems: 'end', marginBottom: '10px' }}>
-                  <div>
-                    <label style={{ ...styles.label, marginBottom: '4px' }}>Tipo de evidencia</label>
-                    <select
-                      style={styles.input}
-                      value={accreditationIngestForm.evidence_type}
-                      onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, evidence_type: e.target.value }))}
-                      disabled={accreditationIngestLoading || !activeCareer}
-                    >
-                      {(accreditationConfigForm.evidence_types || ['General']).map((type) => (
-                        <option key={`ing-type-${type}`} value={type}>{type}</option>
-                      ))}
-                    </select>
+                {accreditationIngestError && (
+                  <div style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '6px', background: '#ffebee', color: '#b71c1c', border: '1px solid #ffcdd2' }}>
+                    {accreditationIngestError}
                   </div>
-                  <div>
-                    <label style={{ ...styles.label, marginBottom: '4px' }}>Actor responsable *</label>
-                    <select
-                      style={styles.input}
-                      value={accreditationIngestForm.actor}
-                      onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, actor: e.target.value }))}
-                      disabled={accreditationIngestLoading || !activeCareer}
-                    >
-                      <option value="">Seleccionar actor...</option>
-                      {(accreditationConfigForm.actors || []).map((actor, index) => {
-                        const label = `${actor.name}${actor.role ? ` · ${actor.role}` : ''}`
-                        return <option key={`actor-opt-${index}`} value={label}>{label}</option>
-                      })}
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ marginBottom: '10px' }}>
-                  <label style={{ ...styles.label, marginBottom: '4px' }}>Referencias (una por línea)</label>
-                  <textarea
-                    style={{ ...styles.input, minHeight: '120px', fontSize: '12px' }}
-                    value={accreditationIngestForm.referencesText}
-                    onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, referencesText: e.target.value }))}
-                    placeholder={"https://drive.google.com/file/d/...\nhttps://drive.google.com/drive/folders/..."}
-                    disabled={accreditationIngestLoading || !activeCareer}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }}
-                    onClick={runAccreditationIngest}
-                    disabled={accreditationIngestLoading || !activeCareer || !String(accreditationIngestForm.actor || '').trim()}
-                  >
-                    {accreditationIngestLoading ? 'Procesando...' : 'Ejecutar ingesta Drive'}
-                  </button>
-                </div>
-                </div>
+                )}
 
                 <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
-                  <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Carga local desde la computadora</div>
-                  <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
-                    Seleccioná archivos locales para registrar evidencia de forma directa.
-                  </div>
-                  <input
-                    type="file"
-                    multiple
-                    onChange={(e) => setAccreditationLocalFiles(Array.from(e.target.files || []))}
-                    disabled={accreditationIngestLoading || !activeCareer}
-                    style={{ marginBottom: '10px' }}
-                  />
-                  {accreditationLocalFiles.length > 0 && (
-                    <div style={{ marginBottom: '10px', color: '#455a64', fontSize: '12px' }}>
-                      {accreditationLocalFiles.length} archivo(s) seleccionados.
+                  <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '10px', alignItems: 'end' }}>
+                    <div>
+                      <label style={{ ...styles.label, marginBottom: '4px' }}>Tipo de evidencia</label>
+                      <select
+                        style={styles.input}
+                        value={accreditationIngestForm.evidence_type}
+                        onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, evidence_type: e.target.value }))}
+                        disabled={accreditationIngestLoading || !activeCareer}
+                      >
+                        {(accreditationConfigForm.evidence_types || ['General']).map((type) => (
+                          <option key={`ing-type-${type}`} value={type}>{type}</option>
+                        ))}
+                      </select>
                     </div>
-                  )}
-                  <button
-                    style={{ ...styles.button, marginRight: 0, background: '#2e7d32' }}
-                    onClick={runAccreditationLocalIngest}
-                    disabled={accreditationIngestLoading || !activeCareer || accreditationLocalFiles.length === 0 || !String(accreditationIngestForm.actor || '').trim()}
-                  >
-                    {accreditationIngestLoading ? 'Procesando...' : 'Cargar archivos locales'}
-                  </button>
+                    <div>
+                      <label style={{ ...styles.label, marginBottom: '4px' }}>Actor responsable *</label>
+                      <select
+                        style={styles.input}
+                        value={accreditationIngestForm.actor}
+                        onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, actor: e.target.value }))}
+                        disabled={accreditationIngestLoading || !activeCareer}
+                      >
+                        <option value="">Seleccionar actor...</option>
+                        {(accreditationConfigForm.actors || []).map((actor, index) => {
+                          const label = `${actor.name}${actor.role ? ` · ${actor.role}` : ''}`
+                          return <option key={`actor-opt-${index}`} value={label}>{label}</option>
+                        })}
+                      </select>
+                    </div>
+                  </div>
                 </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'stretch' }}>
+                  <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px' }}>
+                    <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Cargar desde Local (computadora)</div>
+                    <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
+                      Seleccioná archivos de tu computadora. Se suben a la carpeta destino y quedan registrados como evidencia.
+                    </div>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={handleAccreditationLocalFilesChange}
+                      disabled={accreditationIngestLoading || !activeCareer}
+                      style={{ marginBottom: '10px' }}
+                    />
+                    {accreditationLocalFiles.length > 0 && (
+                      <div style={{ marginBottom: '10px', color: '#455a64', fontSize: '12px' }}>
+                        {accreditationLocalFiles.length} archivo(s) seleccionados.
+                      </div>
+                    )}
+                    {accreditationLocalFiles.length > 0 && !String(accreditationIngestForm.actor || '').trim() && (
+                      <div style={{ marginBottom: '10px', color: '#8d6e00', fontSize: '12px' }}>
+                        Seleccioná un actor responsable antes de cargar archivos.
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        style={{ ...styles.button, marginRight: 0, background: '#2e7d32' }}
+                        onClick={runAccreditationLocalIngest}
+                        disabled={accreditationIngestLoading || !activeCareer || accreditationLocalFiles.length === 0}
+                      >
+                        {accreditationIngestLoading ? 'Procesando...' : 'Cargar archivos locales'}
+                      </button>
+                      <button
+                        type="button"
+                        style={{ ...styles.buttonSecondary, marginRight: 0 }}
+                        onClick={() => runAccreditationLocalPreview()}
+                        disabled={accreditationIngestLoading || accreditationPreviewLoading || !activeCareer || accreditationLocalFiles.length === 0}
+                      >
+                        {accreditationPreviewLoading ? 'Previsualizando...' : 'Previsualizar Local'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ border: '1px solid #dfe8f6', borderRadius: '10px', background: '#fff', padding: '14px', display: 'grid', gap: '12px' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, marginBottom: '6px', color: '#1a3d5c' }}>Cargar desde Remoto (Google Drive / URL)</div>
+                      <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
+                        Pegá links de archivo o carpeta de Drive (también URLs remotas) para procesar y copiar/mover a destino.
+                      </div>
+                      <label style={{ ...styles.label, marginBottom: '4px' }}>Referencias (una por línea)</label>
+                      <textarea
+                        style={{ ...styles.input, minHeight: '110px', fontSize: '12px' }}
+                        value={accreditationIngestForm.referencesText}
+                        onChange={(e) => setAccreditationIngestForm((prev) => ({ ...prev, referencesText: e.target.value }))}
+                        placeholder={"https://drive.google.com/file/d/...\nhttps://drive.google.com/drive/folders/...\nhttps://sitio.com/documento.pdf"}
+                        disabled={accreditationIngestLoading || !activeCareer}
+                      />
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          style={{ ...styles.button, marginRight: 0, background: '#1a73e8' }}
+                          onClick={runAccreditationIngest}
+                          disabled={accreditationIngestLoading || !activeCareer}
+                        >
+                          {accreditationIngestLoading ? 'Procesando...' : 'Procesar remoto'}
+                        </button>
+                        <button
+                          type="button"
+                          style={{ ...styles.buttonSecondary, marginRight: 0 }}
+                          onClick={runAccreditationDrivePreview}
+                          disabled={accreditationIngestLoading || accreditationPreviewLoading || !activeCareer}
+                        >
+                          {accreditationPreviewLoading ? 'Previsualizando...' : 'Previsualizar remoto'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ border: '1px dashed #c9d8ef', borderRadius: '8px', padding: '10px', background: '#f8fbff' }}>
+                      <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '4px' }}>Sincronizar carpeta de origen configurada</div>
+                      <div style={{ color: '#546e7a', fontSize: '12px', marginBottom: '8px' }}>
+                        Toma automáticamente la carpeta ORIGEN definida en Configuración y procesa su contenido hacia DESTINO.
+                      </div>
+                      <div style={{ color: '#607d8b', fontSize: '12px', marginBottom: '8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={accreditationConfigForm.source_folder_url || 'Sin carpeta origen configurada'}>
+                        Origen: {accreditationConfigForm.source_folder_url || 'Sin carpeta origen configurada'}
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          style={{ ...styles.button, marginRight: 0, background: '#1565c0' }}
+                          onClick={runAccreditationSourceFolderIngest}
+                          disabled={accreditationIngestLoading || !activeCareer || !String(accreditationConfigForm.source_folder_url || '').trim()}
+                        >
+                          {accreditationIngestLoading ? 'Procesando...' : 'Sincronizar origen'}
+                        </button>
+                        <button
+                          type="button"
+                          style={{ ...styles.buttonSecondary, marginRight: 0 }}
+                          onClick={runAccreditationSourceFolderPreview}
+                          disabled={accreditationIngestLoading || accreditationPreviewLoading || !activeCareer || !String(accreditationConfigForm.source_folder_url || '').trim()}
+                        >
+                          {accreditationPreviewLoading ? 'Previsualizando...' : 'Preview origen'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {accreditationPreviewResult && (
+                  <div style={{ marginTop: '12px', border: '1px solid #e8def8', borderRadius: '8px', background: '#fcf8ff', padding: '10px' }}>
+                    <div style={{ fontWeight: 700, color: '#4a148c', marginBottom: '6px' }}>Preview de Carga de Documentación (sin guardar)</div>
+                    <div style={{ fontSize: '12px', color: '#5b3b7a' }}>
+                      Procesados: {accreditationPreviewResult.processed || 0} · Omitidos: {accreditationPreviewResult.skipped || 0}
+                    </div>
+                    {Array.isArray(accreditationPreviewResult.items) && accreditationPreviewResult.items.length > 0 && (
+                      <pre style={{ marginTop: '6px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#5b3b7a', fontSize: '11px', background: '#fff', border: '1px solid #e8def8', borderRadius: '6px', padding: '8px', maxHeight: '260px', overflow: 'auto' }}>
+{JSON.stringify(
+  accreditationPreviewResult.items.map((item) => ({
+    source_filename: item.source_filename,
+    source_reference: item.source_reference,
+    status: item.status,
+    access_error: item.access_error,
+    extraction_method: item.extraction_method,
+    ocr_applied: item.ocr_applied,
+    extracted_char_count: item.extracted_char_count,
+    preview_lines: item.preview_lines || []
+  })),
+  null,
+  2
+)}
+                      </pre>
+                    )}
+                  </div>
+                )}
 
                 {accreditationIngestResult && (
                   <div style={{ marginTop: '12px', border: '1px solid #d9e7ff', borderRadius: '8px', background: '#f8fbff', padding: '10px' }}>
-                    <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '6px' }}>Resultado de ingesta</div>
+                    <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '6px' }}>Resultado de Carga de Documentación</div>
                     <div style={{ fontSize: '12px', color: '#355070' }}>
                       Procesados: {accreditationIngestResult.processed || 0} · Creados: {accreditationIngestResult.created || 0} · Versionados: {accreditationIngestResult.versioned || 0} · Omitidos: {accreditationIngestResult.skipped || 0}
                     </div>
+                    {Array.isArray(accreditationIngestResult.items) && accreditationIngestResult.items.length > 0 && (
+                      <>
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#1a3d5c', fontWeight: 700 }}>
+                          Preview de extracción (primeros renglones por documento)
+                        </div>
+                        <pre style={{ marginTop: '6px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#355070', fontSize: '11px', background: '#fff', border: '1px solid #d9e7ff', borderRadius: '6px', padding: '8px', maxHeight: '260px', overflow: 'auto' }}>
+{JSON.stringify(
+  accreditationIngestResult.items.map((item) => ({
+    evidence_id: item.evidence_id,
+    status: item.status,
+    extraction_method: item.extraction_method,
+    ocr_applied: item.ocr_applied,
+    extracted_char_count: item.extracted_char_count,
+    preview_lines: item.preview_lines || []
+  })),
+  null,
+  2
+)}
+                        </pre>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -14950,7 +15230,7 @@ const App = () => {
 
             {accreditationSection === 'registro' && (
               <div style={{ border: '1px solid #dfe8f6', borderRadius: '8px', background: '#fff', padding: '12px' }}>
-                <div style={{ fontWeight: 700, marginBottom: '8px', color: '#1a3d5c' }}>Registro de evidencias</div>
+                <div style={{ fontWeight: 700, marginBottom: '8px', color: '#1a3d5c' }}>Registro de Documentación</div>
                 <div style={{ color: '#546e7a', fontSize: '13px', marginBottom: '10px' }}>
                   Debe mostrar metadatos iniciales + link en carpeta de evidencias y permitir corrección manual de inconsistencias.
                 </div>
@@ -14998,16 +15278,16 @@ const App = () => {
                   <div />
                 </div>
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ background: '#f5f8fd' }}>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Evidencia</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Tipo</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Actor</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Estado</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Metadata</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Link evidencia</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5eaf2' }}>Acciones</th>
+                      <tr style={{ backgroundColor: '#0066cc', color: 'white' }}>
+                        <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Evidencia</th>
+                        <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Tipo</th>
+                        <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Actor</th>
+                        <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Estado</th>
+                        <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Descripción</th>
+                        <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Link evidencia</th>
+                        <th style={{ padding: '10px', borderBottom: '2px solid #0066cc', textAlign: 'center' }}>Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -15029,6 +15309,10 @@ const App = () => {
                         const draft = accreditationEditingById[row.id]
                         const isEditing = !!draft
                         const isSaving = !!accreditationSavingById[row.id]
+                        const normalizedFilename = String(row.normalized_filename || row.source_filename || '').trim()
+                        const titleText = String(row.title || '-').trim()
+                        const showSecondaryFilename = normalizedFilename && normalizedFilename !== '-' && normalizedFilename.toLowerCase() !== titleText.toLowerCase()
+                        const briefDescription = getAccreditationBriefDescription(row.metadata)
                         const isHistoryOpen = !!accreditationHistoryOpenById[row.id]
                         const historyLoading = !!accreditationHistoryLoadingById[row.id]
                         const historyError = accreditationHistoryErrorById[row.id]
@@ -15046,7 +15330,9 @@ const App = () => {
                               ) : (
                                 <div>
                                   <div style={{ fontWeight: 600 }}>{row.title || '-'}</div>
-                                  <div style={{ color: '#607d8b', marginTop: '2px' }}>{row.normalized_filename || row.source_filename || '-'}</div>
+                                  {showSecondaryFilename && (
+                                    <div style={{ color: '#607d8b', marginTop: '2px' }}>{normalizedFilename}</div>
+                                  )}
                                   <div style={{ color: '#90a4ae', marginTop: '2px', fontSize: '11px' }}>
                                     Alta: {formatDateTimeBuenosAires(row.created_at)} (GMT-3)
                                   </div>
@@ -15105,9 +15391,9 @@ const App = () => {
                                   placeholder={`{\n  "clave": "valor"\n}`}
                                 />
                               ) : (
-                                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#455a64', fontSize: '11px' }}>
-                                  {row.metadata ? JSON.stringify(row.metadata, null, 2) : '{}'}
-                                </pre>
+                                <div style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#455a64', fontSize: '11px', lineHeight: 1.4 }}>
+                                  {briefDescription}
+                                </div>
                               )}
                             </td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #eef2f8', minWidth: '180px' }}>
@@ -16378,4 +16664,5 @@ const App = () => {
   )
 }
 
+export { App }
 export default App

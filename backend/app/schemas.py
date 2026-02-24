@@ -598,6 +598,32 @@ class AccreditationIngestRequest(BaseModel):
     items: List[AccreditationIngestItem] = Field(default_factory=list)
 
 
+class AccreditationPreviewRequest(BaseModel):
+    career: str
+    study_plan: Optional[str] = None
+    items: List[AccreditationIngestItem] = Field(default_factory=list)
+
+
+class AccreditationPreviewResultItem(BaseModel):
+    source_kind: str
+    source_reference: str
+    source_file_id: Optional[str] = None
+    source_filename: Optional[str] = None
+    normalized_filename: Optional[str] = None
+    status: str
+    access_error: Optional[str] = None
+    extraction_method: Optional[str] = None
+    extracted_char_count: Optional[int] = None
+    ocr_applied: bool = False
+    preview_lines: List[str] = Field(default_factory=list)
+
+
+class AccreditationPreviewResult(BaseModel):
+    processed: int
+    skipped: int
+    items: List[AccreditationPreviewResultItem] = Field(default_factory=list)
+
+
 class AccreditationIngestResultItem(BaseModel):
     evidence_id: int
     version_number: int
@@ -608,6 +634,10 @@ class AccreditationIngestResultItem(BaseModel):
     normalized_filename: Optional[str] = None
     status: str
     access_error: Optional[str] = None
+    extraction_method: Optional[str] = None
+    extracted_char_count: Optional[int] = None
+    ocr_applied: bool = False
+    preview_lines: List[str] = Field(default_factory=list)
 
 
 class AccreditationIngestResult(BaseModel):
