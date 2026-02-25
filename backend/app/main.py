@@ -864,7 +864,7 @@ def try_create_gdoc_for_proposal(db: Session, proposal: models.Proposal) -> tupl
         return False, "template-not-found"
 
     settings = resolve_drive_settings_for_proposal(db, proposal)
-    if not settings or not settings.root_folder_url:
+    if not settings or not settings.root_folder_url or not settings.pdf_folder_url:
         return False, "drive-settings-missing"
 
     folder_id = extract_drive_folder_id(settings.root_folder_url)
@@ -939,10 +939,10 @@ def create_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Template Propuestas.docx not found")
 
     settings = resolve_drive_settings_for_proposal(db, proposal)
-    if not settings or not settings.root_folder_url:
+    if not settings or not settings.root_folder_url or not settings.pdf_folder_url:
         raise HTTPException(
             status_code=400,
-            detail="No hay carpeta raíz de Drive configurada para esta carrera/plan",
+            detail="Debes configurar Carpeta Raíz y Carpeta PDF de Drive para esta carrera/plan",
         )
 
     folder_id = extract_drive_folder_id(settings.root_folder_url)
@@ -2207,6 +2207,38 @@ ENGLISH_HINT_WORDS = {
     "presence", "meets", "does", "not", "fail", "failed", "rule", "rules", "compliance",
 }
 
+TERMINOLOGY_POLICY_PROMPT = (
+    "Convención terminológica obligatoria: usa SIEMPRE 'Asignatura' (nunca 'Materia'), "
+    "'Docente' (nunca 'Profesor') y 'Estudiante' (nunca 'Alumno'). "
+    "Si el texto de entrada trae esos términos prohibidos, normalízalos respetando el sentido original."
+)
+
+
+def _match_case(source: str, target: str) -> str:
+    src = str(source or "")
+    if not src:
+        return target
+    if src.isupper():
+        return target.upper()
+    if src[:1].isupper():
+        return target.capitalize()
+    return target
+
+
+def normalize_terminology_text(text: str) -> str:
+    value = str(text or "")
+    if not value:
+        return value
+    replacements = [
+        (r"\bmateria(s)?\b", "asignatura"),
+        (r"\bprofesor(?:a|es|as)?\b", "docente"),
+        (r"\balumno(?:s|as)?\b", "estudiante"),
+    ]
+    result = value
+    for pattern, replacement in replacements:
+        result = re.sub(pattern, lambda m: _match_case(m.group(0), replacement), result, flags=re.IGNORECASE)
+    return result
+
 
 def text_looks_english(text: str) -> bool:
     value = str(text or "").strip()
@@ -2255,6 +2287,8 @@ def force_intelligent_feedback_spanish(data: dict, client: OpenAI) -> dict:
                 data[field] = translated_value
     except Exception:
         return data
+    for field in fields:
+        data[field] = normalize_terminology_text(str(data.get(field) or ""))
     return data
 
 
@@ -2292,7 +2326,8 @@ def evaluate_control_with_llm(
         "Si no aplica, devuelve cadena vacía. "
         "Debes escribir SIEMPRE en español (nunca en inglés). "
         "No inventes datos ni contradigas evidencia explícita del JSON. "
-        "Si el JSON trae un resumen estructurado, úsalo como fuente principal para decidir."
+        "Si el JSON trae un resumen estructurado, úsalo como fuente principal para decidir. "
+        f"{TERMINOLOGY_POLICY_PROMPT}"
     )
     user_prompt = (
         f"Control: {control.name}\n"
@@ -2343,6 +2378,9 @@ def evaluate_control_with_llm(
             used_max_tokens = retry_tokens
 
     data = parse_llm_json_response(content)
+    for field in ["what_failed", "why_failed", "suggestion", "proposed_text", "summary"]:
+        if field in data:
+            data[field] = normalize_terminology_text(str(data.get(field) or ""))
     data = force_intelligent_feedback_spanish(data, client)
     passed = bool(data.get("pass") or data.get("passed") or data.get("ok"))
     return {
@@ -5112,7 +5150,11 @@ def suggest_for_proposal(proposal_id: int = Form(...), prompt_context: str = For
         # get top evidence for the proposal
         matches = extract_agent.query_local(f"proposal:{proposal_id}", top_k=5)
         evidence_texts = "\n\n".join([m.get("metadata", {}).get("text", "") for m in matches])
-        system_prompt = "Eres un asistente que ayuda a redactar la Fundamentación de una propuesta docente, usando la evidencia asociada. Devuelve un párrafo sugerido." 
+        system_prompt = (
+            "Eres un asistente que ayuda a redactar la Fundamentación de una propuesta docente, "
+            "usando la evidencia asociada. Devuelve un párrafo sugerido. "
+            f"{TERMINOLOGY_POLICY_PROMPT}"
+        )
         user_prompt = f"Evidencias:\n{evidence_texts}\n\nContexto adicional:{prompt_context or ''}\n\nGenera una sugerencia concisa para la Fundamentación."
         client = get_openai_client()
         resp = create_chat_completion_compatible(
@@ -5124,7 +5166,7 @@ def suggest_for_proposal(proposal_id: int = Form(...), prompt_context: str = For
             ],
             max_tokens=300,
         )
-        suggestion = resp.choices[0].message.content.strip()
+        suggestion = normalize_terminology_text((resp.choices[0].message.content or "").strip())
         return {"suggestion": suggestion, "evidence_used": matches}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -5135,7 +5177,10 @@ def ai_generate(payload: AiPrompt):
     try:
         if not payload.prompt.strip():
             raise HTTPException(status_code=400, detail="Prompt is required")
-        system_prompt = "Eres un asistente que redacta contenido academico en espanol, claro y conciso."
+        system_prompt = (
+            "Eres un asistente que redacta contenido academico en espanol, claro y conciso. "
+            f"{TERMINOLOGY_POLICY_PROMPT}"
+        )
         client = get_openai_client()
         resp = create_chat_completion_compatible(
             client,
@@ -5146,7 +5191,7 @@ def ai_generate(payload: AiPrompt):
             ],
             max_tokens=500
         )
-        content = resp.choices[0].message.content.strip()
+        content = normalize_terminology_text((resp.choices[0].message.content or "").strip())
         return {"status": "success", "content": content}
     except HTTPException:
         raise
@@ -5159,8 +5204,12 @@ def ai_reformulate(payload: AiPrompt):
     try:
         if not payload.prompt.strip():
             raise HTTPException(status_code=400, detail="Prompt is required")
-        system_prompt = "Eres un asistente que reformula textos academicos manteniendo el significado."
-        user_prompt = f"Reformula el siguiente texto, manteniendo el significado:\n\n{payload.prompt}"
+        system_prompt = (
+            "Eres un asistente que reformula textos academicos manteniendo el significado. "
+            "Devuelve UNICAMENTE el texto final, sin encabezados, sin preambulos y sin etiquetas como 'Sección:' o 'Texto original:'. "
+            f"{TERMINOLOGY_POLICY_PROMPT}"
+        )
+        user_prompt = payload.prompt
         client = get_openai_client()
         resp = create_chat_completion_compatible(
             client,
@@ -5171,7 +5220,7 @@ def ai_reformulate(payload: AiPrompt):
             ],
             max_tokens=500
         )
-        content = resp.choices[0].message.content.strip()
+        content = normalize_terminology_text((resp.choices[0].message.content or "").strip())
         return {"status": "success", "content": content}
     except HTTPException:
         raise
@@ -6070,7 +6119,7 @@ def create_proposal(proposal: schemas.ProposalCreate, db: Session = Depends(get_
     """Create a new proposal from form data (no file upload)."""
     try:
         subject_clean = re.sub(r'[<>:"/\\|?*]', '', proposal.subject or '').strip()
-        safe_subject = subject_clean or "Sin materia"
+        safe_subject = subject_clean or "Sin asignatura"
         safe_year = proposal.academic_year or "Sin año"
         safe_quarter = proposal.quarter or "Sin cuatrimestre"
         filename = f"{safe_year} - {safe_quarter} - {safe_subject}.docx"

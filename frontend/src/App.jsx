@@ -24,6 +24,40 @@ const careerOptions = [
   'Tecnicatura Universitaria en Desarrollo Web'
 ]
 
+const isTechnicalCareerName = (careerValue) => /tecnicatura/i.test(String(careerValue || '').trim())
+const normalizeTerminologyText = (input) => {
+  const value = String(input || '')
+  if (!value) return value
+  const matchCase = (original, replacement) => {
+    if (!original) return replacement
+    if (original === original.toUpperCase()) return replacement.toUpperCase()
+    if (original[0] === original[0].toUpperCase()) return replacement.charAt(0).toUpperCase() + replacement.slice(1)
+    return replacement
+  }
+
+  return value
+    .replace(/\bmateria(s)?\b/gi, (m) => matchCase(m, 'asignatura'))
+    .replace(/\bprofesor(a|es|as)?\b/gi, (m) => matchCase(m, 'docente'))
+    .replace(/\balumno(s|as)?\b/gi, (m) => matchCase(m, 'estudiante'))
+}
+
+const getLearningOutcomeLabelsByCareer = (careerValue) => {
+  const technical = isTechnicalCareerName(careerValue)
+  return technical
+    ? {
+      sectionTitle: 'Objetivos de Aprendizaje',
+      shortPlural: 'Objetivos',
+      shortSingular: 'Objetivo',
+      shortIndexPrefix: 'Obj'
+    }
+    : {
+      sectionTitle: 'Resultados de Aprendizaje',
+      shortPlural: 'RA',
+      shortSingular: 'Resultado de Aprendizaje',
+      shortIndexPrefix: 'RA'
+    }
+}
+
 const App = () => {
   useEffect(() => {
     const nativeFetch = window.fetch.bind(window)
@@ -120,6 +154,21 @@ const App = () => {
   const [tpCommentRef, setTpCommentRef] = useState('')
   const [tpCommentDraft, setTpCommentDraft] = useState('')
   const [showTpCommentModal, setShowTpCommentModal] = useState(false)
+  const [showFullProposalModal, setShowFullProposalModal] = useState(false)
+  const [isGeneratingFullProposal, setIsGeneratingFullProposal] = useState(false)
+  const [fullProposalProgress, setFullProposalProgress] = useState({ current: 0, total: 8, label: '' })
+  const [fullProposalSubProgress, setFullProposalSubProgress] = useState({ current: 0, total: 0, label: '' })
+  const [fullProposalDraft, setFullProposalDraft] = useState({
+    bibliografiaBasica: '',
+    bibliografiaComplementaria: '',
+    raCount: 5,
+    unitCount: 4,
+    unitNotes: '',
+    tpCount: 4,
+    tpNotes: '',
+    metodologiaNotes: '',
+    evaluacionNotes: ''
+  })
   const [comparisonData, setComparisonData] = useState({ original: '', reformulated: '' })
   const [comparisonTarget, setComparisonTarget] = useState(null)
   
@@ -166,6 +215,11 @@ const App = () => {
   }
 
   const [formData, setFormData] = useState(emptyFormData)
+  const formDataRef = useRef(emptyFormData)
+
+  useEffect(() => {
+    formDataRef.current = formData
+  }, [formData])
   
   const [statusMsg, setStatusMsg] = useState('')
   const [statusType, setStatusType] = useState('')
@@ -992,6 +1046,12 @@ const App = () => {
       fetchCareerCompetencies(career)
     }
   }, [activeMenu, catalogCareer, activeCareer])
+
+  useEffect(() => {
+    if (activeMenu === 'competencias' && isTechnicalCareerName(activeCareer)) {
+      setActiveMenu('propuestas')
+    }
+  }, [activeMenu, activeCareer])
 
   useEffect(() => {
     if (activeMenu === 'docentes' && activeCareer) {
@@ -3458,6 +3518,29 @@ const App = () => {
     return raw
   }
 
+  const getDriveSettingsForContext = (career, planName = '') => {
+    const careerName = String(career || '').trim()
+    if (!careerName) {
+      return {}
+    }
+    const scopedKey = getDriveSettingsKey(careerName, planName)
+    const fallbackKey = getDriveSettingsKey(careerName, '')
+    return driveSettingsByCareer[scopedKey] || driveSettingsByCareer[fallbackKey] || {}
+  }
+
+  const isDriveSettingsComplete = (settings) => {
+    const rootFolderUrl = normalizeDriveUrl(settings?.rootFolderUrl)
+    const pdfFolderUrl = normalizeDriveUrl(settings?.pdfFolderUrl)
+    return Boolean(rootFolderUrl && pdfFolderUrl)
+  }
+
+  const getDriveSettingsMissingMessage = (career, planName = '') => {
+    const planLabel = String(planName || '').trim()
+    return planLabel
+      ? `Configura Carpeta Raíz y Carpeta PDF de Drive para ${career} (plan ${planLabel}) antes de generar en Drive.`
+      : `Configura Carpeta Raíz y Carpeta PDF de Drive para ${career} antes de generar en Drive.`
+  }
+
   const openDriveUrl = (value) => {
     const url = normalizeDriveUrl(value)
     if (!url) {
@@ -3522,6 +3605,17 @@ const App = () => {
     if (!proposalId) {
       return
     }
+    const proposalContext = (viewProposal?.id === proposalId)
+      ? viewProposal
+      : proposals.find((proposal) => proposal.id === proposalId)
+    const careerName = proposalContext?.career || activeCareer
+    const planName = proposalContext?.study_plan || ''
+    const settings = getDriveSettingsForContext(careerName, planName)
+    if (!isDriveSettingsComplete(settings)) {
+      setViewProposalGdocError(getDriveSettingsMissingMessage(careerName || 'la carrera seleccionada', planName))
+      return
+    }
+
     try {
       setViewProposalCreateGdocLoading(true)
       setViewProposalGdocError('')
@@ -5084,7 +5178,22 @@ const App = () => {
   }
 
   const updateCompetencyItem = (type, id, field, value) => {
+    let duplicateCode = ''
+    let updatedSuccessfully = false
     setFormData(prev => {
+      if (field === 'code') {
+        const normalizedCode = String(value || '').trim().toLowerCase()
+        if (normalizedCode) {
+          const alreadyExists = (prev[type] || []).some((entry) => {
+            if (entry.id === id) return false
+            return String(entry.code || '').trim().toLowerCase() === normalizedCode
+          })
+          if (alreadyExists) {
+            duplicateCode = String(value || '').trim()
+            return prev
+          }
+        }
+      }
       const updated = prev[type].map(item => {
         if (item.id !== id) return item
         const next = { ...item, [field]: field === 'level' ? Number(value) : value }
@@ -5099,8 +5208,17 @@ const App = () => {
         }
         return next
       })
+      updatedSuccessfully = true
       return { ...prev, [type]: updated }
     })
+    if (duplicateCode) {
+      setStatusMsg(`La competencia ${duplicateCode} ya está agregada`)
+      setStatusType('info')
+      return
+    }
+    if (!updatedSuccessfully) {
+      return
+    }
     setIsDirty(true)
   }
 
@@ -5122,10 +5240,11 @@ const App = () => {
   }
 
   const isFormComplete = () => {
+      const requiresCompetencies = !isTechnicalCareerName(formData.carrera || activeCareer)
     return formData.carrera && formData.asignatura && formData.plan &&
            formData.ciclo && formData.cuatrimestre && formData.caracter &&
-           formData.regimen && formData.contenidosMin && 
-           (formData.competenciasGenItems && formData.competenciasGenItems.length > 0)
+        formData.regimen && formData.contenidosMin &&
+        (!requiresCompetencies || (formData.competenciasGenItems && formData.competenciasGenItems.length > 0))
   }
 
   const isNonEmptyText = (value) => typeof value === 'string' && value.trim().length > 0
@@ -5156,6 +5275,8 @@ const App = () => {
   const hasNumberValue = (value) => value !== '' && value !== null && value !== undefined
   const getValidationErrors = () => {
     const errors = []
+    const requiresCompetencies = !isTechnicalCareerName(formData.carrera || activeCareer)
+    const learningLabels = getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer)
     
     // Campos básicos
     if (!isNonEmptyText(formData.carrera)) errors.push('Carrera')
@@ -5169,18 +5290,20 @@ const App = () => {
     
     // Sección Contenidos
     if (!isNonEmptyText(formData.contenidosMin)) errors.push('Contenidos Mínimos')
-    if (!Array.isArray(formData.competenciasGenItems) || formData.competenciasGenItems.length === 0) {
-      errors.push('Competencias Genéricas')
-    } else {
-      const incompletas = formData.competenciasGenItems.filter((comp) =>
-        !isNonEmptyText(comp.code) || !isNonEmptyText(comp.description)
-      )
-      if (incompletas.length > 0) {
-        errors.push(`Competencias Genéricas incompletas: ${incompletas.length}`)
-      }
-      const sinNivel = formData.competenciasGenItems.filter((comp) => normalizeLevelValue(comp.level) === 0)
-      if (sinNivel.length > 0) {
-        errors.push(`Competencias Genéricas sin nivel: ${sinNivel.length}`)
+    if (requiresCompetencies) {
+      if (!Array.isArray(formData.competenciasGenItems) || formData.competenciasGenItems.length === 0) {
+        errors.push('Competencias Genéricas')
+      } else {
+        const incompletas = formData.competenciasGenItems.filter((comp) =>
+          !isNonEmptyText(comp.code) || !isNonEmptyText(comp.description)
+        )
+        if (incompletas.length > 0) {
+          errors.push(`Competencias Genéricas incompletas: ${incompletas.length}`)
+        }
+        const sinNivel = formData.competenciasGenItems.filter((comp) => normalizeLevelValue(comp.level) === 0)
+        if (sinNivel.length > 0) {
+          errors.push(`Competencias Genéricas sin nivel: ${sinNivel.length}`)
+        }
       }
     }
     if (Array.isArray(formData.competenciasEspItems) && formData.competenciasEspItems.length > 0) {
@@ -5200,19 +5323,19 @@ const App = () => {
     if (!isNonEmptyText(formData.fundamentosP1)) errors.push('Fundamentación P1')
     if (!isNonEmptyText(formData.fundamentosP2)) errors.push('Fundamentación P2')
     
-    // Resultados de Aprendizaje
+    // Resultados/Objetivos de Aprendizaje
     if (formData.resultadosAprendizaje.length === 0) {
-      errors.push('Resultados de Aprendizaje (al menos 1)')
+      errors.push(`${learningLabels.sectionTitle} (al menos 1)`)
     } else {
       const incompletos = formData.resultadosAprendizaje.filter((ra, idx) => {
         const hasDesc = isNonEmptyText(ra.descripcion)
         if (!hasDesc) {
-          console.log(`RA ${idx + 1} incompleto: descripción vacía`)
+          console.log(`${learningLabels.shortIndexPrefix} ${idx + 1} incompleto: descripción vacía`)
         }
         return !hasDesc
       })
       if (incompletos.length > 0) {
-        errors.push(`RA incompletos: ${incompletos.length} (falta descripción)`)
+        errors.push(`${learningLabels.shortPlural} incompletos: ${incompletos.length} (falta descripción)`)
       }
     }
     
@@ -5910,20 +6033,22 @@ const App = () => {
   }
 
   const generateLearningOutcomes = async () => {
+    const labels = getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer)
+    const isTechnicalCareer = isTechnicalCareerName(formData.carrera || activeCareer)
     const count = Math.max(1, Math.min(10, parseInt(raBatchCount, 10) || 1))
     const existingCount = formData.resultadosAprendizaje.length
     const remainingCount = Math.max(0, count - existingCount)
     if (remainingCount === 0) {
-      setStatusMsg(`Ya hay ${existingCount} RA cargados`)
+      setStatusMsg(`Ya hay ${existingCount} ${labels.shortPlural} cargados`)
       setStatusType('info')
       return
     }
     if (!isNonEmptyText(formData.carrera) || !isNonEmptyText(formData.asignatura)) {
-      setStatusMsg('Completa Carrera y Asignatura antes de generar RA')
+      setStatusMsg(`Completa Carrera y Asignatura antes de generar ${labels.shortPlural}`)
       setStatusType('info')
       return
     }
-    if (!Array.isArray(formData.competenciasGenItems) || formData.competenciasGenItems.length === 0) {
+    if (!isTechnicalCareer && (!Array.isArray(formData.competenciasGenItems) || formData.competenciasGenItems.length === 0)) {
       setStatusMsg('Completa Competencias Genéricas antes de generar RA')
       setStatusType('info')
       return
@@ -5931,9 +6056,14 @@ const App = () => {
 
     setAiError('')
     setAiLoading(true)
-    setAiSection('Resultados de Aprendizaje')
+    setAiSection(labels.sectionTitle)
     try {
-      const prompt = `Genera ${remainingCount} resultados de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${buildCompetencyText(formData.competenciasGenItems)}\nCompetencias especificas: ${buildCompetencyText(formData.competenciasEspItems)}\n\nReglas de RA:\n- Centrado en el estudiante.\n- Verbo observable y evaluable.\n- Presente del indicativo.\n- Desempeno demostrable y medible.\n- No mezclar demasiadas capacidades en un solo RA.\n- Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada RA.\n- Sin titulos ni encabezados.`
+      const competencyContext = (!isTechnicalCareer && (buildCompetencyText(formData.competenciasGenItems) || buildCompetencyText(formData.competenciasEspItems)))
+        ? `\n\nCompetencias genericas: ${buildCompetencyText(formData.competenciasGenItems)}\nCompetencias especificas: ${buildCompetencyText(formData.competenciasEspItems)}`
+        : ''
+      const prompt = isTechnicalCareer
+        ? `Genera ${remainingCount} objetivos de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.${competencyContext}\n\nReglas de Objetivos:\n- Deben redactarse en infinitivo (por ejemplo: analizar, identificar, diseñar, implementar).\n- Deben ser claros, concretos y evaluables.\n- Centrados en lo que el estudiante deberá lograr.\n- Un objetivo por ítem.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada objetivo.\n- Sin titulos ni encabezados.`
+        : `Genera ${remainingCount} resultados de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.${competencyContext}\n\nReglas de RA:\n- Centrado en el estudiante.\n- Verbo observable y evaluable.\n- Presente del indicativo.\n- Desempeno demostrable y medible.\n- No mezclar demasiadas capacidades en un solo RA.\n- Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada RA.\n- Sin titulos ni encabezados.`
       const res = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5948,20 +6078,20 @@ const App = () => {
         const cleaned = sanitizeAiOutput(data.content)
         const generated = parseLearningOutcomesFromText(cleaned, remainingCount)
         if (generated.length === 0) {
-          throw new Error('No se pudieron interpretar los resultados de aprendizaje')
+          throw new Error(`No se pudieron interpretar los ${labels.sectionTitle.toLowerCase()}`)
         }
         setFormData(prev => ({
           ...prev,
           resultadosAprendizaje: [...prev.resultadosAprendizaje, ...generated]
         }))
         setIsDirty(true)
-        setStatusMsg(`Se generaron ${generated.length} RA`)
+        setStatusMsg(`Se generaron ${generated.length} ${labels.shortPlural}`)
         setStatusType('success')
       } else {
         throw new Error(data.detail || 'Respuesta invalida del servidor')
       }
     } catch (err) {
-      const errorMsg = `Error al generar RA con IA: ${err.message}`
+      const errorMsg = `Error al generar ${labels.shortPlural} con IA: ${err.message}`
       setStatusMsg(errorMsg)
       setStatusType('error')
       setAiError(errorMsg)
@@ -5981,24 +6111,78 @@ const App = () => {
     for (const line of lines) {
       const trimmed = line.trim()
       const isHeading = /^#{1,6}\s+/.test(trimmed) || /^\*\*.+\*\*$/.test(trimmed)
-      const isMetaLine = /^directrices/i.test(trimmed) || /^reformulaci[oó]n/i.test(trimmed)
+      const isMetaLine =
+        /^directrices/i.test(trimmed) ||
+        /^reformulaci[oó]n/i.test(trimmed) ||
+        /^secci[oó]n\s*:/i.test(trimmed) ||
+        /^texto\s+original\s*:/i.test(trimmed) ||
+        /^texto\s+corregido\s*:/i.test(trimmed) ||
+        /^requisitos\s*:/i.test(trimmed)
       if (!removedHeading && (isHeading || isMetaLine || trimmed.toLowerCase().startsWith('fundamentos'))) {
         removedHeading = true
         continue
       }
       cleanedLines.push(line)
     }
-    return cleanedLines.join('\n').trim()
+    return normalizeTerminologyText(cleanedLines.join('\n').trim())
+  }
+
+  const requestAiText = async ({ prompt, endpoint = 'ai-generate' }) => {
+    const res = await fetch(`http://localhost:8001/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt })
+    })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
+      throw new Error(errorData.detail || `Error ${res.status}`)
+    }
+    const data = await res.json()
+    if (data.status !== 'success') {
+      throw new Error(data.detail || 'Respuesta invalida del servidor')
+    }
+    return sanitizeAiOutput(data.content)
+  }
+
+  const generateLearningOutcomesWithCount = async (requestedCount) => {
+    const labels = getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer)
+    const isTechnicalCareer = isTechnicalCareerName(formData.carrera || activeCareer)
+    const count = Math.max(1, Math.min(10, parseInt(requestedCount, 10) || 1))
+    const existingCount = formData.resultadosAprendizaje.length
+    const remainingCount = Math.max(0, count - existingCount)
+    if (remainingCount === 0) {
+      return 0
+    }
+
+    const competencyContext = (!isTechnicalCareer && (buildCompetencyText(formData.competenciasGenItems) || buildCompetencyText(formData.competenciasEspItems)))
+      ? `\n\nCompetencias genericas: ${buildCompetencyText(formData.competenciasGenItems)}\nCompetencias especificas: ${buildCompetencyText(formData.competenciasEspItems)}`
+      : ''
+    const prompt = isTechnicalCareer
+      ? `Genera ${remainingCount} objetivos de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.${competencyContext}\n\nReglas de Objetivos:\n- Deben redactarse en infinitivo (por ejemplo: analizar, identificar, diseñar, implementar).\n- Deben ser claros, concretos y evaluables.\n- Centrados en lo que el estudiante deberá lograr.\n- Un objetivo por ítem.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada objetivo.\n- Sin titulos ni encabezados.`
+      : `Genera ${remainingCount} resultados de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.${competencyContext}\n\nReglas de RA:\n- Centrado en el estudiante.\n- Verbo observable y evaluable.\n- Presente del indicativo.\n- Desempeno demostrable y medible.\n- No mezclar demasiadas capacidades en un solo RA.\n- Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada RA.\n- Sin titulos ni encabezados.`
+
+    const cleaned = await requestAiText({ prompt, endpoint: 'ai-generate' })
+    const generated = parseLearningOutcomesFromText(cleaned, remainingCount)
+    if (generated.length === 0) {
+      throw new Error(`No se pudieron interpretar los ${labels.sectionTitle.toLowerCase()}`)
+    }
+    setFormData(prev => ({
+      ...prev,
+      resultadosAprendizaje: [...prev.resultadosAprendizaje, ...generated]
+    }))
+    setIsDirty(true)
+    return generated.length
   }
 
   const getRaContextText = () => {
+    const labels = getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer)
     const raList = (formData.resultadosAprendizaje || []).map((ra, idx) => {
       const verbo = isNonEmptyText(ra.verbo) ? `${ra.verbo} ` : ''
       const descripcion = isNonEmptyText(ra.descripcion) ? ra.descripcion : ''
       const text = `${verbo}${descripcion}`.trim()
-      return text ? `RA ${idx + 1}: ${text}` : `RA ${idx + 1}: (sin descripcion)`
+      return text ? `${labels.shortIndexPrefix} ${idx + 1}: ${text}` : `${labels.shortIndexPrefix} ${idx + 1}: (sin descripcion)`
     })
-    return raList.length > 0 ? raList.join('\n') : 'Sin RA cargados.'
+    return raList.length > 0 ? raList.join('\n') : `Sin ${labels.shortPlural} cargados.`
   }
 
   const buildMethodologyPrompt = ({ baseContext, raText, mode, currentValue }) => {
@@ -6020,11 +6204,32 @@ const App = () => {
   }
 
   const buildEvaluationPrompt = ({ baseContext, mode, currentValue }) => {
+    const normalizedCurrent = String(currentValue || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+    const mentionsPromotion = /promocion|promociona|promocionar/.test(normalizedCurrent)
+    const deniesPromotion = /no\s+(se\s+)?(puede\s+)?promocion|no\s+promociona|sin\s+promocion|no\s+ofrece\s+(la\s+)?(posibilidad\s+de\s+)?promocion/.test(normalizedCurrent)
+
+    const promotionRules = (() => {
+      if (mode === 'reformulate' && deniesPromotion) {
+        return [
+          '- Mantener explícitamente que la asignatura no tiene modalidad de promoción.',
+          '- No introducir promoción directa ni indirecta.',
+          '- Si incluyes escala de notas, usar: 0-3 libre y 4-10 regular.'
+        ]
+      }
+      if (mode === 'reformulate' && !mentionsPromotion) {
+        return ['- No agregar modalidades de promoción que no estén en el texto original.']
+      }
+      return ['- Explicitar rangos de nota: 0-3 libre, 4-6 regular, 7-8 promocion indirecta, 9-10 promocion directa.']
+    })()
+
     const commonRequirements = [
       '- Incluir dos parciales y un recuperatorio.',
       '- Indicar que los trabajos practicos son evaluables.',
       '- Incluir examen libre con instancia practica y teorica.',
-      '- Explicitar rangos de nota: 0-3 libre, 4-6 regular, 7-8 promocion indirecta, 9-10 promocion directa.',
+      ...promotionRules,
       '- Espanol claro y formal.',
       '- Sin titulos ni encabezados, solo el texto.'
     ].join('\n')
@@ -6062,6 +6267,26 @@ const App = () => {
     return `Escribe el contenido para: ${label}.\n\nContexto:\n${baseContext}\n\nRequisitos:\n- Espanol claro y conciso.\n- No incluyas titulos ni encabezados, solo el texto.`
   }
 
+  const buildRevisionPrompt = ({ mode, currentValue, label, target }) => {
+    const modeInstruction = mode === 'orthography'
+      ? 'Corrige únicamente ortografía y tildes, sin cambiar redacción ni estilo.'
+      : 'Corrige gramática, puntuación y sintaxis con cambios mínimos, manteniendo el estilo original.'
+    const extraRules = [
+      '- No agregues ni elimines ideas.',
+      '- Conserva el orden y estructura del texto original.',
+      '- Devuelve solo el texto final, sin explicaciones ni encabezados.'
+    ]
+
+    if (target?.type === 'ra') {
+      extraRules.push('- Mantén formato de Resultado de Aprendizaje (texto breve, claro y evaluable).')
+    }
+    if (target?.field === 'bibliografia') {
+      extraRules.push('- Mantén una referencia por línea cuando aplique.')
+    }
+
+    return `${modeInstruction}\n\nTexto:\n${currentValue}\n\nRequisitos:\n${extraRules.join('\n')}`
+  }
+
   const getUnitContext = (unitId) => {
     const index = formData.unidades.findIndex(u => u.id === unitId)
     const unit = formData.unidades[index] || {}
@@ -6074,7 +6299,9 @@ const App = () => {
     }
   }
 
-  const runAiForField = async ({ target, currentValue, label }) => {
+  const runAiForField = async ({ target, currentValue, label, assistMode = 'auto' }) => {
+    const learningLabels = getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer)
+    const isTechnicalCareer = isTechnicalCareerName(formData.carrera || activeCareer)
     const hasContent = typeof currentValue === 'string' && currentValue.trim().length > 0
     if (!hasContent && !isFormComplete()) {
       setStatusMsg('Completa la informacion general antes de usar IA')
@@ -6082,17 +6309,28 @@ const App = () => {
       return
     }
 
+    const resolvedMode = hasContent
+      ? (assistMode === 'auto' ? 'reformulate' : assistMode)
+      : 'generate'
+
     setAiError('')
     setAiLoading(true)
     setAiSection(label || target.field || 'IA')
     try {
-      const endpoint = hasContent ? 'ai-reformulate' : 'ai-generate'
-      const raRules = [
-        'Reglas de RA: centrado en el estudiante, verbo observable y evaluable, presente del indicativo, desempeño demostrable y medible.',
-        'Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.',
-        'No mezclar demasiadas capacidades en un solo RA.',
-        'No usar infinitivo (terminaciones -ar, -er, -ir).'
-      ].join(' ')
+      const endpoint = resolvedMode === 'generate' ? 'ai-generate' : 'ai-reformulate'
+      const raRules = isTechnicalCareer
+        ? [
+          'Reglas de Objetivos: centrado en el estudiante y redactado en infinitivo.',
+          'Usar verbo en infinitivo + objeto + contexto/alcance.',
+          'No mezclar demasiadas capacidades en un solo objetivo.',
+          'Evitar encabezados o texto explicativo.'
+        ].join(' ')
+        : [
+          'Reglas de RA: centrado en el estudiante, verbo observable y evaluable, presente del indicativo, desempeño demostrable y medible.',
+          'Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.',
+          'No mezclar demasiadas capacidades en un solo RA.',
+          'No usar infinitivo (terminaciones -ar, -er, -ir).'
+        ].join(' ')
 
       const unitContext = target?.type === 'unidad' ? getUnitContext(target.id) : { unitName: '', previousUnitsText: '' }
       const baseContext = [
@@ -6104,23 +6342,29 @@ const App = () => {
       const isMethodologyField = target?.field === 'metodologia'
       const isEvaluationField = target?.field === 'evaluacion'
       const isBibliographyField = target?.field === 'bibliografia'
-      const prompt = hasContent
-        ? (isBibliographyField
-          ? `Formatea la bibliografia al estilo APA 7.\n\nTexto a reformular:\n${currentValue}\n\nRequisitos:\n- Una referencia por linea.\n- Conservar el contenido original sin inventar datos.\n- Si falta anio, usar "s.f.".\n- Mantener el idioma original.\n- No incluir encabezados ni explicaciones.`
-          : (target?.type === 'ra'
-            ? `${raRules}\n\nReformula el siguiente RA manteniendo el sentido.\nDevuelve solo el RA reformulado, sin encabezados ni explicaciones:\n${currentValue}`
-            : (target?.type === 'unidad'
-              ? `Reformula los contenidos de la unidad "${unitContext.unitName}" manteniendo el sentido y coherencia con las unidades anteriores.\n\nContexto:\nCarrera: ${formData.carrera}\nAsignatura: ${formData.asignatura}\nContenidos minimos: ${formData.contenidosMin}\n${unitContext.previousUnitsText ? `\nUnidades anteriores:\n${unitContext.previousUnitsText}` : ''}\n\nRequisitos:\n- Devuelve solo los contenidos reformulados.\n- Sin titulos ni bibliografia.`
-              : (isMethodologyField
-                ? buildMethodologyPrompt({ baseContext, raText: getRaContextText(), mode: 'reformulate', currentValue })
-                : (isEvaluationField
-                  ? buildEvaluationPrompt({ baseContext, mode: 'reformulate', currentValue })
-                  : currentValue)))))
+      const reformulationPrompt = isBibliographyField
+        ? `Formatea la bibliografia al estilo APA 7.\n\nTexto a reformular:\n${currentValue}\n\nRequisitos:\n- Una referencia por linea.\n- Conservar el contenido original sin inventar datos.\n- Si falta anio, usar "s.f.".\n- Mantener el idioma original.\n- No incluir encabezados ni explicaciones.`
         : (target?.type === 'ra'
-          ? `Genera un resultado de aprendizaje para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${buildCompetencyText(formData.competenciasGenItems)}\nCompetencias especificas: ${buildCompetencyText(formData.competenciasEspItems)}\n\n${raRules}\n\nRequisitos:\n- Un solo RA.\n- Solo el texto del RA.\n- Sin titulos ni encabezados.`
+          ? `${raRules}\n\nReformula el siguiente ${isTechnicalCareer ? 'Objetivo de Aprendizaje' : 'RA'} manteniendo el sentido.\nDevuelve solo el texto reformulado, sin encabezados ni explicaciones:\n${currentValue}`
+          : (target?.type === 'unidad'
+            ? `Reformula los contenidos de la unidad "${unitContext.unitName}" manteniendo el sentido y coherencia con las unidades anteriores.\n\nContexto:\nCarrera: ${formData.carrera}\nAsignatura: ${formData.asignatura}\nContenidos minimos: ${formData.contenidosMin}\n${unitContext.previousUnitsText ? `\nUnidades anteriores:\n${unitContext.previousUnitsText}` : ''}\n\nRequisitos:\n- Devuelve solo los contenidos reformulados.\n- Sin titulos ni bibliografia.`
+            : (isMethodologyField
+              ? buildMethodologyPrompt({ baseContext, raText: getRaContextText(), mode: 'reformulate', currentValue })
+              : (isEvaluationField
+                ? buildEvaluationPrompt({ baseContext, mode: 'reformulate', currentValue })
+                : currentValue))))
+      const generationPrompt = (target?.type === 'ra'
+          ? (isTechnicalCareer
+            ? `Genera un objetivo de aprendizaje para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\n${raRules}\n\nRequisitos:\n- Un solo objetivo.\n- Verbo principal en infinitivo.\n- Solo el texto del objetivo.\n- Sin titulos ni encabezados.`
+            : `Genera un resultado de aprendizaje para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nCompetencias genericas: ${buildCompetencyText(formData.competenciasGenItems)}\nCompetencias especificas: ${buildCompetencyText(formData.competenciasEspItems)}\n\n${raRules}\n\nRequisitos:\n- Un solo RA.\n- Solo el texto del RA.\n- Sin titulos ni encabezados.`)
           : (target?.type === 'unidad'
             ? `Escribe los contenidos de la unidad "${unitContext.unitName}" en funcion de los contenidos minimos y manteniendo coherencia con las unidades anteriores.\n\nContexto:\nCarrera: ${formData.carrera}\nAsignatura: ${formData.asignatura}\nContenidos minimos: ${formData.contenidosMin}\n${unitContext.previousUnitsText ? `\nUnidades anteriores:\n${unitContext.previousUnitsText}` : ''}\n\nRequisitos:\n- Devuelve solo los contenidos.\n- Sin titulos ni bibliografia.`
             : buildAiPrompt(label || target.field || 'contenido', target)))
+      const prompt = resolvedMode === 'generate'
+        ? generationPrompt
+        : (resolvedMode === 'reformulate'
+          ? reformulationPrompt
+          : buildRevisionPrompt({ mode: resolvedMode, currentValue, label, target }))
       const res = await fetch(`http://localhost:8001/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6134,14 +6378,29 @@ const App = () => {
 
       if (data.status === 'success') {
         const cleaned = sanitizeAiOutput(data.content)
+        const normalizeForComparison = (value) => String(value || '').replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim()
+        const unchanged = normalizeForComparison(cleaned) === normalizeForComparison(currentValue)
+
+        if (unchanged && (resolvedMode === 'orthography' || resolvedMode === 'grammar')) {
+          const sectionLabel = label || target.field || 'texto'
+          const unchangedMsg = resolvedMode === 'orthography'
+            ? `${sectionLabel}: ortografía correcta, no se detectaron cambios.`
+            : `${sectionLabel}: gramática correcta, no se detectaron cambios.`
+          setStatusMsg(unchangedMsg)
+          setStatusType('success')
+          return
+        }
+
         setComparisonData({ original: currentValue || '', reformulated: cleaned })
-        setComparisonTarget({ ...target, label: label || target.field || '' })
+        setComparisonTarget({ ...target, label: label || target.field || '', assistMode: resolvedMode })
         setShowComparison(true)
       } else {
         throw new Error(data.detail || 'Respuesta invalida del servidor')
       }
     } catch (err) {
-      const action = hasContent ? 'reformular' : 'escribir'
+      const action = resolvedMode === 'generate'
+        ? 'generar'
+        : (resolvedMode === 'orthography' ? 'corregir ortografía' : (resolvedMode === 'grammar' ? 'corregir gramática' : 'reformular'))
       const errorMsg = `Error al ${action} con IA: ${err.message}`
       setStatusMsg(errorMsg)
       setStatusType('error')
@@ -6265,7 +6524,8 @@ const App = () => {
       return
     }
     if (formData.resultadosAprendizaje.length === 0) {
-      setStatusMsg('Carga resultados de aprendizaje antes de generar TP')
+      const labels = getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer)
+      setStatusMsg(`Carga ${labels.sectionTitle.toLowerCase()} antes de generar TP`)
       setStatusType('info')
       return
     }
@@ -6317,7 +6577,7 @@ const App = () => {
     }
   }
 
-  const generateUnitsFromContents = async (bibliographyData) => {
+  const generateUnitsFromContents = async (bibliographyData, forcedCount = null, onUnitProgress = null) => {
     if (!isNonEmptyText(formData.contenidosMin)) {
       setStatusMsg('Completa Contenidos Minimos antes de generar unidades')
       setStatusType('info')
@@ -6329,7 +6589,7 @@ const App = () => {
       return
     }
 
-    const count = Math.max(1, Math.min(12, parseInt(unitBatchCount, 10) || 1))
+    const count = Math.max(1, Math.min(12, parseInt(forcedCount ?? unitBatchCount, 10) || 1))
     if (formData.unidades.length > 0) {
       const confirmReplace = window.confirm('Ya existen unidades cargadas. Deseas reemplazarlas por las generadas con IA?')
       if (!confirmReplace) {
@@ -6415,6 +6675,9 @@ const App = () => {
       const generatedUnits = []
       const suspiciousUnits = []
       for (let i = 0; i < unitNames.length; i += 1) {
+        if (typeof onUnitProgress === 'function') {
+          onUnitProgress({ current: i + 1, total: unitNames.length, label: `Unidad ${i + 1}/${unitNames.length}` })
+        }
         const unitName = unitNames[i]
         const previousUnits = generatedUnits.map((u, idx) => (
           `Unidad ${idx + 1}: ${u.nombre}\nContenidos: ${u.contenidos || '-'}`
@@ -6508,30 +6771,35 @@ const App = () => {
     }
   }
 
-  const generatePracticalsFromUnits = async (tpComment = '') => {
-    const count = Math.max(1, Math.min(12, parseInt(tpBatchCount, 10) || 1))
-    if (formData.trabajosPracticos.length > 0) {
+  const generatePracticalsFromUnits = async (tpComment = '', forcedCount = null, onTpProgress = null) => {
+    const currentFormData = formDataRef.current || formData
+    const count = Math.max(1, Math.min(12, parseInt(forcedCount ?? tpBatchCount, 10) || 1))
+    if ((currentFormData.trabajosPracticos || []).length > 0) {
       const confirmReplace = window.confirm('Ya existen trabajos practicos cargados. Deseas reemplazarlos por los generados con IA?')
       if (!confirmReplace) {
         return
       }
     }
 
-    const raList = formData.resultadosAprendizaje
+    const currentLearningOutcomes = Array.isArray(currentFormData.resultadosAprendizaje)
+      ? currentFormData.resultadosAprendizaje
+      : []
+
+    const raList = currentLearningOutcomes
       .map((ra, idx) => `RA ${idx + 1}: ${ra.descripcion || ra.verbo || ''}`)
       .filter(line => isNonEmptyText(line))
       .join('\n')
 
-    const allRaIds = (formData.resultadosAprendizaje || []).map(ra => ra.id)
+    const allRaIds = currentLearningOutcomes.map(ra => ra.id)
 
-    const unitsList = formData.unidades
+    const unitsList = (currentFormData.unidades || [])
       .map((u, idx) => `Unidad ${idx + 1}: ${u.nombre || 'Sin nombre'}\nContenidos: ${u.contenidos || '-'}`)
       .join('\n\n')
     setAiError('')
     setAiLoading(true)
     setAiSection('TP - nombres')
     try {
-      const namesPrompt = `Genera ${count} nombres de trabajos practicos para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nUnidades desarrolladas:\n${unitsList}\n\nResultados de aprendizaje:\n${raList}\n\n${tpComment ? `Comentario del docente (obligatorio, debes seguirlo):\n${tpComment}\n\n` : ''}Requisitos de salida:\n- Devuelve solo una lista con ${count} items.\n- Un nombre por linea.\n- Sin JSON, sin encabezados.\n- Los nombres deben reflejar el comentario del docente.`
+      const namesPrompt = `Genera ${count} nombres de trabajos practicos para la asignatura ${currentFormData.asignatura} de la carrera ${currentFormData.carrera}.\n\nUnidades desarrolladas:\n${unitsList}\n\nResultados de aprendizaje:\n${raList}\n\n${tpComment ? `Comentario del docente (obligatorio, debes seguirlo):\n${tpComment}\n\n` : ''}Requisitos de salida:\n- Devuelve solo una lista con ${count} items.\n- Un nombre por linea.\n- Sin JSON, sin encabezados.\n- Los nombres deben reflejar el comentario del docente.`
 
       const namesRes = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
@@ -6559,10 +6827,13 @@ const App = () => {
 
       const generated = []
       for (let i = 0; i < tpNames.length; i += 1) {
+        if (typeof onTpProgress === 'function') {
+          onTpProgress({ current: i + 1, total: tpNames.length, label: `TP ${i + 1}/${tpNames.length}` })
+        }
         const tpNumber = i + 1
         const tpName = tpNames[i]
         const previousTps = generated.map(tp => `TP ${tp.numero || ''}: ${tp.nombre || 'Sin nombre'}`).join('\n')
-        const tpPrompt = `Genera el Trabajo Practico ${tpNumber} ("${tpName}") para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nUnidades desarrolladas:\n${unitsList}\n\nResultados de aprendizaje (deben cubrirse sin modificar el texto):\n${raList}\n\n${tpComment ? `Comentario del docente (obligatorio, debes seguirlo):\n${tpComment}\n\n` : ''}${previousTps ? `TP anteriores:\n${previousTps}\n\n` : ''}Requisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {\"numero\":\"${tpNumber}\",\"nombre\":\"${tpName}\",\"objetivo\":\"...\",\"actividades\":\"...\",\"materiales\":\"...\",\"raIndices\":[1,2]}.\n- El objetivo debe incluir literalmente los RA usados (sin cambiarlos).\n- Actividades deben cubrir el objetivo y respetar el comentario del docente.\n- Materiales en lista separada por lineas.\n- raIndices debe contener los numeros de RA usados.\n- No incluyas ambito.`
+        const tpPrompt = `Genera el Trabajo Practico ${tpNumber} ("${tpName}") para la asignatura ${currentFormData.asignatura} de la carrera ${currentFormData.carrera}.\n\nUnidades desarrolladas:\n${unitsList}\n\nResultados de aprendizaje (deben cubrirse sin modificar el texto):\n${raList}\n\n${tpComment ? `Comentario del docente (obligatorio, debes seguirlo):\n${tpComment}\n\n` : ''}${previousTps ? `TP anteriores:\n${previousTps}\n\n` : ''}Requisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {\"numero\":\"${tpNumber}\",\"nombre\":\"${tpName}\",\"objetivo\":\"...\",\"actividades\":\"...\",\"materiales\":\"...\",\"raIndices\":[1,2]}.\n- El objetivo debe incluir literalmente los RA usados (sin cambiarlos).\n- Actividades deben cubrir el objetivo y respetar el comentario del docente.\n- Materiales en lista separada por lineas.\n- raIndices debe contener los numeros de RA usados.\n- No incluyas ambito.`
 
         setAiSection(`TP ${tpNumber}/${tpNames.length}`)
         const tpRes = await fetch('http://localhost:8001/ai-generate', {
@@ -6605,12 +6876,33 @@ const App = () => {
             }
           }
         }
-        const raIndices = Array.isArray(parsedTp.raIndices) ? parsedTp.raIndices : []
-        const selectedRaIds = raIndices.length > 0
+        const raIndices = Array.isArray(parsedTp.raIndices)
+          ? parsedTp.raIndices
+            .map((idx) => parseInt(idx, 10))
+            .filter((idx) => Number.isInteger(idx) && idx >= 1 && idx <= currentLearningOutcomes.length)
+          : []
+        let selectedRaIds = raIndices.length > 0
           ? raIndices
-            .map((idx) => formData.resultadosAprendizaje[idx - 1]?.id)
+            .map((idx) => currentLearningOutcomes[idx - 1]?.id)
             .filter(Boolean)
-          : allRaIds
+          : []
+        if (selectedRaIds.length === 0 && currentLearningOutcomes.length > 0 && isNonEmptyText(parsedTp.objetivo)) {
+          const objectiveText = String(parsedTp.objetivo || '').toLowerCase()
+          selectedRaIds = currentLearningOutcomes
+            .map((ra, idx) => ({
+              id: ra.id,
+              idx,
+              description: String(ra.descripcion || ra.verbo || '').toLowerCase()
+            }))
+            .filter((item) => {
+              if (!item.description) return false
+              return objectiveText.includes(`ra ${item.idx + 1}`) || objectiveText.includes(item.description)
+            })
+            .map((item) => item.id)
+        }
+        if (selectedRaIds.length === 0) {
+          selectedRaIds = allRaIds
+        }
         generated.push({
           id: Date.now() + i,
           numero: parsedTp.numero || String(tpNumber),
@@ -6694,7 +6986,17 @@ const App = () => {
           : (isProposalReadyToCreate() ? 'Creada' : 'EnProceso'))
       : (isProposalReadyToCreate() ? 'Creada' : 'EnProceso')
 
+    const driveSettings = getDriveSettingsForContext(careerValue, formData.plan)
+    const driveSettingsReady = isDriveSettingsComplete(driveSettings)
     const shouldCreateInDrive = createInDriveOnSave && !formData.gdocUrl
+    if (shouldCreateInDrive && !driveSettingsReady) {
+      if (!silent) {
+        setStatusMsg(getDriveSettingsMissingMessage(careerValue || 'la carrera seleccionada', formData.plan))
+        setStatusType('error')
+      }
+      setCreateInDriveOnSave(false)
+      return
+    }
     const payload = {
       title: formData.asignatura,
       career: careerValue,
@@ -6959,7 +7261,8 @@ const App = () => {
         gdocUrl: data.gdoc_url || '',
         sourceType: data.source_type || ''
       })
-      setCreateInDriveOnSave(!(data.gdoc_url || '').trim())
+      const defaultDriveSettings = getDriveSettingsForContext(data.career || activeCareer, data.study_plan || data.plan || '')
+      setCreateInDriveOnSave(!(data.gdoc_url || '').trim() && isDriveSettingsComplete(defaultDriveSettings))
       if (Array.isArray(data.teaching_team) && data.teaching_team.length > 0) {
         setEquipoDocente(data.teaching_team.map((doc, idx) => ({
           id: Date.now() + idx,
@@ -7259,7 +7562,8 @@ const App = () => {
       gdocUrl: data.gdoc_url || importPreview?.gdoc_url || importGdocUrl || '',
       sourceType: data.gdoc_url || importPreview?.gdoc_url || importGdocUrl ? 'gdoc' : 'docx'
     })
-    setCreateInDriveOnSave(!(data.gdoc_url || importPreview?.gdoc_url || importGdocUrl || '').trim())
+    const importDriveSettings = getDriveSettingsForContext(data.career || activeCareer, data.study_plan || data.plan || '')
+    setCreateInDriveOnSave(!(data.gdoc_url || importPreview?.gdoc_url || importGdocUrl || '').trim() && isDriveSettingsComplete(importDriveSettings))
     
     // Cargar equipo docente desde teaching_team array
     if (data.teaching_team && Array.isArray(data.teaching_team)) {
@@ -7338,17 +7642,31 @@ const App = () => {
       {label}
     </button>
   )
-  const AIButton = ({ onClick, hasContent, disabled, tooltip, fullWidth = false }) => {
-    const title = disabled ? tooltip : (hasContent ? 'Reformular con IA' : 'Escribir con IA')
+  const AIAssistButtons = ({ onAction, hasContent, disabled, tooltip }) => {
+    const actionButtons = hasContent
+      ? [
+        { mode: 'orthography', label: 'Revisión Ortográfica', icon: '🔎' },
+        { mode: 'grammar', label: 'Revisión Gramatical', icon: '🧩' },
+        { mode: 'reformulate', label: 'Reformulación con IA', icon: '✨' }
+      ]
+      : [
+        { mode: 'generate', label: 'Generar con IA', icon: '✍️' }
+      ]
+
     return (
-      <button
-        style={{ ...styles.button, ...(disabled && styles.buttonDisabled), ...(fullWidth && { width: '100%', marginRight: 0, flex: 1 }) }}
-        onClick={onClick}
-        disabled={disabled}
-        title={title}
-      >
-        {hasContent ? '✏️' : '✍️'} {hasContent ? 'Reformular con IA' : 'Escribir con IA'}
-      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '220px', height: '100%' }}>
+        {actionButtons.map((action) => (
+          <button
+            key={action.mode}
+            style={{ ...styles.button, ...(disabled && styles.buttonDisabled), marginRight: 0, width: '100%', flex: 1, minHeight: 0 }}
+            onClick={() => onAction(action.mode)}
+            disabled={disabled}
+            title={disabled ? tooltip : action.label}
+          >
+            {action.icon} {action.label}
+          </button>
+        ))}
+      </div>
     )
   }
 
@@ -7421,6 +7739,190 @@ const App = () => {
     formData.caracter &&
     (!isDocenteView || !!editingProposalId)
   )
+  const fullProposalStarterRequiresCompetencies = !isTechnicalCareerName(formData.carrera || activeCareer)
+  const fullProposalStarterPendingItems = [
+    !isNonEmptyText(formData.carrera || activeCareer) ? 'Carrera' : null,
+    !isNonEmptyText(formData.asignatura) ? 'Asignatura' : null,
+    !isNonEmptyText(formData.anio) ? 'Año académico' : null,
+    !isNonEmptyText(formData.ciclo) ? 'Año en carrera' : null,
+    !isNonEmptyText(formData.cuatrimestre) ? 'Cuatrimestre' : null,
+    !isNonEmptyText(formData.contenidosMin) ? 'Contenidos mínimos' : null,
+    (fullProposalStarterRequiresCompetencies && (!Array.isArray(formData.competenciasGenItems) || formData.competenciasGenItems.length === 0))
+      ? 'Competencias genéricas'
+      : null
+  ].filter(Boolean)
+  const fullProposalStarterBaseReady = !!(
+    (formData.carrera || activeCareer) &&
+    formData.asignatura &&
+    formData.anio &&
+    formData.ciclo &&
+    formData.cuatrimestre &&
+    isNonEmptyText(formData.contenidosMin) &&
+    (!fullProposalStarterRequiresCompetencies || (Array.isArray(formData.competenciasGenItems) && formData.competenciasGenItems.length > 0))
+  )
+  const fullProposalStarterSectionsEmpty = (
+    !isNonEmptyText(formData.fundamentosP1) &&
+    !isNonEmptyText(formData.fundamentosP2) &&
+    (!Array.isArray(formData.resultadosAprendizaje) || formData.resultadosAprendizaje.length === 0) &&
+    (!Array.isArray(formData.unidades) || formData.unidades.length === 0) &&
+    (!Array.isArray(formData.trabajosPracticos) || formData.trabajosPracticos.length === 0) &&
+    !isNonEmptyText(formData.metodologia) &&
+    !isNonEmptyText(formData.evaluacion) &&
+    !isNonEmptyText(formData.bibliografia)
+  )
+  const canStartFullProposalWithIa = !isDocenteView && fullProposalStarterBaseReady && fullProposalStarterSectionsEmpty && !isGeneratingFullProposal
+  const fullProposalDraftRaCountValid = Number.isInteger(parseInt(fullProposalDraft.raCount, 10)) && parseInt(fullProposalDraft.raCount, 10) >= 1 && parseInt(fullProposalDraft.raCount, 10) <= 10
+  const fullProposalDraftUnitCountValid = Number.isInteger(parseInt(fullProposalDraft.unitCount, 10)) && parseInt(fullProposalDraft.unitCount, 10) >= 1 && parseInt(fullProposalDraft.unitCount, 10) <= 12
+  const fullProposalDraftTpCountValid = Number.isInteger(parseInt(fullProposalDraft.tpCount, 10)) && parseInt(fullProposalDraft.tpCount, 10) >= 1 && parseInt(fullProposalDraft.tpCount, 10) <= 12
+  const fullProposalDraftRequiredReady = isNonEmptyText(fullProposalDraft.bibliografiaBasica) && fullProposalDraftRaCountValid && fullProposalDraftUnitCountValid && fullProposalDraftTpCountValid
+  const fullProposalStarterDisabledMessage = !fullProposalStarterBaseReady
+    ? `Completa datos base para habilitar este asistente.${fullProposalStarterPendingItems.length ? ` Pendiente: ${fullProposalStarterPendingItems.join(', ')}.` : ''}`
+    : (!fullProposalStarterSectionsEmpty
+      ? 'Si quieres que te ayude, deberás eliminar todas las secciones generadas (Fundamentos, RA/Objetivos, Unidades, TP, Metodología, Evaluación y Bibliografía).'
+      : '')
+
+  const openFullProposalModal = () => {
+    if (!canStartFullProposalWithIa) {
+      if (fullProposalStarterDisabledMessage) {
+        setStatusMsg(fullProposalStarterDisabledMessage)
+        setStatusType('info')
+      }
+      return
+    }
+    setFullProposalDraft((prev) => ({
+      ...prev,
+      raCount: Math.max(1, parseInt(prev.raCount, 10) || parseInt(raBatchCount, 10) || 5),
+      unitCount: Math.max(1, parseInt(prev.unitCount, 10) || parseInt(unitBatchCount, 10) || 4),
+      tpCount: Math.max(1, parseInt(prev.tpCount, 10) || parseInt(tpBatchCount, 10) || 4)
+    }))
+    setShowFullProposalModal(true)
+  }
+
+  const closeFullProposalModal = () => {
+    if (isGeneratingFullProposal) return
+    setShowFullProposalModal(false)
+  }
+
+  const startFullProposalGeneration = async () => {
+    const bibliografiaBasica = normalizeBibliographyLines(fullProposalDraft.bibliografiaBasica || '')
+    const bibliografiaComplementaria = normalizeBibliographyLines(fullProposalDraft.bibliografiaComplementaria || '')
+    const raCount = Math.max(1, Math.min(10, parseInt(fullProposalDraft.raCount, 10) || 0))
+    const unitCount = Math.max(1, Math.min(12, parseInt(fullProposalDraft.unitCount, 10) || 0))
+    const tpCount = Math.max(1, Math.min(12, parseInt(fullProposalDraft.tpCount, 10) || 0))
+
+    if (!isNonEmptyText(bibliografiaBasica)) {
+      setStatusMsg('La bibliografía básica de referencia es obligatoria.')
+      setStatusType('error')
+      return
+    }
+    if (!fullProposalDraftRaCountValid || !fullProposalDraftUnitCountValid || !fullProposalDraftTpCountValid) {
+      setStatusMsg('Completa cantidades válidas para RA, Unidades y TP antes de generar.')
+      setStatusType('error')
+      return
+    }
+    if (!canStartFullProposalWithIa) {
+      setStatusMsg(fullProposalStarterDisabledMessage || 'No se puede iniciar el asistente en este estado.')
+      setStatusType('info')
+      return
+    }
+
+    const updateProgress = (current, label) => {
+      setFullProposalProgress({ current, total: 8, label })
+    }
+
+    setIsGeneratingFullProposal(true)
+    setFullProposalSubProgress({ current: 0, total: 0, label: '' })
+    setAiError('')
+    try {
+      updateProgress(1, 'Formateando bibliografía')
+      const basicaApa = await formatBibliographyApaList('basica', bibliografiaBasica)
+      const complementariaApa = isNonEmptyText(bibliografiaComplementaria)
+        ? await formatBibliographyApaList('complementaria', bibliografiaComplementaria)
+        : ''
+      const basicaFinal = normalizeBibliographyLines(basicaApa || bibliografiaBasica)
+      const complementariaFinal = normalizeBibliographyLines(complementariaApa || bibliografiaComplementaria)
+      const bibliographyText = `Bibliografia basica (APA):\n${basicaFinal}\n\nBibliografia complementaria (APA):\n${complementariaFinal || 'No aplica'}`
+      updateFormData('bibliografia', bibliographyText)
+
+      updateProgress(2, 'Generando Fundamentación: Importancia')
+      const fundamentosP1Prompt = buildAiPrompt('Fundamentos - Importancia', { type: 'form', field: 'fundamentosP1' })
+      const fundamentosP1 = await requestAiText({ prompt: fundamentosP1Prompt, endpoint: 'ai-generate' })
+      updateFormData('fundamentosP1', fundamentosP1)
+
+      updateProgress(3, 'Generando Fundamentación: Perfil Profesional')
+      const fundamentosP2Prompt = buildAiPrompt('Fundamentos - Perfil Profesional', { type: 'form', field: 'fundamentosP2' })
+      const fundamentosP2 = await requestAiText({ prompt: fundamentosP2Prompt, endpoint: 'ai-generate' })
+      updateFormData('fundamentosP2', fundamentosP2)
+
+      updateProgress(4, 'Generando Resultados de Aprendizaje / Objetivos')
+      await generateLearningOutcomesWithCount(raCount)
+
+      updateProgress(5, 'Generando Unidades')
+      setUnitBatchCount(unitCount)
+      setFullProposalSubProgress({ current: 0, total: unitCount, label: 'Preparando unidades...' })
+      await generateUnitsFromContents({
+        basica: basicaFinal,
+        complementaria: complementariaFinal,
+        preferencia: String(fullProposalDraft.unitNotes || '').trim()
+      }, unitCount, ({ current, total, label }) => {
+        setFullProposalSubProgress({ current, total, label })
+      })
+
+      updateProgress(6, 'Generando Trabajos Prácticos')
+      setTpBatchCount(tpCount)
+      setFullProposalSubProgress({ current: 0, total: tpCount, label: 'Preparando TP...' })
+      await generatePracticalsFromUnits(String(fullProposalDraft.tpNotes || '').trim(), tpCount, ({ current, total, label }) => {
+        setFullProposalSubProgress({ current, total, label })
+      })
+
+      updateProgress(7, 'Generando Metodología')
+      setFullProposalSubProgress({ current: 0, total: 0, label: '' })
+      const metodologiaPromptBase = buildMethodologyPrompt({
+        baseContext: [
+          `Carrera: ${formData.carrera}`,
+          `Asignatura: ${formData.asignatura}`,
+          `Ano en la carrera: ${formData.ciclo}`,
+          `Cuatrimestre: ${formData.cuatrimestre}`
+        ].join('\n'),
+        raText: getRaContextText(),
+        mode: 'generate',
+        currentValue: ''
+      })
+      const metodologiaPrompt = isNonEmptyText(fullProposalDraft.metodologiaNotes)
+        ? `${metodologiaPromptBase}\n\nConsideraciones adicionales del docente:\n${fullProposalDraft.metodologiaNotes}`
+        : metodologiaPromptBase
+      const metodologia = await requestAiText({ prompt: metodologiaPrompt, endpoint: 'ai-generate' })
+      updateFormData('metodologia', metodologia)
+
+      updateProgress(8, 'Generando Evaluación')
+      const evaluacionPromptBase = buildEvaluationPrompt({
+        baseContext: [
+          `Carrera: ${formData.carrera}`,
+          `Asignatura: ${formData.asignatura}`,
+          `Ano en la carrera: ${formData.ciclo}`,
+          `Cuatrimestre: ${formData.cuatrimestre}`
+        ].join('\n'),
+        mode: 'generate',
+        currentValue: ''
+      })
+      const evaluacionPrompt = isNonEmptyText(fullProposalDraft.evaluacionNotes)
+        ? `${evaluacionPromptBase}\n\nConsideraciones adicionales del docente:\n${fullProposalDraft.evaluacionNotes}`
+        : evaluacionPromptBase
+      const evaluacion = await requestAiText({ prompt: evaluacionPrompt, endpoint: 'ai-generate' })
+      updateFormData('evaluacion', evaluacion)
+
+      setStatusMsg('Propuesta generada con IA. Si quieres que te ayude, elimina primero las secciones generadas.')
+      setStatusType('success')
+      setShowFullProposalModal(false)
+    } catch (err) {
+      setStatusMsg(`Error durante la generación completa con IA: ${err.message}`)
+      setStatusType('error')
+    } finally {
+      setIsGeneratingFullProposal(false)
+      setFullProposalProgress({ current: 0, total: 8, label: '' })
+      setFullProposalSubProgress({ current: 0, total: 0, label: '' })
+    }
+  }
   const canSaveEdits = !!(formData.carrera || activeCareer) && !!formData.asignatura && (!isDocenteView || !!editingProposalId)
   const normalizedActiveCareer = normalizeCareer(activeCareer)
   const filteredByCareer = normalizedActiveCareer
@@ -8757,6 +9259,16 @@ const App = () => {
   const driveSettingsKey = activeCareer ? getDriveSettingsKey(activeCareer, drivePlanName) : ''
   const savedDriveSettings = driveSettingsKey ? (driveSettingsByCareer[driveSettingsKey] || {}) : {}
   const hasSavedDriveSettings = !!(savedDriveSettings.rootFolderUrl || savedDriveSettings.pdfFolderUrl)
+  const proposalDriveSettings = getDriveSettingsForContext(formData.carrera || activeCareer, formData.plan)
+  const proposalDriveSettingsReady = isDriveSettingsComplete(proposalDriveSettings)
+  const proposalDriveSettingsMessage = getDriveSettingsMissingMessage(formData.carrera || activeCareer || 'la carrera seleccionada', formData.plan)
+  const viewProposalDriveSettings = viewProposal
+    ? getDriveSettingsForContext(viewProposal.career || activeCareer, viewProposal.study_plan || '')
+    : {}
+  const viewProposalDriveSettingsReady = viewProposal ? isDriveSettingsComplete(viewProposalDriveSettings) : false
+  const viewProposalDriveSettingsMessage = viewProposal
+    ? getDriveSettingsMissingMessage(viewProposal.career || activeCareer || 'la carrera seleccionada', viewProposal.study_plan || '')
+    : ''
 
   const renderCompetencySection = ({ title, type, required }) => {
     const items = Array.isArray(formData[type]) ? formData[type] : []
@@ -8773,58 +9285,68 @@ const App = () => {
           {items.length === 0 ? (
             <div style={{ color: '#777', fontStyle: 'italic' }}>No hay competencias cargadas.</div>
           ) : (
-            items.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 3fr 1fr auto',
-                  gap: '10px',
-                  alignItems: 'center'
-                }}
-              >
-                <input
-                  style={styles.input}
-                  placeholder="Codigo"
-                  value={item.code || ''}
-                  onChange={(e) => updateCompetencyItem(type, item.id, 'code', e.target.value)}
-                  list={datalistId}
-                  disabled={!canEditCompetencies}
-                />
-                <datalist id={datalistId}>
-                  {filteredCatalogList.map((entry) => (
-                    <option key={entry.id ?? entry.code} value={entry.code}>
-                      {entry.description}
-                    </option>
-                  ))}
-                </datalist>
-                <input
-                  style={styles.input}
-                  placeholder="Descripcion"
-                  value={item.description || ''}
-                  onChange={(e) => updateCompetencyItem(type, item.id, 'description', e.target.value)}
-                  disabled={!canEditCompetencies}
-                />
-                <select
-                  style={styles.input}
-                  value={normalizeLevelValue(item.level) || ''}
-                  onChange={(e) => updateCompetencyItem(type, item.id, 'level', e.target.value)}
-                  disabled={!canEditCompetencies}
+            items.map((item) => {
+              const usedCodes = new Set(
+                items
+                  .filter((entry) => entry.id !== item.id)
+                  .map((entry) => String(entry.code || '').trim().toLowerCase())
+                  .filter(Boolean)
+              )
+              const datalistId = `${type}-catalog-${item.id}`
+              const availableCatalogList = filteredCatalogList.filter((entry) => !usedCodes.has(String(entry.code || '').trim().toLowerCase()))
+              return (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 3fr 1fr auto',
+                    gap: '10px',
+                    alignItems: 'center'
+                  }}
                 >
-                  <option value="">Seleccionar nivel</option>
-                  {levelOptions.filter((opt) => opt.value > 0).map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                <button
-                  style={{ ...styles.button, marginRight: 0 }}
-                  onClick={() => deleteCompetencyItem(type, item.id)}
-                  disabled={!canEditCompetencies}
-                >
-                  X
-                </button>
-              </div>
-            ))
+                  <input
+                    style={styles.input}
+                    placeholder="Codigo"
+                    value={item.code || ''}
+                    onChange={(e) => updateCompetencyItem(type, item.id, 'code', e.target.value)}
+                    list={datalistId}
+                    disabled={!canEditCompetencies}
+                  />
+                  <datalist id={datalistId}>
+                    {availableCatalogList.map((entry) => (
+                      <option key={entry.id ?? entry.code} value={entry.code}>
+                        {entry.description}
+                      </option>
+                    ))}
+                  </datalist>
+                  <input
+                    style={styles.input}
+                    placeholder="Descripcion"
+                    value={item.description || ''}
+                    onChange={(e) => updateCompetencyItem(type, item.id, 'description', e.target.value)}
+                    disabled={!canEditCompetencies}
+                  />
+                  <select
+                    style={styles.input}
+                    value={normalizeLevelValue(item.level) || ''}
+                    onChange={(e) => updateCompetencyItem(type, item.id, 'level', e.target.value)}
+                    disabled={!canEditCompetencies}
+                  >
+                    <option value="">Seleccionar nivel</option>
+                    {levelOptions.filter((opt) => opt.value > 0).map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    style={{ ...styles.button, marginRight: 0 }}
+                    onClick={() => deleteCompetencyItem(type, item.id)}
+                    disabled={!canEditCompetencies}
+                  >
+                    X
+                  </button>
+                </div>
+              )
+            })
           )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
@@ -8852,7 +9374,7 @@ const App = () => {
         {!isDocenteView && (
           <MenuButton label="Plan de Estudios" onClick={() => handleMenuChange('plan')} active={activeMenu === 'plan'} />
         )}
-        {!isDocenteView && (
+        {!isDocenteView && !isTechnicalCareerName(activeCareer) && (
           <MenuButton
             label="Competencias"
             onClick={() => handleMenuChange('competencias')}
@@ -9733,7 +10255,7 @@ const App = () => {
               {renderCompetencySection({
                 title: 'Competencias Genéricas',
                 type: 'competenciasGenItems',
-                required: true
+                required: !isTechnicalCareerName(formData.carrera || activeCareer)
               })}
 
               {renderCompetencySection({
@@ -9742,39 +10264,83 @@ const App = () => {
                 required: false
               })}
 
+              <div style={styles.section}>
+                <button
+                  style={{
+                    ...styles.button,
+                    width: '100%',
+                    marginRight: 0,
+                    padding: '16px 22px',
+                    background: canStartFullProposalWithIa ? '#512da8' : '#9ea4b3',
+                    fontSize: '16px',
+                    fontWeight: 700,
+                    ...(!canStartFullProposalWithIa && {
+                      cursor: 'not-allowed',
+                      color: '#eef1f5',
+                      opacity: 0.68,
+                      boxShadow: 'none',
+                      border: '1px solid #8e95a5'
+                    })
+                  }}
+                  onClick={openFullProposalModal}
+                  disabled={!canStartFullProposalWithIa}
+                  title={canStartFullProposalWithIa ? 'Generar propuesta completa con IA' : fullProposalStarterDisabledMessage}
+                >
+                  ✨ Generar propuesta completa con IA
+                </button>
+                {!canStartFullProposalWithIa && fullProposalStarterDisabledMessage && (
+                  <div style={{ marginTop: '10px', color: '#6b5f00', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '6px', padding: '10px 12px', fontSize: '12px' }}>
+                    <div>{fullProposalStarterDisabledMessage}</div>
+                    {!fullProposalStarterBaseReady && fullProposalStarterPendingItems.length > 0 && (
+                      <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
+                        {fullProposalStarterPendingItems.map((item) => (
+                          <li key={item} style={{ marginBottom: '2px' }}>{item}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* FUNDAMENTALS */}
               <div style={styles.section}>
                 <h3>Fundamentos</h3>
                 <label style={styles.label}>Importancia (100-200 palabras)</label>
-                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.fundamentosP1} onChange={(e) => updateFormData('fundamentosP1', e.target.value)} />
-                <AIButton
-                  onClick={() => runAiForField({
-                    target: { type: 'form', field: 'fundamentosP1' },
-                    currentValue: formData.fundamentosP1,
-                    label: 'Fundamentos - Importancia'
-                  })}
-                  hasContent={!!formData.fundamentosP1}
-                  disabled={!isFormComplete()}
-                  tooltip={isFormComplete() ? '' : 'Completa info general primero'}
-                />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '10px', alignItems: 'stretch' }}>
+                  <textarea style={{ ...styles.textarea, marginBottom: 0 }} data-autoresize="true" onInput={autoResizeTextarea} value={formData.fundamentosP1} onChange={(e) => updateFormData('fundamentosP1', e.target.value)} />
+                  <AIAssistButtons
+                    onAction={(mode) => runAiForField({
+                      target: { type: 'form', field: 'fundamentosP1' },
+                      currentValue: formData.fundamentosP1,
+                      label: 'Fundamentos - Importancia',
+                      assistMode: mode
+                    })}
+                    hasContent={!!formData.fundamentosP1}
+                    disabled={!isFormComplete()}
+                    tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                  />
+                </div>
 
                 <label style={styles.label}>Perfil Profesional (100-200 palabras)</label>
-                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.fundamentosP2} onChange={(e) => updateFormData('fundamentosP2', e.target.value)} />
-                <AIButton
-                  onClick={() => runAiForField({
-                    target: { type: 'form', field: 'fundamentosP2' },
-                    currentValue: formData.fundamentosP2,
-                    label: 'Fundamentos - Perfil Profesional'
-                  })}
-                  hasContent={!!formData.fundamentosP2}
-                  disabled={!isFormComplete()}
-                  tooltip={isFormComplete() ? '' : 'Completa info general primero'}
-                />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '10px', alignItems: 'stretch' }}>
+                  <textarea style={{ ...styles.textarea, marginBottom: 0 }} data-autoresize="true" onInput={autoResizeTextarea} value={formData.fundamentosP2} onChange={(e) => updateFormData('fundamentosP2', e.target.value)} />
+                  <AIAssistButtons
+                    onAction={(mode) => runAiForField({
+                      target: { type: 'form', field: 'fundamentosP2' },
+                      currentValue: formData.fundamentosP2,
+                      label: 'Fundamentos - Perfil Profesional',
+                      assistMode: mode
+                    })}
+                    hasContent={!!formData.fundamentosP2}
+                    disabled={!isFormComplete()}
+                    tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                  />
+                </div>
               </div>
 
               {/* LEARNING OUTCOMES */}
               <div style={styles.section}>
-                <h3>Resultados de Aprendizaje</h3>
+                <h3>{getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer).sectionTitle}</h3>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
                   <label style={{ fontWeight: 600, color: '#1a3d5c' }}>Generar</label>
                   <input
@@ -9785,11 +10351,11 @@ const App = () => {
                     value={raBatchCount}
                     onChange={(e) => setRaBatchCount(e.target.value)}
                   />
-                  <button style={styles.button} onClick={generateLearningOutcomes}>Generar RA con IA</button>
+                  <button style={styles.button} onClick={generateLearningOutcomes}>Generar {getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer).shortPlural} con IA</button>
                 </div>
                 {formData.resultadosAprendizaje.map((ra, idx) => (
                   <div key={ra.id} style={{ marginBottom: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
-                    <div style={{ fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>RA {idx + 1}</div>
+                    <div style={{ fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>{getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer).shortIndexPrefix} {idx + 1}</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'start' }}>
                       <textarea
                         style={{ ...styles.textarea, marginBottom: 0, minHeight: '60px' }}
@@ -9799,19 +10365,19 @@ const App = () => {
                         value={ra.descripcion}
                         onChange={(e) => updateRA(ra.id, 'descripcion', e.target.value)}
                       />
-                      <div style={{ display: 'flex', gap: '8px', minWidth: '240px' }}>
-                        <AIButton
-                          onClick={() => runAiForField({
+                      <div style={{ display: 'grid', gap: '8px', minWidth: '220px' }}>
+                        <AIAssistButtons
+                          onAction={(mode) => runAiForField({
                             target: { type: 'ra', id: ra.id, field: 'descripcion' },
                             currentValue: ra.descripcion,
-                            label: 'Resultado de Aprendizaje'
+                            label: 'Resultado de Aprendizaje',
+                            assistMode: mode
                           })}
                           hasContent={!!ra.descripcion}
                           disabled={!isFormComplete()}
                           tooltip={isFormComplete() ? '' : 'Completa info general primero'}
-                          fullWidth
                         />
-                        <button style={{ ...styles.button, background: '#d32f2f', marginRight: 0, flex: 1 }} onClick={() => deleteRA(ra.id)}>Eliminar</button>
+                        <button style={{ ...styles.button, background: '#d32f2f', marginRight: 0 }} onClick={() => deleteRA(ra.id)}>Eliminar</button>
                       </div>
                     </div>
                   </div>
@@ -9864,16 +10430,16 @@ const App = () => {
                     <label style={styles.label}>Contenidos</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'start' }}>
                       <textarea style={{ ...styles.textarea, marginBottom: 0 }} placeholder="Contenidos" data-autoresize="true" onInput={autoResizeTextarea} value={u.contenidos} onChange={(e) => updateUnidad(u.id, 'contenidos', e.target.value)} />
-                      <AIButton
-                        onClick={() => runAiForField({
+                      <AIAssistButtons
+                        onAction={(mode) => runAiForField({
                           target: { type: 'unidad', id: u.id, field: 'contenidos' },
                           currentValue: u.contenidos,
-                          label: 'Contenidos de la Unidad'
+                          label: 'Contenidos de la Unidad',
+                          assistMode: mode
                         })}
                         hasContent={!!u.contenidos}
                         disabled={!isNonEmptyText(u.nombre) || !isNonEmptyText(formData.contenidosMin)}
                         tooltip={!isNonEmptyText(u.nombre) ? 'Completa el nombre de la unidad' : (!isNonEmptyText(formData.contenidosMin) ? 'Completa contenidos minimos primero' : '')}
-                        fullWidth
                       />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -9927,10 +10493,10 @@ const App = () => {
                   <div key={tp.id} style={{ marginBottom: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
                     <div style={{ fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Trabajo Practico {tp.numero || idx + 1}</div>
                     <input style={styles.input} placeholder="Nombre del TP" value={tp.nombre} onChange={(e) => updateTP(tp.id, 'nombre', e.target.value)} />
-                    <label style={styles.label}>Resultados de aprendizaje cubiertos</label>
+                    <label style={styles.label}>{getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer).sectionTitle} cubiertos</label>
                     <div style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '8px', background: '#fff' }}>
                       {formData.resultadosAprendizaje.length === 0 ? (
-                        <div style={{ color: '#888', fontSize: '13px' }}>No hay RA cargados</div>
+                        <div style={{ color: '#888', fontSize: '13px' }}>No hay {getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer).shortPlural} cargados</div>
                       ) : (
                         formData.resultadosAprendizaje.map((ra, raIdx) => (
                           <label key={ra.id} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '13px', marginBottom: '6px' }}>
@@ -9939,12 +10505,12 @@ const App = () => {
                               checked={Array.isArray(tp.raIds) && tp.raIds.includes(ra.id)}
                               onChange={() => toggleTpRa(tp.id, ra.id)}
                             />
-                            <span>RA {raIdx + 1}: {ra.descripcion || ra.verbo || ''}</span>
+                            <span>{getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer).shortIndexPrefix} {raIdx + 1}: {ra.descripcion || ra.verbo || ''}</span>
                           </label>
                         ))
                       )}
                     </div>
-                    <label style={{ ...styles.label, marginTop: '8px' }}>Objetivo (RA seleccionados)</label>
+                    <label style={{ ...styles.label, marginTop: '8px' }}>Objetivo ({getLearningOutcomeLabelsByCareer(formData.carrera || activeCareer).shortPlural} seleccionados)</label>
                     <textarea
                       style={{ ...styles.textarea, minHeight: '90px' }}
                       data-autoresize="true"
@@ -9966,52 +10532,59 @@ const App = () => {
               {/* OTHER SECTIONS */}
               <div style={styles.section}>
                 <h3>Metodología</h3>
-                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.metodologia} onChange={(e) => updateFormData('metodologia', e.target.value)} />
-                <AIButton
-                  onClick={() => runAiForField({
-                    target: { type: 'form', field: 'metodologia' },
-                    currentValue: formData.metodologia,
-                    label: 'Metodologia'
-                  })}
-                  hasContent={!!formData.metodologia}
-                  disabled={!isFormComplete()}
-                  tooltip={isFormComplete() ? '' : 'Completa info general primero'}
-                />
-              </div>
-
-              <div style={styles.section}>
-                <h3>Evaluación</h3>
-                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.evaluacion} onChange={(e) => updateFormData('evaluacion', e.target.value)} />
-                <AIButton
-                  onClick={() => runAiForField({
-                    target: { type: 'form', field: 'evaluacion' },
-                    currentValue: formData.evaluacion,
-                    label: 'Evaluacion'
-                  })}
-                  hasContent={!!formData.evaluacion}
-                  disabled={!isFormComplete()}
-                  tooltip={isFormComplete() ? '' : 'Completa info general primero'}
-                />
-              </div>
-
-              <div style={styles.section}>
-                <h3>Bibliografía</h3>
-                <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.bibliografia} onChange={(e) => updateFormData('bibliografia', e.target.value)} />
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
-                  <AIButton
-                    onClick={() => runAiForField({
-                      target: { type: 'form', field: 'bibliografia' },
-                      currentValue: formData.bibliografia,
-                      label: 'Bibliografia'
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '10px', alignItems: 'stretch' }}>
+                  <textarea style={{ ...styles.textarea, marginBottom: 0 }} data-autoresize="true" onInput={autoResizeTextarea} value={formData.metodologia} onChange={(e) => updateFormData('metodologia', e.target.value)} />
+                  <AIAssistButtons
+                    onAction={(mode) => runAiForField({
+                      target: { type: 'form', field: 'metodologia' },
+                      currentValue: formData.metodologia,
+                      label: 'Metodologia',
+                      assistMode: mode
                     })}
-                    hasContent={!!formData.bibliografia}
-                    disabled={!isNonEmptyText(formData.bibliografia)}
-                    tooltip="Carga bibliografia para formatear"
+                    hasContent={!!formData.metodologia}
+                    disabled={!isFormComplete()}
+                    tooltip={isFormComplete() ? '' : 'Completa info general primero'}
                   />
                 </div>
               </div>
 
               <div style={styles.section}>
+                <h3>Evaluación</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '10px', alignItems: 'stretch' }}>
+                  <textarea style={{ ...styles.textarea, marginBottom: 0 }} data-autoresize="true" onInput={autoResizeTextarea} value={formData.evaluacion} onChange={(e) => updateFormData('evaluacion', e.target.value)} />
+                  <AIAssistButtons
+                    onAction={(mode) => runAiForField({
+                      target: { type: 'form', field: 'evaluacion' },
+                      currentValue: formData.evaluacion,
+                      label: 'Evaluacion',
+                      assistMode: mode
+                    })}
+                    hasContent={!!formData.evaluacion}
+                    disabled={!isFormComplete()}
+                    tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                  />
+                </div>
+              </div>
+
+              <div style={styles.section}>
+                <h3>Bibliografía</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '10px', alignItems: 'stretch' }}>
+                  <textarea style={{ ...styles.textarea, marginBottom: 0 }} data-autoresize="true" onInput={autoResizeTextarea} value={formData.bibliografia} onChange={(e) => updateFormData('bibliografia', e.target.value)} />
+                  <AIAssistButtons
+                    onAction={(mode) => runAiForField({
+                      target: { type: 'form', field: 'bibliografia' },
+                      currentValue: formData.bibliografia,
+                      label: 'Bibliografia',
+                      assistMode: mode
+                    })}
+                    hasContent={!!formData.bibliografia}
+                    disabled={!isFormComplete()}
+                    tooltip={isFormComplete() ? '' : 'Completa info general primero'}
+                  />
+                </div>
+              </div>
+
+              <div style={{ ...styles.section, marginBottom: '220px' }}>
                 <h3>Observaciones</h3>
                 <textarea style={styles.textarea} data-autoresize="true" onInput={autoResizeTextarea} value={formData.observaciones} onChange={(e) => updateFormData('observaciones', e.target.value)} />
               </div>
@@ -10021,12 +10594,22 @@ const App = () => {
                 {!formData.gdocUrl && (
                   <div style={{ background: '#ffffff', border: '1px solid #d9e1e6', borderRadius: '10px', padding: '10px 12px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)', minWidth: '260px' }}>
                     <div style={{ fontSize: '12px', color: '#445', marginBottom: '6px', fontWeight: 600 }}>Crear en Google Drive al guardar</div>
+                    {!proposalDriveSettingsReady && (
+                      <div style={{ marginBottom: '8px', fontSize: '12px', color: '#b35b00', background: '#fff3e0', border: '1px solid #ffcc80', borderRadius: '6px', padding: '6px 8px' }}>
+                        {proposalDriveSettingsMessage}
+                      </div>
+                    )}
                     <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', cursor: isSaving ? 'not-allowed' : 'pointer' }}>
                       <span style={{ fontSize: '12px', color: '#555' }}>{createInDriveOnSave ? 'Activado' : 'Desactivado'}</span>
                       <button
                         type="button"
                         onClick={() => {
                           if (isSaving) return
+                          if (!proposalDriveSettingsReady) {
+                            setStatusMsg(proposalDriveSettingsMessage)
+                            setStatusType('error')
+                            return
+                          }
                           setCreateInDriveOnSave((prev) => !prev)
                         }}
                         style={{
@@ -10040,8 +10623,8 @@ const App = () => {
                           outline: 'none',
                           cursor: isSaving ? 'not-allowed' : 'pointer'
                         }}
-                        title="Activar creación en Drive"
-                        disabled={isSaving}
+                        title={proposalDriveSettingsReady ? 'Activar creación en Drive' : proposalDriveSettingsMessage}
+                        disabled={isSaving || !proposalDriveSettingsReady}
                         aria-pressed={createInDriveOnSave}
                       >
                         <span
@@ -10146,6 +10729,186 @@ const App = () => {
                 )}
               </div>
             </div>
+
+            {showFullProposalModal && (
+              <div
+                style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 6100 }}
+              >
+                <div
+                  style={{ background: '#fff', padding: '24px 30px', borderRadius: '8px', maxWidth: '860px', width: '94%', maxHeight: '86vh', overflowY: 'auto' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 style={{ marginTop: 0 }}>Generar propuesta completa con IA</h3>
+                  <p style={{ color: '#555', marginTop: 0 }}>
+                    En esta sección seré tu compañero para generar tu propuesta de asignatura desde cero.
+                    Primero necesito alguna información para poder ayudarte.
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={styles.label}>¿Cuál será tu bibliografía básica de referencia? *</label>
+                      <textarea
+                        style={{ ...styles.textarea, minHeight: '110px' }}
+                        placeholder="Una referencia por línea"
+                        data-autoresize="true"
+                        onInput={autoResizeTextarea}
+                        value={fullProposalDraft.bibliografiaBasica}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, bibliografiaBasica: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                    </div>
+
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={styles.label}>¿Tenés bibliografía complementaria? (opcional)</label>
+                      <textarea
+                        style={{ ...styles.textarea, minHeight: '90px' }}
+                        placeholder="Opcional"
+                        data-autoresize="true"
+                        onInput={autoResizeTextarea}
+                        value={fullProposalDraft.bibliografiaComplementaria}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, bibliografiaComplementaria: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={styles.label}>¿Cuántos Resultados de Aprendizaje querés? *</label>
+                      <input
+                        style={styles.input}
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={fullProposalDraft.raCount}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, raCount: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                      {!fullProposalDraftRaCountValid && (
+                        <div style={{ marginTop: '-6px', marginBottom: '8px', color: '#b00020', fontSize: '12px' }}>Ingresa un valor entre 1 y 10.</div>
+                      )}
+                    </div>
+                    <div>
+                      <label style={styles.label}>¿Cuántas unidades querés que te genere? *</label>
+                      <input
+                        style={styles.input}
+                        type="number"
+                        min="1"
+                        max="12"
+                        value={fullProposalDraft.unitCount}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, unitCount: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                      {!fullProposalDraftUnitCountValid && (
+                        <div style={{ marginTop: '-6px', marginBottom: '8px', color: '#b00020', fontSize: '12px' }}>Ingresa un valor entre 1 y 12.</div>
+                      )}
+                    </div>
+
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={styles.label}>¿Algo a tener en cuenta en las unidades? (opcional)</label>
+                      <textarea
+                        style={{ ...styles.textarea, minHeight: '80px' }}
+                        placeholder="Opcional"
+                        data-autoresize="true"
+                        onInput={autoResizeTextarea}
+                        value={fullProposalDraft.unitNotes}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, unitNotes: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={styles.label}>¿Cuántos TP querés que generemos? *</label>
+                      <input
+                        style={styles.input}
+                        type="number"
+                        min="1"
+                        max="12"
+                        value={fullProposalDraft.tpCount}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, tpCount: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                      {!fullProposalDraftTpCountValid && (
+                        <div style={{ marginTop: '-6px', marginBottom: '8px', color: '#b00020', fontSize: '12px' }}>Ingresa un valor entre 1 y 12.</div>
+                      )}
+                    </div>
+                    <div>
+                      <label style={styles.label}>¿Algo a tener en cuenta en los TP? (opcional)</label>
+                      <input
+                        style={styles.input}
+                        value={fullProposalDraft.tpNotes}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, tpNotes: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                    </div>
+
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={styles.label}>¿Algo a tener en cuenta en la metodología? (opcional)</label>
+                      <textarea
+                        style={{ ...styles.textarea, minHeight: '76px' }}
+                        data-autoresize="true"
+                        onInput={autoResizeTextarea}
+                        value={fullProposalDraft.metodologiaNotes}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, metodologiaNotes: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                    </div>
+
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={styles.label}>¿Algo a tener en cuenta en la evaluación? (opcional)</label>
+                      <textarea
+                        style={{ ...styles.textarea, minHeight: '76px' }}
+                        data-autoresize="true"
+                        onInput={autoResizeTextarea}
+                        value={fullProposalDraft.evaluacionNotes}
+                        onChange={(e) => setFullProposalDraft((prev) => ({ ...prev, evaluacionNotes: e.target.value }))}
+                        disabled={isGeneratingFullProposal}
+                      />
+                    </div>
+                  </div>
+
+                  {isGeneratingFullProposal && (
+                    <div style={{ marginTop: '12px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', padding: '10px 12px' }}>
+                      <div style={{ fontSize: '12px', color: '#334155', marginBottom: '6px', fontWeight: 600 }}>
+                        Progreso: paso {fullProposalProgress.current} de {fullProposalProgress.total}
+                      </div>
+                      <div style={{ width: '100%', height: '10px', background: '#e5e7eb', borderRadius: '999px', overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.max(0, Math.min(100, Math.round((fullProposalProgress.current / Math.max(1, fullProposalProgress.total)) * 100)))}%`, height: '100%', background: '#4f46e5' }} />
+                      </div>
+                      <div style={{ marginTop: '6px', fontSize: '12px', color: '#1f2937' }}>{fullProposalProgress.label || 'Iniciando...'}</div>
+
+                      {fullProposalSubProgress.total > 0 && (
+                        <div style={{ marginTop: '10px', background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px' }}>
+                          <div style={{ fontSize: '11px', color: '#334155', marginBottom: '6px', fontWeight: 600 }}>
+                            Subprogreso: {fullProposalSubProgress.current} de {fullProposalSubProgress.total}
+                          </div>
+                          <div style={{ width: '100%', height: '8px', background: '#e5e7eb', borderRadius: '999px', overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.max(0, Math.min(100, Math.round((fullProposalSubProgress.current / Math.max(1, fullProposalSubProgress.total)) * 100)))}%`, height: '100%', background: '#0ea5e9' }} />
+                          </div>
+                          <div style={{ marginTop: '5px', fontSize: '11px', color: '#334155' }}>{fullProposalSubProgress.label}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '14px' }}>
+                    <button
+                      style={{ ...styles.button, background: '#ccc', color: '#000' }}
+                      onClick={closeFullProposalModal}
+                      disabled={isGeneratingFullProposal}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      style={{ ...styles.button, background: '#512da8' }}
+                      onClick={startFullProposalGeneration}
+                      disabled={isGeneratingFullProposal || !fullProposalDraftRequiredReady}
+                      title={fullProposalDraftRequiredReady ? 'Comenzar generación completa' : 'Completa Bibliografía básica y cantidades válidas de RA, Unidades y TP.'}
+                    >
+                      {isGeneratingFullProposal ? 'Generando...' : 'Comenzar generación completa'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {showUnitBibliografiaModal && (
               <div
@@ -10270,7 +11033,17 @@ const App = () => {
             {showComparison && (
               <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
                 <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '900px', maxHeight: '80vh', overflowY: 'auto' }}>
-                  <h2>Comparación de Reformulación</h2>
+                  <h2>
+                    {`Comparación de ${
+                      comparisonTarget?.assistMode === 'orthography'
+                        ? 'Revisión Ortográfica'
+                        : comparisonTarget?.assistMode === 'grammar'
+                          ? 'Revisión Gramatical'
+                          : comparisonTarget?.assistMode === 'generate'
+                            ? 'Generación con IA'
+                            : 'Reformulación'
+                    }`}
+                  </h2>
                   {comparisonTarget?.label && (
                     <div style={{ color: '#555', marginTop: '6px' }}>Seccion: {comparisonTarget.label}</div>
                   )}
@@ -10282,7 +11055,7 @@ const App = () => {
                       </div>
                     </div>
                     <div>
-                      <h3>Reformulado</h3>
+                      <h3>Sugerencia IA</h3>
                       <div style={{ background: '#e8f5e9', padding: '15px', borderRadius: '4px', minHeight: '200px', whiteSpace: 'pre-wrap' }}>
                         {comparisonData.reformulated}
                       </div>
@@ -10696,7 +11469,7 @@ const App = () => {
                   )}
 
                   {/* Competencias Genéricas */}
-                  {previewGenericCompetencies.length > 0 && (
+                  {!isTechnicalCareerName(importPreview.preview?.career || activeCareer) && previewGenericCompetencies.length > 0 && (
                     <div style={{ marginTop: '15px', marginBottom: '15px' }}>
                       <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Genéricas ({previewGenericCompetencies.length}):</strong>
                       <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
@@ -10710,20 +11483,22 @@ const App = () => {
                   )}
 
                   {/* Competencias Específicas */}
-                  <div style={{ marginTop: '15px', marginBottom: '15px' }}>
-                    <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Específicas {previewSpecificCompetencies.length > 0 ? `(${previewSpecificCompetencies.length})` : ''}:</strong>
-                    {previewSpecificCompetencies.length > 0 ? (
-                      <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
-                        {previewSpecificCompetencies.map((comp, idx) => (
-                          <div key={idx} style={{ padding: '5px', marginBottom: '5px', background: '#f9f9f9', borderRadius: '3px', fontSize: '13px' }}>
-                            <strong>{comp.code || `CE${idx + 1}`}</strong> - {comp.description || ''} {typeof comp.level !== 'undefined' && <span style={{ color: '#d32f2f' }}>({getLevelLabel(comp.level)})</span>}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div style={{ background: '#f5f5f5', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', color: '#999', fontStyle: 'italic' }}>No Aplica</div>
-                    )}
-                  </div>
+                  {!isTechnicalCareerName(importPreview.preview?.career || activeCareer) && (
+                    <div style={{ marginTop: '15px', marginBottom: '15px' }}>
+                      <strong style={{ display: 'block', marginBottom: '8px' }}>Competencias Específicas {previewSpecificCompetencies.length > 0 ? `(${previewSpecificCompetencies.length})` : ''}:</strong>
+                      {previewSpecificCompetencies.length > 0 ? (
+                        <div style={{ background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', maxHeight: '150px', overflowY: 'auto' }}>
+                          {previewSpecificCompetencies.map((comp, idx) => (
+                            <div key={idx} style={{ padding: '5px', marginBottom: '5px', background: '#f9f9f9', borderRadius: '3px', fontSize: '13px' }}>
+                              <strong>{comp.code || `CE${idx + 1}`}</strong> - {comp.description || ''} {typeof comp.level !== 'undefined' && <span style={{ color: '#d32f2f' }}>({getLevelLabel(comp.level)})</span>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ background: '#f5f5f5', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', color: '#999', fontStyle: 'italic' }}>No Aplica</div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Resultados de Aprendizaje */}
                   {importPreview.data?.learning_outcomes && importPreview.data.learning_outcomes.length > 0 && (
@@ -10876,7 +11651,7 @@ const App = () => {
         )}
 
         {/* COMPETENCIAS CATALOG */}
-        {activeMenu === 'competencias' && (
+        {activeMenu === 'competencias' && !isTechnicalCareerName(activeCareer) && (
           <div style={styles.section}>
             <h2>Catálogo de Competencias</h2>
             <div style={{ display: 'grid', gap: '20px' }}>
@@ -12921,20 +13696,22 @@ const App = () => {
                                 >
                                   👁️
                                 </button>
-                                <button
-                                  style={{ ...styles.button, padding: '6px 10px', background: '#7c3aed', color: '#fff' }}
-                                  title="Ver Matriz de Tributación"
-                                  onClick={() => {
-                                    setPlanName(plan.name)
-                                    setPlanYears(plan.years || [])
-                                    setEditingPlanId(plan.id)
-                                    const matriz = buildCompetencyMatrix(activeCareer, plan.id)
-                                    setMatrizData(matriz)
-                                    setShowMatrizModal(true)
-                                  }}
-                                >
-                                  📊
-                                </button>
+                                {!isTechnicalCareerName(activeCareer) && (
+                                  <button
+                                    style={{ ...styles.button, padding: '6px 10px', background: '#7c3aed', color: '#fff' }}
+                                    title="Ver Matriz de Tributación"
+                                    onClick={() => {
+                                      setPlanName(plan.name)
+                                      setPlanYears(plan.years || [])
+                                      setEditingPlanId(plan.id)
+                                      const matriz = buildCompetencyMatrix(activeCareer, plan.id)
+                                      setMatrizData(matriz)
+                                      setShowMatrizModal(true)
+                                    }}
+                                  >
+                                    📊
+                                  </button>
+                                )}
                                 <button
                                   style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
                                   title="Editar plan"
@@ -13227,17 +14004,19 @@ const App = () => {
                       >
                         ✏️ Editar Plan
                       </button>
-                      <button
-                        style={{ ...styles.button, padding: '6px 10px', background: '#7c3aed', color: '#fff' }}
-                        title="Ver Matriz de Tributación"
-                        onClick={() => {
-                          const matriz = buildCompetencyMatrix(activeCareer, editingPlanId)
-                          setMatrizData(matriz)
-                          setShowMatrizModal(true)
-                        }}
-                      >
-                        📊 Matriz de Tributación
-                      </button>
+                      {!isTechnicalCareerName(activeCareer) && (
+                        <button
+                          style={{ ...styles.button, padding: '6px 10px', background: '#7c3aed', color: '#fff' }}
+                          title="Ver Matriz de Tributación"
+                          onClick={() => {
+                            const matriz = buildCompetencyMatrix(activeCareer, editingPlanId)
+                            setMatrizData(matriz)
+                            setShowMatrizModal(true)
+                          }}
+                        >
+                          📊 Matriz de Tributación
+                        </button>
+                      )}
                     </div>
 
                     <h3>{planName}</h3>
@@ -15513,10 +16292,10 @@ const App = () => {
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button style={{ ...styles.button, background: '#2196F3' }} onClick={() => downloadProposalDocx(viewProposal.id)}>Descargar DOCX</button>
                   <button
-                    style={{ ...styles.button, background: viewProposal.gdoc_url ? '#bbb' : '#7c4dff' }}
+                    style={{ ...styles.button, background: (viewProposal.gdoc_url || !viewProposalDriveSettingsReady) ? '#bbb' : '#7c4dff' }}
                     onClick={() => createAndLinkProposalGdoc(viewProposal.id)}
-                    disabled={!!viewProposal.gdoc_url || viewProposalCreateGdocLoading}
-                    title={viewProposal.gdoc_url ? 'La propuesta ya tiene link de Google Docs' : 'Crear documento en Drive y vincular'}
+                    disabled={!!viewProposal.gdoc_url || viewProposalCreateGdocLoading || !viewProposalDriveSettingsReady}
+                    title={viewProposal.gdoc_url ? 'La propuesta ya tiene link de Google Docs' : (!viewProposalDriveSettingsReady ? viewProposalDriveSettingsMessage : 'Crear documento en Drive y vincular')}
                   >
                     {viewProposalCreateGdocLoading ? 'Creando en Drive...' : 'Crear en Drive y vincular'}
                   </button>
@@ -15872,15 +16651,17 @@ const App = () => {
                 <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.minimum_content || '-'}</div>
               </div>
 
-              <div style={{ marginTop: '15px' }}>
-                <h3>Competencias</h3>
-                <div style={{ whiteSpace: 'pre-wrap' }}>
-                  <strong>Genericas:</strong> {buildCompetencyText(viewProposal.generic_competencies_items || []) || viewProposal.generic_competencies || '-'}
+              {!isTechnicalCareerName(viewProposal.career || activeCareer) && (
+                <div style={{ marginTop: '15px' }}>
+                  <h3>Competencias</h3>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>
+                    <strong>Genericas:</strong> {buildCompetencyText(viewProposal.generic_competencies_items || []) || viewProposal.generic_competencies || '-'}
+                  </div>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>
+                    <strong>Especificas:</strong> {buildCompetencyText(viewProposal.specific_competencies_items || []) || viewProposal.specific_competencies || 'No Aplica'}
+                  </div>
                 </div>
-                <div style={{ whiteSpace: 'pre-wrap' }}>
-                  <strong>Especificas:</strong> {buildCompetencyText(viewProposal.specific_competencies_items || []) || viewProposal.specific_competencies || 'No Aplica'}
-                </div>
-              </div>
+              )}
 
               <div style={{ marginTop: '15px' }}>
                 <h3>Fundamentos</h3>
@@ -16075,7 +16856,7 @@ const App = () => {
         )}
 
         {/* Modal Matriz de Tributación */}
-        {showMatrizModal && matrizData && (
+        {!isTechnicalCareerName(activeCareer) && showMatrizModal && matrizData && (
           <div style={{
             position: 'fixed',
             top: 0,
