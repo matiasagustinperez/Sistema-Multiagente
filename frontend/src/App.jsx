@@ -123,6 +123,7 @@ const App = () => {
   const [viewProposalGdocInput, setViewProposalGdocInput] = useState('')
   const [viewProposalGdocError, setViewProposalGdocError] = useState('')
   const [viewProposalGdocLoading, setViewProposalGdocLoading] = useState(false)
+  const [viewProposalGdocEditMode, setViewProposalGdocEditMode] = useState(false)
   const [viewProposalCreateGdocLoading, setViewProposalCreateGdocLoading] = useState(false)
   const [viewProposalGdocUpdateAvailable, setViewProposalGdocUpdateAvailable] = useState(false)
   const [viewProposalGdocUpdateMessage, setViewProposalGdocUpdateMessage] = useState('')
@@ -180,6 +181,7 @@ const App = () => {
   const [editingProposalId, setEditingProposalId] = useState(null)
   const [editingProposalStatus, setEditingProposalStatus] = useState(null)
   const [viewProposal, setViewProposal] = useState(null)
+  const [viewProposalExportFormat, setViewProposalExportFormat] = useState('docx')
   const [isSaving, setIsSaving] = useState(false)
   const [createInDriveOnSave, setCreateInDriveOnSave] = useState(false)
   const [isCreatingInDrive, setIsCreatingInDrive] = useState(false)
@@ -3628,6 +3630,7 @@ const App = () => {
       }
       setViewProposal(data)
       setViewProposalGdocInput(data.gdoc_url || '')
+      setViewProposalGdocEditMode(false)
       setViewProposalLinkIssue('Documento creado en Drive y vinculado correctamente.')
       setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
       fetchProposals()
@@ -6011,10 +6014,11 @@ const App = () => {
     Contenidos mínimos: ${formData.contenidosMin}
     Competencias: ${buildCompetencyText(formData.competenciasGenItems)}, ${buildCompetencyText(formData.competenciasEspItems)}`
 
+      const finalPrompt = appendPromptWithActiveControls({ prompt, topic: 'methodology' })
       const res = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt: finalPrompt })
       })
       const data = await res.json()
       
@@ -6064,10 +6068,11 @@ const App = () => {
       const prompt = isTechnicalCareer
         ? `Genera ${remainingCount} objetivos de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.${competencyContext}\n\nReglas de Objetivos:\n- Deben redactarse en infinitivo (por ejemplo: analizar, identificar, diseñar, implementar).\n- Deben ser claros, concretos y evaluables.\n- Centrados en lo que el estudiante deberá lograr.\n- Un objetivo por ítem.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada objetivo.\n- Sin titulos ni encabezados.`
         : `Genera ${remainingCount} resultados de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.${competencyContext}\n\nReglas de RA:\n- Centrado en el estudiante.\n- Verbo observable y evaluable.\n- Presente del indicativo.\n- Desempeno demostrable y medible.\n- No mezclar demasiadas capacidades en un solo RA.\n- Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada RA.\n- Sin titulos ni encabezados.`
+      const finalPrompt = appendPromptWithActiveControls({ prompt, topic: 'learning_outcomes' })
       const res = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt: finalPrompt })
       })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -6127,11 +6132,119 @@ const App = () => {
     return normalizeTerminologyText(cleanedLines.join('\n').trim())
   }
 
-  const requestAiText = async ({ prompt, endpoint = 'ai-generate' }) => {
+  const normalizePromptScopeKey = (value) => String(value || '').trim().toLowerCase()
+
+  const resolveIntelligentTopicFromTarget = (target) => {
+    if (!target) return ''
+    if (isNonEmptyText(target.topic)) {
+      return normalizePromptScopeKey(target.topic)
+    }
+    if (target.type === 'ra') return 'learning_outcomes'
+    if (target.type === 'unidad') return 'units'
+    if (target.type === 'tp') return 'practicals'
+
+    const field = normalizePromptScopeKey(target.field)
+    if (!field) return ''
+
+    const fieldTopicMap = {
+      equipodocente: 'teaching_team',
+      competenciasgenitems: 'minimum_content',
+      competenciasespitems: 'minimum_content',
+      contenidosmin: 'minimum_content',
+      fundamentosp1: 'fundamentals',
+      fundamentosp2: 'fundamentals',
+      resultadosaprendizaje: 'learning_outcomes',
+      unidades: 'units',
+      trabajospracticos: 'practicals',
+      metodologia: 'methodology',
+      evaluacion: 'evaluation',
+      bibliografia: 'bibliography'
+    }
+    return fieldTopicMap[field] || ''
+  }
+
+  const appendPromptWithActiveControls = ({ prompt, topic = '' }) => {
+    const basePrompt = String(prompt || '')
+    const normalizedTopic = normalizePromptScopeKey(topic)
+    if (!basePrompt || !normalizedTopic) {
+      return basePrompt
+    }
+
+    const normalizeScope = (value) => String(value || '').trim().toLowerCase()
+    const currentCareer = normalizeScope(formData.carrera || activeCareer)
+    const currentPlan = normalizeScope(formData.plan)
+
+    const getControlScopeValue = (control, candidates) => {
+      for (const key of candidates) {
+        if (isNonEmptyText(control?.[key])) {
+          return normalizeScope(control[key])
+        }
+      }
+      return ''
+    }
+
+    const isControlEnabledForPrompt = (control) => {
+      if (!control?.is_active) return false
+      if (!isDocenteView) return true
+      if (Object.prototype.hasOwnProperty.call(docenteControlActivation, control.id)) {
+        return !!docenteControlActivation[control.id]
+      }
+      return true
+    }
+
+    const scopedControls = (Array.isArray(intelligentControls) ? intelligentControls : []).filter((control) => {
+      if (!isControlEnabledForPrompt(control)) return false
+
+      const mainTopic = normalizeScope(control.topic)
+      const associated = Array.isArray(control.associated_topics)
+        ? control.associated_topics.map((item) => normalizeScope(item)).filter(Boolean)
+        : []
+      if (mainTopic !== normalizedTopic && !associated.includes(normalizedTopic)) {
+        return false
+      }
+
+      const scopedCareer = getControlScopeValue(control, ['career', 'career_name'])
+      if (scopedCareer && currentCareer && scopedCareer !== currentCareer) {
+        return false
+      }
+
+      const scopedPlan = getControlScopeValue(control, ['plan', 'plan_name', 'study_plan'])
+      if (scopedPlan && currentPlan && scopedPlan !== currentPlan) {
+        return false
+      }
+
+      return true
+    })
+
+    if (!scopedControls.length) {
+      return basePrompt
+    }
+
+    const topicLabelMap = {
+      teaching_team: 'Equipo docente',
+      fundamentals: 'Fundamentación',
+      minimum_content: 'Contenidos mínimos',
+      learning_outcomes: 'Resultados de aprendizaje',
+      units: 'Unidades',
+      practicals: 'Trabajos prácticos',
+      methodology: 'Metodología',
+      evaluation: 'Evaluación',
+      bibliography: 'Bibliografía'
+    }
+
+    const controlsBlock = scopedControls
+      .map((control, idx) => `${idx + 1}. ${String(control.name || 'Control').trim()}: ${String(control.instruction || '').trim()}`)
+      .join('\n')
+
+    return `${basePrompt}\n\nControles activos de Control de Propuestas (bloque: ${topicLabelMap[normalizedTopic] || normalizedTopic}):\n${controlsBlock}\n\nCumple estrictamente estas reglas sin agregar explicación meta en la salida.`
+  }
+
+  const requestAiText = async ({ prompt, endpoint = 'ai-generate', topic = '' }) => {
+    const finalPrompt = appendPromptWithActiveControls({ prompt, topic })
     const res = await fetch(`http://localhost:8001/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt })
+      body: JSON.stringify({ prompt: finalPrompt })
     })
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -6161,7 +6274,7 @@ const App = () => {
       ? `Genera ${remainingCount} objetivos de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.${competencyContext}\n\nReglas de Objetivos:\n- Deben redactarse en infinitivo (por ejemplo: analizar, identificar, diseñar, implementar).\n- Deben ser claros, concretos y evaluables.\n- Centrados en lo que el estudiante deberá lograr.\n- Un objetivo por ítem.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada objetivo.\n- Sin titulos ni encabezados.`
       : `Genera ${remainingCount} resultados de aprendizaje adicionales para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.${competencyContext}\n\nReglas de RA:\n- Centrado en el estudiante.\n- Verbo observable y evaluable.\n- Presente del indicativo.\n- Desempeno demostrable y medible.\n- No mezclar demasiadas capacidades en un solo RA.\n- Estructura: verbo en presente + objeto de conocimiento + contexto/condicion + criterio.\n\nRequisitos de salida:\n- Devuelve solo una lista con ${remainingCount} items.\n- Un item por linea.\n- Solo el texto de cada RA.\n- Sin titulos ni encabezados.`
 
-    const cleaned = await requestAiText({ prompt, endpoint: 'ai-generate' })
+    const cleaned = await requestAiText({ prompt, endpoint: 'ai-generate', topic: 'learning_outcomes' })
     const generated = parseLearningOutcomesFromText(cleaned, remainingCount)
     if (generated.length === 0) {
       throw new Error(`No se pudieron interpretar los ${labels.sectionTitle.toLowerCase()}`)
@@ -6365,10 +6478,12 @@ const App = () => {
         : (resolvedMode === 'reformulate'
           ? reformulationPrompt
           : buildRevisionPrompt({ mode: resolvedMode, currentValue, label, target }))
+      const topic = resolveIntelligentTopicFromTarget(target)
+      const promptWithControls = appendPromptWithActiveControls({ prompt, topic })
       const res = await fetch(`http://localhost:8001/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt: promptWithControls })
       })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -6554,10 +6669,11 @@ const App = () => {
     const prompt = `Convierte la siguiente bibliografia ${label} a normas APA.\n\nBibliografia:\n${bibliographyRef}\n\nRequisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {"items":"..."}\n- Una referencia por linea.\n- No inventes referencias nuevas.`
 
     try {
+      const finalPrompt = appendPromptWithActiveControls({ prompt, topic: 'bibliography' })
       const res = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt: finalPrompt })
       })
       if (!res.ok) {
         return null
@@ -6639,10 +6755,11 @@ const App = () => {
 
       const namesPrompt = `Genera ${count} nombres de unidades para la asignatura ${formData.asignatura} de la carrera ${formData.carrera}.\n\nContenidos minimos (debes distribuirlos sin repetir):\n${formData.contenidosMin}\n\nRequisitos de salida:\n- Devuelve solo una lista con ${count} items.\n- Un nombre por linea.\n- Sin JSON, sin encabezados.`
 
+      const namesPromptWithControls = appendPromptWithActiveControls({ prompt: namesPrompt, topic: 'units' })
       const namesRes = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: namesPrompt })
+        body: JSON.stringify({ prompt: namesPromptWithControls })
       })
       if (!namesRes.ok) {
         const errorData = await namesRes.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -6685,10 +6802,11 @@ const App = () => {
         const unitPrompt = `Escribe los contenidos y bibliografia de la unidad "${unitName}" en funcion de los contenidos minimos y manteniendo coherencia con las unidades anteriores.\n\nContenidos minimos (debes distribuirlos sin repetir):\n${formData.contenidosMin}\n\nBibliografia de referencia (usa y asigna en basica y complementaria para la unidad, en APA):\n${bibliographyForUnits}\n\n${preferenciaInput ? `Preferencias del docente para el orden/énfasis:\n${preferenciaInput}\n\n` : ''}${previousUnits ? `Unidades anteriores:\n${previousUnits}\n\n` : ''}Requisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {"nombre":"...","contenidos":"...","bibBasica":"...","bibCompl":"..."}.\n- Incluye al menos 2 referencias en bibBasica y 1 en bibCompl.\n- No inventes referencias nuevas, solo usa las provistas.\n- No mezcles ni cambies la categoria basica/complementaria.\n- Sin encabezados.`
 
         setAiSection(`Unidad ${i + 1}/${unitNames.length}`)
+        const unitPromptWithControls = appendPromptWithActiveControls({ prompt: unitPrompt, topic: 'units' })
         const unitRes = await fetch('http://localhost:8001/ai-generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: unitPrompt })
+          body: JSON.stringify({ prompt: unitPromptWithControls })
         })
         if (!unitRes.ok) {
           const errorData = await unitRes.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -6801,10 +6919,11 @@ const App = () => {
     try {
       const namesPrompt = `Genera ${count} nombres de trabajos practicos para la asignatura ${currentFormData.asignatura} de la carrera ${currentFormData.carrera}.\n\nUnidades desarrolladas:\n${unitsList}\n\nResultados de aprendizaje:\n${raList}\n\n${tpComment ? `Comentario del docente (obligatorio, debes seguirlo):\n${tpComment}\n\n` : ''}Requisitos de salida:\n- Devuelve solo una lista con ${count} items.\n- Un nombre por linea.\n- Sin JSON, sin encabezados.\n- Los nombres deben reflejar el comentario del docente.`
 
+      const namesPromptWithControls = appendPromptWithActiveControls({ prompt: namesPrompt, topic: 'practicals' })
       const namesRes = await fetch('http://localhost:8001/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: namesPrompt })
+        body: JSON.stringify({ prompt: namesPromptWithControls })
       })
       if (!namesRes.ok) {
         const errorData = await namesRes.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -6836,10 +6955,11 @@ const App = () => {
         const tpPrompt = `Genera el Trabajo Practico ${tpNumber} ("${tpName}") para la asignatura ${currentFormData.asignatura} de la carrera ${currentFormData.carrera}.\n\nUnidades desarrolladas:\n${unitsList}\n\nResultados de aprendizaje (deben cubrirse sin modificar el texto):\n${raList}\n\n${tpComment ? `Comentario del docente (obligatorio, debes seguirlo):\n${tpComment}\n\n` : ''}${previousTps ? `TP anteriores:\n${previousTps}\n\n` : ''}Requisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {\"numero\":\"${tpNumber}\",\"nombre\":\"${tpName}\",\"objetivo\":\"...\",\"actividades\":\"...\",\"materiales\":\"...\",\"raIndices\":[1,2]}.\n- El objetivo debe incluir literalmente los RA usados (sin cambiarlos).\n- Actividades deben cubrir el objetivo y respetar el comentario del docente.\n- Materiales en lista separada por lineas.\n- raIndices debe contener los numeros de RA usados.\n- No incluyas ambito.`
 
         setAiSection(`TP ${tpNumber}/${tpNames.length}`)
+        const tpPromptWithControls = appendPromptWithActiveControls({ prompt: tpPrompt, topic: 'practicals' })
         const tpRes = await fetch('http://localhost:8001/ai-generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: tpPrompt })
+          body: JSON.stringify({ prompt: tpPromptWithControls })
         })
         if (!tpRes.ok) {
           const errorData = await tpRes.json().catch(() => ({ detail: 'Error desconocido' }))
@@ -6861,10 +6981,11 @@ const App = () => {
         let materiales = parsedTp.materiales || ''
         if (!isNonEmptyText(actividades) || !isNonEmptyText(materiales)) {
           const fillPrompt = `Completa actividades y materiales para el TP ${tpNumber} sin cambiar el objetivo.\n\nObjetivo:\n${parsedTp.objetivo}\n\nRequisitos de salida:\n- Devuelve solo un JSON valido, sin texto extra.\n- Formato: {\"actividades\":\"...\",\"materiales\":\"...\"}.\n- Materiales en lista separada por lineas.`
+          const fillPromptWithControls = appendPromptWithActiveControls({ prompt: fillPrompt, topic: 'practicals' })
           const fillRes = await fetch('http://localhost:8001/ai-generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: fillPrompt })
+            body: JSON.stringify({ prompt: fillPromptWithControls })
           })
           if (fillRes.ok) {
             const fillData = await fillRes.json().catch(() => null)
@@ -7306,10 +7427,12 @@ const App = () => {
       setViewProposalOriginMenu(activeMenu || '')
       setViewProposalExpandedSuggestions({})
       setViewProposal(data)
+      setViewProposalExportFormat('docx')
       setViewProposalIntelligentSummary(null)
       setViewProposalIntelligentLoading(true)
       setViewProposalLinkIssue('')
       setViewProposalGdocInput(data.gdoc_url || '')
+      setViewProposalGdocEditMode(false)
       setViewProposalGdocError('')
       setViewProposalGdocUpdateAvailable(false)
       setViewProposalGdocUpdateMessage('')
@@ -7356,12 +7479,16 @@ const App = () => {
     }
   }
 
-  const downloadProposalDocx = async (proposalId) => {
+  const downloadProposalExport = async (proposalId, format = 'docx') => {
     try {
-      setStatusMsg('Generando documento...')
+      const normalizedFormat = String(format || 'docx').toLowerCase()
+      const allowedFormats = ['docx', 'pdf', 'json', 'xml']
+      const exportFormat = allowedFormats.includes(normalizedFormat) ? normalizedFormat : 'docx'
+
+      setStatusMsg(`Exportando ${exportFormat.toUpperCase()}...`)
       setStatusType('info')
       
-      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/docx`)
+      const res = await fetch(`${API_BASE_URL}/proposals/${proposalId}/export?format=${encodeURIComponent(exportFormat)}`)
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
         throw new Error(errorData.detail || `Error ${res.status}`)
@@ -7369,7 +7496,7 @@ const App = () => {
       
       // Extract filename from Content-Disposition header
       const disposition = res.headers.get('Content-Disposition')
-      let filename = `Propuesta_${proposalId}.docx` // default fallback
+      let filename = `Propuesta_${proposalId}.${exportFormat}` // default fallback
       if (disposition && disposition.includes('filename*=utf-8\'\'')) {
         const filenameMatch = disposition.match(/filename\*=utf-8''(.+)/)
         if (filenameMatch && filenameMatch[1]) {
@@ -7391,7 +7518,7 @@ const App = () => {
       link.click()
       link.remove()
       window.URL.revokeObjectURL(url)
-      setStatusMsg(`Propuesta #${proposalId} descargada`)
+      setStatusMsg(`Propuesta #${proposalId} exportada en ${exportFormat.toUpperCase()}`)
       setStatusType('success')
     } catch (err) {
       const msg = err.message === 'Failed to fetch' 
@@ -7401,6 +7528,10 @@ const App = () => {
       setStatusType('error')
       console.error('Download error:', err)
     }
+  }
+
+  const downloadProposalDocx = async (proposalId) => {
+    return downloadProposalExport(proposalId, 'docx')
   }
 
   const handleImportDocxFile = async (event) => {
@@ -7846,12 +7977,12 @@ const App = () => {
 
       updateProgress(2, 'Generando Fundamentación: Importancia')
       const fundamentosP1Prompt = buildAiPrompt('Fundamentos - Importancia', { type: 'form', field: 'fundamentosP1' })
-      const fundamentosP1 = await requestAiText({ prompt: fundamentosP1Prompt, endpoint: 'ai-generate' })
+      const fundamentosP1 = await requestAiText({ prompt: fundamentosP1Prompt, endpoint: 'ai-generate', topic: 'fundamentals' })
       updateFormData('fundamentosP1', fundamentosP1)
 
       updateProgress(3, 'Generando Fundamentación: Perfil Profesional')
       const fundamentosP2Prompt = buildAiPrompt('Fundamentos - Perfil Profesional', { type: 'form', field: 'fundamentosP2' })
-      const fundamentosP2 = await requestAiText({ prompt: fundamentosP2Prompt, endpoint: 'ai-generate' })
+      const fundamentosP2 = await requestAiText({ prompt: fundamentosP2Prompt, endpoint: 'ai-generate', topic: 'fundamentals' })
       updateFormData('fundamentosP2', fundamentosP2)
 
       updateProgress(4, 'Generando Resultados de Aprendizaje / Objetivos')
@@ -7891,7 +8022,7 @@ const App = () => {
       const metodologiaPrompt = isNonEmptyText(fullProposalDraft.metodologiaNotes)
         ? `${metodologiaPromptBase}\n\nConsideraciones adicionales del docente:\n${fullProposalDraft.metodologiaNotes}`
         : metodologiaPromptBase
-      const metodologia = await requestAiText({ prompt: metodologiaPrompt, endpoint: 'ai-generate' })
+      const metodologia = await requestAiText({ prompt: metodologiaPrompt, endpoint: 'ai-generate', topic: 'methodology' })
       updateFormData('metodologia', metodologia)
 
       updateProgress(8, 'Generando Evaluación')
@@ -7908,7 +8039,7 @@ const App = () => {
       const evaluacionPrompt = isNonEmptyText(fullProposalDraft.evaluacionNotes)
         ? `${evaluacionPromptBase}\n\nConsideraciones adicionales del docente:\n${fullProposalDraft.evaluacionNotes}`
         : evaluacionPromptBase
-      const evaluacion = await requestAiText({ prompt: evaluacionPrompt, endpoint: 'ai-generate' })
+      const evaluacion = await requestAiText({ prompt: evaluacionPrompt, endpoint: 'ai-generate', topic: 'evaluation' })
       updateFormData('evaluacion', evaluacion)
 
       setStatusMsg('Propuesta generada con IA. Si quieres que te ayude, elimina primero las secciones generadas.')
@@ -16286,11 +16417,55 @@ const App = () => {
         {/* VIEW PROPOSAL MODAL */}
         {viewProposal && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', padding: '30px', borderRadius: '8px', maxWidth: '900px', maxHeight: '80vh', overflowY: 'auto' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2>Resumen de Propuesta #{viewProposal.id}</h2>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button style={{ ...styles.button, background: '#2196F3' }} onClick={() => downloadProposalDocx(viewProposal.id)}>Descargar DOCX</button>
+            <div style={{ background: '#fff', borderRadius: '8px', width: '95vw', maxWidth: '1300px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+
+              {/* HEADER FIJO: título + botón cerrar */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 30px', borderBottom: '1px solid #e2e8f0', flexShrink: 0 }}>
+                <h2 style={{ margin: 0 }}>Resumen de Propuesta: {viewProposal.subject || viewProposal.title || `#${viewProposal.id}`}</h2>
+                <button
+                  style={{ ...styles.button, background: '#999', marginRight: 0 }}
+                  onClick={() => {
+                    setViewProposal(null)
+                    setViewProposalOriginMenu('')
+                    setViewProposalExpandedSuggestions({})
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              {/* CUERPO SCROLLEABLE */}
+              <div style={{ overflowY: 'auto', flex: 1, padding: '24px 30px' }}>
+                <div style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'stretch', overflowX: 'auto', paddingBottom: '4px', marginBottom: '16px' }}>
+                  <select
+                    value={viewProposalExportFormat}
+                    onChange={(e) => setViewProposalExportFormat(e.target.value)}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: '6px',
+                      border: '2px solid #2196F3',
+                      background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
+                      color: '#0d47a1',
+                      fontWeight: '600',
+                      fontSize: '13px',
+                      minWidth: '120px',
+                      cursor: 'pointer',
+                      outline: 'none',
+                      boxShadow: '0 2px 6px rgba(33,150,243,0.25)'
+                    }}
+                    title="Formato de exportación"
+                  >
+                    <option value="docx">📄 DOCX</option>
+                    <option value="pdf">📕 PDF</option>
+                    <option value="json">🔧 JSON</option>
+                    <option value="xml">📋 XML</option>
+                  </select>
+                  <button
+                    style={{ ...styles.button, background: '#2196F3' }}
+                    onClick={() => downloadProposalExport(viewProposal.id, viewProposalExportFormat)}
+                  >
+                    Exportar {String(viewProposalExportFormat || 'docx').toUpperCase()}
+                  </button>
                   <button
                     style={{ ...styles.button, background: (viewProposal.gdoc_url || !viewProposalDriveSettingsReady) ? '#bbb' : '#7c4dff' }}
                     onClick={() => createAndLinkProposalGdoc(viewProposal.id)}
@@ -16323,18 +16498,7 @@ const App = () => {
                   >
                     Desvincular link
                   </button>
-                  <button
-                    style={{ ...styles.button, background: '#999' }}
-                    onClick={() => {
-                      setViewProposal(null)
-                      setViewProposalOriginMenu('')
-                      setViewProposalExpandedSuggestions({})
-                    }}
-                  >
-                    Cerrar
-                  </button>
                 </div>
-              </div>
 
               {viewProposalLinkIssue && (
                 <div style={{ marginTop: '12px', padding: '10px', background: '#fff3e0', borderRadius: '6px', border: '1px solid #ffcc80', color: '#b35b00' }}>
@@ -16573,24 +16737,48 @@ const App = () => {
               </div>
 
               <div style={{ marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                <div style={{ fontWeight: 600, marginBottom: '8px', color: '#1a3d5c' }}>Vincular Google Docs</div>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  <input
-                    style={{ ...styles.input, marginBottom: 0 }}
-                    placeholder="https://docs.google.com/document/d/..."
-                    value={viewProposalGdocInput}
-                    onChange={(e) => setViewProposalGdocInput(e.target.value)}
-                  />
-                  <button
-                    style={{ ...styles.button, background: '#4caf50' }}
-                    onClick={() => linkProposalGdoc(viewProposal.id)}
-                    disabled={viewProposalGdocLoading}
-                  >
-                    {viewProposalGdocLoading ? 'Validando...' : 'Validar y vincular'}
-                  </button>
-                </div>
-                {viewProposalGdocError && (
-                  <div style={{ marginTop: '8px', color: '#b00020' }}>{viewProposalGdocError}</div>
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: '#1a3d5c' }}>Google Docs</div>
+                {viewProposal.gdoc_url && !viewProposalGdocEditMode ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '13px', color: '#15803d', background: '#dcfce7', border: '1px solid #86efac', borderRadius: '6px', padding: '6px 12px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      ✅ Enlazado
+                    </span>
+                    <button
+                      style={{ ...styles.button, background: '#64748b', marginRight: 0, whiteSpace: 'nowrap' }}
+                      onClick={() => { setViewProposalGdocEditMode(true); setViewProposalGdocInput(viewProposal.gdoc_url || '') }}
+                    >
+                      Cambiar enlace
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <input
+                        style={{ ...styles.input, marginBottom: 0 }}
+                        placeholder="https://docs.google.com/document/d/..."
+                        value={viewProposalGdocInput}
+                        onChange={(e) => setViewProposalGdocInput(e.target.value)}
+                      />
+                      <button
+                        style={{ ...styles.button, background: '#4caf50', whiteSpace: 'nowrap' }}
+                        onClick={() => { linkProposalGdoc(viewProposal.id); setViewProposalGdocEditMode(false) }}
+                        disabled={viewProposalGdocLoading}
+                      >
+                        {viewProposalGdocLoading ? 'Validando...' : 'Validar y vincular'}
+                      </button>
+                      {viewProposalGdocEditMode && (
+                        <button
+                          style={{ ...styles.button, background: '#999', marginRight: 0, whiteSpace: 'nowrap' }}
+                          onClick={() => { setViewProposalGdocEditMode(false); setViewProposalGdocError('') }}
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
+                    {viewProposalGdocError && (
+                      <div style={{ marginTop: '8px', color: '#b00020' }}>{viewProposalGdocError}</div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -16703,6 +16891,7 @@ const App = () => {
                 <h3>Observaciones</h3>
                 <div style={{ whiteSpace: 'pre-wrap' }}>{viewProposal.observations || '-'}</div>
               </div>
+              </div>{/* fin body scrolleable */}
             </div>
           </div>
         )}

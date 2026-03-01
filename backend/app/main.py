@@ -2,7 +2,7 @@ import os
 import glob
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Body
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -14,15 +14,19 @@ from .docx_import import import_proposal_from_docx
 from openai import OpenAI
 import shutil
 import tempfile
+import subprocess
 import unicodedata
 import re
 import hashlib
 import json
 import ast
 import mimetypes
+import xml.etree.ElementTree as ET
+import textwrap
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
+from urllib.parse import quote
 import requests
 
 app = FastAPI(title="TesisMCD API")
@@ -674,6 +678,297 @@ def build_proposal_docx_filename(proposal: models.Proposal) -> str:
     subject_clean = re.sub(r'[<>:"/\\|?*]', '', subject)
     year_display = f"{year}°" if str(year).strip() else "0°"
     return f"{year_display}_{quarter} - {subject_clean}.docx"
+
+
+def build_download_headers(filename: str) -> dict:
+    ascii_fallback = unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode("ascii")
+    ascii_fallback = ascii_fallback or "export"
+    encoded = quote(filename)
+    return {
+        "Content-Disposition": f"attachment; filename=\"{ascii_fallback}\"; filename*=utf-8''{encoded}"
+    }
+
+
+def build_proposal_export_basename(proposal: models.Proposal) -> str:
+    return os.path.splitext(build_proposal_docx_filename(proposal))[0]
+
+
+def sanitize_xml_tag(tag: str) -> str:
+    candidate = re.sub(r"[^a-zA-Z0-9_\-]", "_", str(tag or "item"))
+    if not candidate:
+        candidate = "item"
+    if not re.match(r"^[a-zA-Z_]", candidate):
+        candidate = f"n_{candidate}"
+    return candidate
+
+
+def append_xml_value(parent: ET.Element, key: str, value) -> None:
+    tag = sanitize_xml_tag(key)
+
+    if isinstance(value, dict):
+        node = ET.SubElement(parent, tag)
+        for child_key, child_value in value.items():
+            append_xml_value(node, child_key, child_value)
+        return
+
+    if isinstance(value, list):
+        node = ET.SubElement(parent, tag)
+        for item in value:
+            append_xml_value(node, "item", item)
+        return
+
+    node = ET.SubElement(parent, tag)
+    node.text = "" if value is None else str(value)
+
+
+def build_proposal_xml_bytes(payload: dict) -> bytes:
+    root = ET.Element("proposal")
+    for key, value in payload.items():
+        append_xml_value(root, key, value)
+
+    xml_buffer = BytesIO()
+    ET.ElementTree(root).write(xml_buffer, encoding="utf-8", xml_declaration=True)
+    return xml_buffer.getvalue()
+
+
+def resolve_soffice_executable() -> str | None:
+    env_candidate = os.getenv("SOFFICE_PATH")
+    if env_candidate and os.path.isfile(env_candidate):
+        return env_candidate
+
+    for cmd in ("soffice", "soffice.exe"):
+        in_path = shutil.which(cmd)
+        if in_path:
+            return in_path
+
+    common_paths = [
+        r"C:/Program Files/LibreOffice/program/soffice.exe",
+        r"C:/Program Files (x86)/LibreOffice/program/soffice.exe",
+    ]
+    for candidate in common_paths:
+        if os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
+def convert_docx_to_pdf_with_docx2pdf(docx_path: str, pdf_path: str) -> tuple[str | None, str | None]:
+    try:
+        from docx2pdf import convert as docx2pdf_convert  # type: ignore
+    except Exception as exc:
+        return None, str(exc)
+
+    try:
+        docx2pdf_convert(docx_path, pdf_path)
+    except Exception as exc:
+        return None, str(exc)
+
+    if os.path.exists(pdf_path):
+        return pdf_path, None
+    return None, "docx2pdf finalizó pero no generó archivo PDF"
+
+
+def convert_docx_to_pdf(docx_path: str) -> tuple[str, str]:
+    pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
+
+    converted_by_word, word_error = convert_docx_to_pdf_with_docx2pdf(docx_path, pdf_path)
+    if converted_by_word:
+        return converted_by_word, "word"
+
+    soffice = resolve_soffice_executable()
+    if not soffice:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "No se pudo exportar a PDF manteniendo el formato DOCX. "
+                "Instalá LibreOffice (soffice en PATH) o Microsoft Word con docx2pdf. "
+                f"Detalle docx2pdf: {word_error or 'no disponible'}"
+            ),
+        )
+
+    output_dir = os.path.dirname(docx_path)
+    command = [
+        soffice,
+        "--headless",
+        "--convert-to",
+        "pdf:writer_pdf_Export",
+        "--outdir",
+        output_dir,
+        docx_path,
+    ]
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo convertir DOCX a PDF: tiempo de espera agotado en LibreOffice.",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo convertir DOCX a PDF: {str(exc)}",
+        )
+
+    if result.returncode != 0 or not os.path.exists(pdf_path):
+        error = (result.stderr or result.stdout or "").strip()
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo convertir DOCX a PDF. {error or 'Sin detalle adicional.'}",
+        )
+
+    return pdf_path, "libreoffice"
+
+
+def convert_docx_to_pdf_with_libreoffice(docx_path: str) -> str:
+    soffice = resolve_soffice_executable()
+    if not soffice:
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo exportar a PDF: LibreOffice (soffice) no está disponible.",
+        )
+
+    output_dir = os.path.dirname(docx_path)
+    pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
+    command = [
+        soffice,
+        "--headless",
+        "--convert-to",
+        "pdf:writer_pdf_Export",
+        "--outdir",
+        output_dir,
+        docx_path,
+    ]
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo convertir DOCX a PDF: tiempo de espera agotado en LibreOffice.",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo convertir DOCX a PDF con LibreOffice: {str(exc)}",
+        )
+
+    if result.returncode != 0 or not os.path.exists(pdf_path):
+        error = (result.stderr or result.stdout or "").strip()
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo convertir DOCX a PDF con LibreOffice. {error or 'Sin detalle adicional.'}",
+        )
+
+    return pdf_path
+
+
+def make_json_compatible(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    if isinstance(value, dict):
+        return {str(key): make_json_compatible(item) for key, item in value.items()}
+
+    if isinstance(value, list):
+        return [make_json_compatible(item) for item in value]
+
+    if isinstance(value, tuple):
+        return [make_json_compatible(item) for item in value]
+
+    return value
+
+
+def _format_export_field_label(key: str) -> str:
+    cleaned = str(key or "").strip().replace("_", " ")
+    return cleaned.capitalize() if cleaned else "Campo"
+
+
+def _flatten_export_payload_lines(value, level: int = 0, key_name: str | None = None) -> list[str]:
+    indent = "  " * max(level, 0)
+    lines: list[str] = []
+
+    if isinstance(value, dict):
+        if key_name is not None:
+            lines.append(f"{indent}{_format_export_field_label(key_name)}:")
+        next_level = level + 1 if key_name is not None else level
+        for child_key, child_value in value.items():
+            lines.extend(_flatten_export_payload_lines(child_value, next_level, str(child_key)))
+        return lines
+
+    if isinstance(value, list):
+        if key_name is not None:
+            lines.append(f"{indent}{_format_export_field_label(key_name)}:")
+        next_level = level + 1 if key_name is not None else level
+        if not value:
+            lines.append(f"{'  ' * next_level}-")
+            return lines
+        for index, item in enumerate(value, start=1):
+            if isinstance(item, (dict, list)):
+                lines.append(f"{'  ' * next_level}- Item {index}")
+                lines.extend(_flatten_export_payload_lines(item, next_level + 1))
+            else:
+                text = str(item or "").strip()
+                lines.append(f"{'  ' * next_level}- {text}")
+        return lines
+
+    text_value = str(value or "").strip()
+    if key_name is not None:
+        lines.append(f"{indent}{_format_export_field_label(key_name)}: {text_value}")
+    else:
+        lines.append(f"{indent}{text_value}")
+    return lines
+
+
+def generate_pdf_from_payload(payload: dict, output_path: str) -> str:
+    try:
+        from reportlab.lib.pagesizes import A4  # type: ignore
+        from reportlab.pdfgen import canvas  # type: ignore
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo exportar a PDF: falta la dependencia reportlab. Instalá requirements.txt.",
+        )
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    title = str(payload.get("subject") or payload.get("title") or "Propuesta")
+    c = canvas.Canvas(output_path, pagesize=A4)
+    page_width, page_height = A4
+    margin_x = 40
+    margin_top = 48
+    margin_bottom = 40
+    line_height = 13
+
+    def new_page() -> tuple[object, float]:
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(margin_x, page_height - margin_top, "Propuesta Académica")
+        c.setFont("Helvetica", 11)
+        c.drawString(margin_x, page_height - margin_top - 16, title)
+        text_obj = c.beginText(margin_x, page_height - margin_top - 36)
+        text_obj.setFont("Helvetica", 9)
+        return text_obj, page_height - margin_top - 36
+
+    text_obj, current_y = new_page()
+
+    lines = _flatten_export_payload_lines(payload)
+    for raw_line in lines:
+        line_chunks = str(raw_line).splitlines() or [""]
+        for chunk in line_chunks:
+            wrapped = textwrap.wrap(chunk, width=120, break_long_words=False, break_on_hyphens=False)
+            if not wrapped:
+                wrapped = [""]
+            for part in wrapped:
+                if current_y <= margin_bottom:
+                    c.drawText(text_obj)
+                    c.showPage()
+                    text_obj, current_y = new_page()
+                text_obj.textLine(part)
+                current_y -= line_height
+
+    c.drawText(text_obj)
+    c.save()
+    return output_path
 
 
 @app.post("/proposals/{proposal_id}/validate-gdoc")
@@ -5072,6 +5367,7 @@ def build_proposal_response(db: Session, proposal: models.Proposal) -> dict:
 
 @app.on_event("startup")
 def on_startup():
+    print(f"[DEBUG] Loaded backend module: {__file__}")
     # Validate required environment variables
     required_env_vars = ["OPENAI_API_KEY"]
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
@@ -6069,48 +6365,89 @@ def download_proposal_docx(
     db: Session = Depends(get_db),
     background: BackgroundTasks = None,
 ):
+    return export_proposal(
+        proposal_id=proposal_id,
+        format="docx",
+        db=db,
+        background=background,
+    )
+
+
+@app.get("/proposals/{proposal_id}/export")
+def export_proposal(
+    proposal_id: int,
+    format: str = "docx",
+    db: Session = Depends(get_db),
+    background: BackgroundTasks = None,
+):
     proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
-    if not os.path.exists(TEMPLATE_PATH):
-        raise HTTPException(status_code=500, detail="Template Propuestas.docx not found")
 
-    try:
-        from .docx_export import generate_proposal_docx
-    except ImportError:
-        raise HTTPException(status_code=500, detail="python-docx no esta instalado")
+    export_format = (format or "docx").strip().lower()
+    allowed_formats = {"docx", "pdf", "json", "xml"}
+    if export_format not in allowed_formats:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato no soportado: {export_format}. Formatos válidos: docx, pdf, json, xml",
+        )
 
-    output_path = generate_proposal_docx(proposal, TEMPLATE_PATH)
-    if background is not None:
-        output_dir = os.path.dirname(output_path)
-        background.add_task(shutil.rmtree, output_dir, ignore_errors=True)
+    basename = build_proposal_export_basename(proposal)
+    payload = make_json_compatible(build_proposal_response(db, proposal))
 
-    # Generate filename: Año°_Cuatrimestre - Asignatura.docx
-    year = proposal.year_of_career or "0"
-    quarter_raw = proposal.quarter or "0"
-    subject = proposal.subject or "Sin_Asignatura"
-    
-    # Normalize quarter to 1° , 2° , or A
-    import re
-    quarter_lower = str(quarter_raw).lower()
-    if "anual" in quarter_lower or quarter_lower.strip() == "a":
-        quarter = "A"
-    elif "1" in quarter_lower or "primer" in quarter_lower:
-        quarter = "1°"
-    elif "2" in quarter_lower or "segundo" in quarter_lower:
-        quarter = "2°"
-    else:
-        quarter = quarter_raw
-    
-    # Clean filename (remove invalid characters)
-    subject_clean = re.sub(r'[<>:"/\\|?*]', '', subject)
-    
-    year_display = f"{year}°" if str(year).strip() else "0°"
-    filename = f"{year_display}_{quarter} - {subject_clean}.docx"
-    return FileResponse(
-        output_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=filename,
+    if export_format in {"docx", "pdf"}:
+        if not os.path.exists(TEMPLATE_PATH):
+            raise HTTPException(status_code=500, detail="Template Propuestas.docx not found")
+
+        try:
+            from .docx_export import generate_proposal_docx
+        except ImportError:
+            raise HTTPException(status_code=500, detail="python-docx no esta instalado")
+
+        docx_path = generate_proposal_docx(proposal, TEMPLATE_PATH)
+        output_dir = os.path.dirname(docx_path)
+        if background is not None:
+            background.add_task(shutil.rmtree, output_dir, ignore_errors=True)
+
+        if export_format == "docx":
+            filename = f"{basename}.docx"
+            return FileResponse(
+                docx_path,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                filename=filename,
+                headers=build_download_headers(filename),
+            )
+
+        renderer_used = "libreoffice"
+        try:
+            pdf_path = convert_docx_to_pdf_with_libreoffice(docx_path)
+        except HTTPException:
+            pdf_path, renderer_used = convert_docx_to_pdf(docx_path)
+        filename = f"{basename}.pdf"
+        pdf_headers = build_download_headers(filename)
+        pdf_headers["X-PDF-Renderer"] = renderer_used
+        return FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=filename,
+            headers=pdf_headers,
+        )
+
+    if export_format == "json":
+        filename = f"{basename}.json"
+        body = json.dumps(payload, ensure_ascii=False, indent=2)
+        return Response(
+            content=body,
+            media_type="application/json; charset=utf-8",
+            headers=build_download_headers(filename),
+        )
+
+    filename = f"{basename}.xml"
+    xml_bytes = build_proposal_xml_bytes(payload)
+    return Response(
+        content=xml_bytes,
+        media_type="application/xml; charset=utf-8",
+        headers=build_download_headers(filename),
     )
 
 
