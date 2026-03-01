@@ -134,6 +134,7 @@ class ProposalBase(BaseModel):
     gdoc_last_synced: Optional[datetime] = None
     gdoc_status: Optional[str] = None
     intelligent_status: Optional[str] = None
+    editing_locked: Optional[bool] = False
 
 class ProposalCreate(ProposalBase):
     create_in_drive: Optional[bool] = None
@@ -174,6 +175,7 @@ class ProposalUpdate(BaseModel):
     gdoc_url: Optional[str] = None
     create_in_drive: Optional[bool] = None
     intelligent_status: Optional[str] = None
+    editing_locked: Optional[bool] = None
 
 class Proposal(ProposalBase):
     id: int
@@ -222,6 +224,7 @@ class ProposalOut(BaseModel):
     gdoc_last_synced: Optional[datetime] = None
     intelligent_status: Optional[str] = None
     status: Optional[str] = None
+    editing_locked: Optional[bool] = False
     created_at: datetime
     updated_at: Optional[datetime] = None
     study_subject_id: Optional[int] = None
@@ -740,4 +743,38 @@ class AccreditationWorkPlanActivityOut(BaseModel):
     tasks: List[AccreditationWorkPlanTaskOut] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+# ── Evaluative Instruments ──────────────────────────────────────────────────
+
+class EvaluativeInstrumentOut(BaseModel):
+    id: int
+    career: str
+    study_plan: Optional[str] = None
+    subject: str
+    instrument_type: str
+    title: Optional[str] = None
+    original_filename: str
+    stored_filename: str
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    gdrive_url: Optional[str] = None
+    gdrive_file_id: Optional[str] = None
+    uploaded_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EvaluativeInstrumentFolderOut(BaseModel):
+    id: int
+    career: str
+    study_plan: Optional[str] = None
+    subject: str
+    gdrive_folder_url: Optional[str] = None
+    gdrive_folder_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 

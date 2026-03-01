@@ -2,7 +2,7 @@ import os
 import glob
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Body
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -119,6 +119,7 @@ async def import_proposal_gdoc_url(
 
 UPLOAD_FOLDER = os.getenv("LOCAL_UPLOAD_PATH", "./data/uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+INSTRUMENTS_FOLDER = os.path.join(os.path.dirname(os.path.abspath(UPLOAD_FOLDER)) if not os.path.isabs(UPLOAD_FOLDER) else os.path.dirname(UPLOAD_FOLDER), "instruments")
 TEMPLATE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Template Propuestas.docx"))
 
 
@@ -639,6 +640,150 @@ def drive_auth_debug():
         },
         "raw": about,
     }
+
+
+# ── OAuth Google Re-Auth ──────────────────────────────────────────────────────
+
+_OAUTH_SCOPES = ["https://www.googleapis.com/auth/drive"]
+_OAUTH_REDIRECT_URI = "http://127.0.0.1:8011/auth/google/callback"
+
+
+def _build_oauth_flow(redirect_uri: str = _OAUTH_REDIRECT_URI):
+    """Crea un Flow de OAuth usando oauth-client.json o variables de entorno."""
+    from google_auth_oauthlib.flow import Flow
+
+    client_secrets_path = os.path.join(backend_dir, "secrets", "oauth-client.json")
+    if os.path.exists(client_secrets_path):
+        return Flow.from_client_secrets_file(
+            client_secrets_path,
+            scopes=_OAUTH_SCOPES,
+            redirect_uri=redirect_uri,
+        )
+    # Fallback a variables de entorno
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="No se encontraron credenciales OAuth de Google (oauth-client.json o variables de entorno).")
+    client_config = {
+        "installed": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [redirect_uri],
+        }
+    }
+    return Flow.from_client_config(client_config, scopes=_OAUTH_SCOPES, redirect_uri=redirect_uri)
+
+
+@app.get("/auth/google/authorize")
+def google_auth_authorize():
+    """Genera la URL de autorización OAuth para Google Drive y la devuelve al frontend."""
+    try:
+        flow = _build_oauth_flow()
+    except ImportError:
+        raise HTTPException(status_code=500, detail="google-auth-oauthlib no está instalado.")
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true",
+    )
+    return {"auth_url": auth_url}
+
+
+@app.get("/auth/google/callback", response_class=HTMLResponse)
+def google_auth_callback(code: str = None, error: str = None):
+    """
+    Callback OAuth de Google. Intercambia el código por tokens,
+    actualiza GOOGLE_OAUTH_REFRESH_TOKEN en backend/.env y recarga las variables.
+    """
+    _SUCCESS_HTML = """<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Autorización exitosa – TesisMCD</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; display: flex; align-items: center;
+           justify-content: center; min-height: 100vh; margin: 0; background: #f0fdf4; }}
+    .card {{ background: white; border-radius: 12px; padding: 40px; text-align: center;
+             box-shadow: 0 4px 24px rgba(0,0,0,.08); max-width: 400px; }}
+    h1 {{ color: #15803d; margin-top: 0; }}
+    p {{ color: #555; line-height: 1.6; }}
+    .icon {{ font-size: 48px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✅</div>
+    <h1>Autorización exitosa</h1>
+    <p>La aplicación ya tiene acceso a Google Drive.<br>
+       Podés cerrar esta ventana y reintentar la operación.</p>
+    <script>setTimeout(() => window.close(), 3000);</script>
+  </div>
+</body>
+</html>"""
+
+    _ERROR_HTML_TPL = """<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Error de autorización</title>
+<style>body{{font-family:system-ui,sans-serif;display:flex;align-items:center;
+justify-content:center;min-height:100vh;margin:0;background:#fff5f5;}}
+.card{{background:white;border-radius:12px;padding:40px;text-align:center;
+box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:400px;}}
+h1{{color:#c62828;margin-top:0;}}p{{color:#555;}}</style></head>
+<body><div class="card"><div style="font-size:48px">❌</div>
+<h1>Error de autorización</h1><p>{msg}</p></div></body></html>"""
+
+    if error:
+        return HTMLResponse(_ERROR_HTML_TPL.format(msg=f"Google reportó: {error}"), status_code=400)
+    if not code:
+        return HTMLResponse(_ERROR_HTML_TPL.format(msg="No se recibió el código de autorización."), status_code=400)
+
+    try:
+        flow = _build_oauth_flow()
+    except ImportError:
+        return HTMLResponse(_ERROR_HTML_TPL.format(msg="google-auth-oauthlib no está instalado."), status_code=500)
+    except HTTPException as exc:
+        return HTMLResponse(_ERROR_HTML_TPL.format(msg=exc.detail), status_code=500)
+
+    try:
+        import os as _os
+        _os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # permite http en localhost
+        flow.fetch_token(code=code)
+    except Exception as exc:
+        return HTMLResponse(_ERROR_HTML_TPL.format(msg=f"No se pudo intercambiar el código: {exc}"), status_code=500)
+
+    credentials = flow.credentials
+    new_refresh_token = credentials.refresh_token
+
+    if new_refresh_token:
+        # Actualizar GOOGLE_OAUTH_REFRESH_TOKEN en el archivo .env
+        try:
+            env_content = ""
+            if os.path.exists(env_file):
+                with open(env_file, "r", encoding="utf-8") as f:
+                    env_content = f.read()
+
+            import re as _re
+            token_line = f"GOOGLE_OAUTH_REFRESH_TOKEN={new_refresh_token}"
+            if _re.search(r"^GOOGLE_OAUTH_REFRESH_TOKEN\s*=", env_content, _re.MULTILINE):
+                env_content = _re.sub(
+                    r"^GOOGLE_OAUTH_REFRESH_TOKEN\s*=.*$",
+                    token_line,
+                    env_content,
+                    flags=_re.MULTILINE,
+                )
+            else:
+                env_content += f"\n{token_line}\n"
+
+            with open(env_file, "w", encoding="utf-8") as f:
+                f.write(env_content)
+
+            load_dotenv(dotenv_path=env_file, override=True)
+        except Exception as exc:
+            return HTMLResponse(_ERROR_HTML_TPL.format(msg=f"Token obtenido pero no se pudo guardar en .env: {exc}"), status_code=500)
+
+    return HTMLResponse(_SUCCESS_HTML)
 
 
 def resolve_drive_settings_for_proposal(db: Session, proposal: models.Proposal) -> models.DriveSettings | None:
@@ -1316,6 +1461,12 @@ def create_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
                     detail="No se pudo crear el documento: la cuota de almacenamiento de la cuenta autenticada en Google Drive está excedida.",
                 )
 
+            if "invalid_grant" in lower_message or "token has been expired" in lower_message or "token has been revoked" in lower_message:
+                raise HTTPException(
+                    status_code=401,
+                    detail="GOOGLE_AUTH_EXPIRED: El token de Google Drive expiró o fue revocado. Necesitás reautorizar la aplicación desde el modal de la propuesta.",
+                )
+
             # Fallback probado: crear primero en raíz y luego mover a carpeta destino.
             try:
                 created = create_google_doc(None)
@@ -1343,6 +1494,11 @@ def create_proposal_gdoc(proposal_id: int, db: Session = Depends(get_db)):
                     raise HTTPException(
                         status_code=507,
                         detail="No se pudo crear el documento: la cuota de almacenamiento de la cuenta autenticada en Google Drive está excedida.",
+                    )
+                if "invalid_grant" in fb_lower or "token has been expired" in fb_lower or "token has been revoked" in fb_lower:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="GOOGLE_AUTH_EXPIRED: El token de Google Drive expiró o fue revocado. Necesitás reautorizar la aplicación desde el modal de la propuesta.",
                     )
                 status_text = f"{fb_status}" if fb_status is not None else "unknown"
                 reason_text = ", ".join(fb_reasons) if fb_reasons else "none"
@@ -5763,13 +5919,51 @@ def update_intelligent_result(
     return {"status": "updated", "id": result.id}
 
 
+# ── Lock / Unlock endpoints ──────────────────────────────────────────────────
+
+class LockPayload(BaseModel):
+    locked: bool
+
+class BulkLockPayload(BaseModel):
+    ids: list[int]
+    locked: bool
+
+@app.patch("/proposals/{proposal_id}/lock")
+def set_proposal_lock(proposal_id: int, payload: LockPayload, db: Session = Depends(get_db)):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    proposal.editing_locked = payload.locked
+    db.commit()
+    db.refresh(proposal)
+    return {"id": proposal.id, "editing_locked": proposal.editing_locked, "subject": proposal.subject}
+
+@app.post("/proposals/bulk-lock")
+def bulk_set_proposal_lock(payload: BulkLockPayload, db: Session = Depends(get_db)):
+    updated = []
+    for pid in payload.ids:
+        proposal = db.query(models.Proposal).filter(models.Proposal.id == pid).first()
+        if proposal:
+            proposal.editing_locked = payload.locked
+            updated.append(pid)
+    db.commit()
+    return {"updated": updated, "locked": payload.locked}
+
+# ────────────────────────────────────────────────────────────────────────────
+
 @app.patch("/proposals/{proposal_id}", response_model=schemas.Proposal)
 def update_proposal(proposal_id: int, payload: schemas.ProposalUpdate, db: Session = Depends(get_db)):
     proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
-    
+
     data = payload.model_dump(exclude_unset=True) if hasattr(payload, 'model_dump') else payload.dict(exclude_unset=True)
+
+    # Si la propuesta está cerrada para edición y el payload no es solo editing_locked, rechazar
+    non_lock_fields = {k for k in data if k != "editing_locked"}
+    if proposal.editing_locked and non_lock_fields:
+        raise HTTPException(status_code=403, detail="La propuesta está cerrada para edición. Solo un directivo puede habilitarla.")
+
     generic_items_raw = data.pop("generic_competencies_items", None)
     specific_items_raw = data.pop("specific_competencies_items", None)
     create_in_drive = bool(data.pop("create_in_drive", False))
@@ -6643,3 +6837,313 @@ async def sync_proposal_to_study_plan(proposal_id: int, db: Session = Depends(ge
         db.rollback()
         print(f"[ERROR] Sync failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EVALUATIVE INSTRUMENTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/instruments", response_model=list[schemas.EvaluativeInstrumentOut])
+def list_instruments(
+    career: str = None,
+    subject: str = None,
+    instrument_type: str = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.EvaluativeInstrument)
+    if career:
+        q = q.filter(models.EvaluativeInstrument.career == career)
+    if subject:
+        q = q.filter(models.EvaluativeInstrument.subject == subject)
+    if instrument_type:
+        q = q.filter(models.EvaluativeInstrument.instrument_type == instrument_type)
+    return q.order_by(models.EvaluativeInstrument.created_at.desc()).all()
+
+
+@app.get("/instruments/summary")
+def instruments_summary(career: str = None, db: Session = Depends(get_db)):
+    """Returns list of subjects with counts per type."""
+    q = db.query(models.EvaluativeInstrument)
+    if career:
+        q = q.filter(models.EvaluativeInstrument.career == career)
+    instruments = q.all()
+    summary: dict = {}
+    for inst in instruments:
+        key = (inst.career, inst.study_plan or "", inst.subject)
+        if key not in summary:
+            summary[key] = {
+                "career": inst.career,
+                "study_plan": inst.study_plan or "",
+                "subject": inst.subject,
+                "tp": 0,
+                "parcial": 0,
+                "final": 0,
+            }
+        t = inst.instrument_type
+        if t == "TP":
+            summary[key]["tp"] += 1
+        elif t == "Parcial":
+            summary[key]["parcial"] += 1
+        elif t == "Final":
+            summary[key]["final"] += 1
+    # Enrich with folder URLs
+    folders_q = db.query(models.EvaluativeInstrumentFolder)
+    if career:
+        folders_q = folders_q.filter(models.EvaluativeInstrumentFolder.career == career)
+    for f in folders_q.all():
+        key = (f.career, f.study_plan or "", f.subject)
+        if key in summary:
+            summary[key]["gdrive_folder_url"] = f.gdrive_folder_url or ""
+    return list(summary.values())
+
+
+@app.get("/instruments/folders")
+def list_instrument_folders(career: str = None, db: Session = Depends(get_db)):
+    """Returns all linked Drive folders for evaluative instruments, optionally filtered by career."""
+    q = db.query(models.EvaluativeInstrumentFolder)
+    if career:
+        q = q.filter(models.EvaluativeInstrumentFolder.career == career)
+    return [
+        {"career": f.career, "study_plan": f.study_plan or "", "subject": f.subject, "gdrive_folder_url": f.gdrive_folder_url or ""}
+        for f in q.all()
+    ]
+
+
+@app.get("/instruments/folder", response_model=schemas.EvaluativeInstrumentFolderOut | None)
+def get_instrument_folder(
+    career: str,
+    subject: str,
+    study_plan: str = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.EvaluativeInstrumentFolder).filter(
+        models.EvaluativeInstrumentFolder.career == career,
+        models.EvaluativeInstrumentFolder.subject == subject,
+    )
+    if study_plan:
+        q = q.filter(models.EvaluativeInstrumentFolder.study_plan == study_plan)
+    return q.first()
+
+
+@app.post("/instruments/folder/link", response_model=schemas.EvaluativeInstrumentFolderOut)
+def link_instrument_folder(payload: dict = Body(...), db: Session = Depends(get_db)):
+    career = (payload.get("career") or "").strip()
+    subject = (payload.get("subject") or "").strip()
+    study_plan = (payload.get("study_plan") or "").strip() or None
+    folder_url = (payload.get("folder_url") or "").strip()
+    if not career or not subject or not folder_url:
+        raise HTTPException(status_code=400, detail="career, subject y folder_url son requeridos")
+    folder_id = extract_drive_folder_id(folder_url)
+    if not folder_id:
+        raise HTTPException(status_code=400, detail="URL de carpeta de Drive inválida")
+    existing = db.query(models.EvaluativeInstrumentFolder).filter(
+        models.EvaluativeInstrumentFolder.career == career,
+        models.EvaluativeInstrumentFolder.subject == subject,
+    ).first()
+    if existing:
+        existing.gdrive_folder_url = folder_url
+        existing.gdrive_folder_id = folder_id
+        if study_plan:
+            existing.study_plan = study_plan
+        db.commit()
+        db.refresh(existing)
+        return existing
+    new_folder = models.EvaluativeInstrumentFolder(
+        career=career, study_plan=study_plan, subject=subject,
+        gdrive_folder_url=folder_url, gdrive_folder_id=folder_id,
+    )
+    db.add(new_folder)
+    db.commit()
+    db.refresh(new_folder)
+    return new_folder
+
+
+@app.delete("/instruments/folder")
+def unlink_instrument_folder(
+    career: str,
+    subject: str,
+    db: Session = Depends(get_db),
+):
+    """Remove the Drive folder link for a subject (does not delete the folder from Drive)."""
+    existing = db.query(models.EvaluativeInstrumentFolder).filter(
+        models.EvaluativeInstrumentFolder.career == career,
+        models.EvaluativeInstrumentFolder.subject == subject,
+    ).first()
+    if not existing:
+        raise HTTPException(status_code=404, detail="No hay carpeta vinculada para esta asignatura")
+    db.delete(existing)
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/instruments/folder/create", response_model=schemas.EvaluativeInstrumentFolderOut)
+def create_instrument_folder_in_drive(payload: dict = Body(...), db: Session = Depends(get_db)):
+    career = (payload.get("career") or "").strip()
+    subject = (payload.get("subject") or "").strip()
+    study_plan = (payload.get("study_plan") or "").strip() or None
+    if not career or not subject:
+        raise HTTPException(status_code=400, detail="career y subject son requeridos")
+    existing = db.query(models.EvaluativeInstrumentFolder).filter(
+        models.EvaluativeInstrumentFolder.career == career,
+        models.EvaluativeInstrumentFolder.subject == subject,
+    ).first()
+    if existing and existing.gdrive_folder_id:
+        return existing
+    drive_settings = db.query(models.DriveSettings).filter(models.DriveSettings.career == career).first()
+    if not drive_settings or not drive_settings.root_folder_url:
+        raise HTTPException(status_code=400, detail=f"No hay carpeta raíz de Drive configurada para la carrera '{career}'")
+    parent_folder_id = extract_drive_folder_id(drive_settings.root_folder_url)
+    if not parent_folder_id:
+        raise HTTPException(status_code=400, detail="La URL de carpeta raíz de Drive es inválida")
+    drive_service = get_google_drive_service()
+    try:
+        instr_folder_name = "Instrumentos Evaluativos"
+        results = drive_service.files().list(
+            q=f"name='{instr_folder_name}' and '{parent_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            fields="files(id, name)", supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        instr_folders = results.get("files", [])
+        if instr_folders:
+            instr_folder_id = instr_folders[0]["id"]
+        else:
+            meta = {"name": instr_folder_name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_folder_id]}
+            created = drive_service.files().create(body=meta, fields="id", supportsAllDrives=True).execute()
+            instr_folder_id = created["id"]
+        safe_subject = re.sub(r'[/\\:*?"<>|]', "_", subject)
+        results2 = drive_service.files().list(
+            q=f"name='{safe_subject}' and '{instr_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            fields="files(id, name)", supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        subj_folders = results2.get("files", [])
+        if subj_folders:
+            subj_folder_id = subj_folders[0]["id"]
+        else:
+            meta2 = {"name": safe_subject, "mimeType": "application/vnd.google-apps.folder", "parents": [instr_folder_id]}
+            created2 = drive_service.files().create(body=meta2, fields="id", supportsAllDrives=True).execute()
+            subj_folder_id = created2["id"]
+        gdrive_folder_url = f"https://drive.google.com/drive/folders/{subj_folder_id}"
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Error al crear carpeta en Drive: {exc}")
+    if existing:
+        existing.gdrive_folder_url = gdrive_folder_url
+        existing.gdrive_folder_id = subj_folder_id
+        db.commit()
+        db.refresh(existing)
+        return existing
+    new_folder = models.EvaluativeInstrumentFolder(
+        career=career, study_plan=study_plan, subject=subject,
+        gdrive_folder_url=gdrive_folder_url, gdrive_folder_id=subj_folder_id,
+    )
+    db.add(new_folder)
+    db.commit()
+    db.refresh(new_folder)
+    return new_folder
+
+
+@app.post("/instruments/upload")
+async def upload_instruments(
+    files: list[UploadFile] = File(...),
+    types: str = Form(...),
+    titles: str = Form(None),
+    career: str = Form(...),
+    subject: str = Form(...),
+    study_plan: str = Form(None),
+    uploaded_by: str = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Upload one or more evaluative instrument files for a subject."""
+    import uuid as _uuid
+    types_list: list[str] = json.loads(types)
+    titles_list: list = json.loads(titles) if titles else [None] * len(files)
+    valid_types = {"TP", "Parcial", "Final"}
+    if len(files) != len(types_list):
+        raise HTTPException(status_code=400, detail="Los arrays 'files' y 'types' deben tener el mismo tamaño")
+    for t in types_list:
+        if t not in valid_types:
+            raise HTTPException(status_code=400, detail=f"Tipo inválido '{t}'. Use: TP, Parcial, Final")
+
+    # Resolve INSTRUMENTS_FOLDER relative to CWD
+    instruments_dir = os.path.abspath(INSTRUMENTS_FOLDER)
+    os.makedirs(instruments_dir, exist_ok=True)
+
+    # Get linked drive folder if exists
+    folder_record = db.query(models.EvaluativeInstrumentFolder).filter(
+        models.EvaluativeInstrumentFolder.career == career,
+        models.EvaluativeInstrumentFolder.subject == subject,
+    ).first()
+
+    results = []
+    for i, (upload_file, itype) in enumerate(zip(files, types_list)):
+        ext = os.path.splitext(upload_file.filename or "")[-1]
+        stored_name = f"{_uuid.uuid4().hex}{ext}"
+        dest_path = os.path.join(instruments_dir, stored_name)
+        content = await upload_file.read()
+        with open(dest_path, "wb") as fout:
+            fout.write(content)
+
+        gdrive_url = None
+        gdrive_file_id = None
+        # Auto-upload to Drive if folder is linked
+        if folder_record and folder_record.gdrive_folder_id:
+            try:
+                from googleapiclient.http import MediaFileUpload as _MediaUpload
+                _drive = get_google_drive_service()
+                _media = _MediaUpload(dest_path, resumable=False)
+                _meta = {"name": upload_file.filename, "parents": [folder_record.gdrive_folder_id]}
+                _created = _drive.files().create(body=_meta, media_body=_media, fields="id,webViewLink", supportsAllDrives=True).execute()
+                gdrive_url = _created.get("webViewLink") or f"https://drive.google.com/file/d/{_created.get('id')}/view"
+                gdrive_file_id = _created.get("id")
+            except Exception:
+                pass  # local save is sufficient; Drive upload is best-effort
+
+        title_val = (titles_list[i] if titles_list and i < len(titles_list) else None) or upload_file.filename
+        inst = models.EvaluativeInstrument(
+            career=career,
+            study_plan=study_plan,
+            subject=subject,
+            instrument_type=itype,
+            title=title_val,
+            original_filename=upload_file.filename,
+            stored_filename=stored_name,
+            file_path=dest_path,
+            file_size=len(content),
+            mime_type=upload_file.content_type,
+            gdrive_url=gdrive_url,
+            gdrive_file_id=gdrive_file_id,
+            uploaded_by=uploaded_by,
+        )
+        db.add(inst)
+        results.append(inst)
+    db.commit()
+    for r in results:
+        db.refresh(r)
+    return [schemas.EvaluativeInstrumentOut.model_validate(r) for r in results]
+
+
+@app.delete("/instruments/{instrument_id}")
+def delete_instrument(instrument_id: int, db: Session = Depends(get_db)):
+    inst = db.query(models.EvaluativeInstrument).filter(models.EvaluativeInstrument.id == instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado")
+    if inst.file_path and os.path.exists(inst.file_path):
+        try:
+            os.remove(inst.file_path)
+        except Exception:
+            pass
+    db.delete(inst)
+    db.commit()
+    return {"deleted": instrument_id}
+
+
+@app.get("/instruments/{instrument_id}/file")
+def download_instrument_file(instrument_id: int, db: Session = Depends(get_db)):
+    inst = db.query(models.EvaluativeInstrument).filter(models.EvaluativeInstrument.id == instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado")
+    if not inst.file_path or not os.path.exists(inst.file_path):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado en el servidor")
+    return FileResponse(
+        inst.file_path,
+        filename=inst.original_filename,
+        media_type=inst.mime_type or "application/octet-stream",
+    )

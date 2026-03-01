@@ -51,6 +51,7 @@ class Proposal(Base):
     gdoc_status = Column(String(20), nullable=True)
     intelligent_status = Column(String(30), nullable=True)
     status = Column(String(50), nullable=True)  # EnProceso, Importada, Creada
+    editing_locked = Column(Boolean, default=False, nullable=True)  # Cerrada para edición por directivo
     
     study_subject_id = Column(Integer, ForeignKey("study_subjects.id"), nullable=True)
 
@@ -413,5 +414,41 @@ class AccreditationWorkPlanTask(Base):
     status = Column(String(30), nullable=False, default="pending", index=True)
     status_date = Column(DateTime(timezone=False), nullable=False)
     notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# ── Evaluative Instruments ──────────────────────────────────────────────────
+
+class EvaluativeInstrument(Base):
+    __tablename__ = "evaluative_instruments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career = Column(String(255), nullable=False, index=True)
+    study_plan = Column(String(255), nullable=True, index=True)
+    subject = Column(String(255), nullable=False, index=True)
+    instrument_type = Column(String(20), nullable=False, index=True)  # TP | Parcial | Final
+    title = Column(String(500), nullable=True)
+    original_filename = Column(String(500), nullable=False)
+    stored_filename = Column(String(500), nullable=False)
+    file_path = Column(String(1000), nullable=True)
+    file_size = Column(Integer, nullable=True)
+    mime_type = Column(String(100), nullable=True)
+    gdrive_url = Column(String(1000), nullable=True)
+    gdrive_file_id = Column(String(255), nullable=True, index=True)
+    uploaded_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class EvaluativeInstrumentFolder(Base):
+    __tablename__ = "evaluative_instrument_folders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career = Column(String(255), nullable=False, index=True)
+    study_plan = Column(String(255), nullable=True, index=True)
+    subject = Column(String(255), nullable=False, index=True)
+    gdrive_folder_url = Column(String(1000), nullable=True)
+    gdrive_folder_id = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

@@ -114,6 +114,10 @@ const App = () => {
   const [selectedTeacherId, setSelectedTeacherId] = useState(null)
   const [selectedTeacherName, setSelectedTeacherName] = useState('')
 
+  // Lock / bulk selection
+  const [selectedProposalIds, setSelectedProposalIds] = useState(new Set())
+  const [lockLoading, setLockLoading] = useState(false)
+
   const [importFile, setImportFile] = useState(null)
   const [importLoading, setImportLoading] = useState(false)
   const [importError, setImportError] = useState('')
@@ -122,6 +126,7 @@ const App = () => {
   const [viewProposalLinkIssue, setViewProposalLinkIssue] = useState('')
   const [viewProposalGdocInput, setViewProposalGdocInput] = useState('')
   const [viewProposalGdocError, setViewProposalGdocError] = useState('')
+  const [viewProposalGdocAuthNeeded, setViewProposalGdocAuthNeeded] = useState(false)
   const [viewProposalGdocLoading, setViewProposalGdocLoading] = useState(false)
   const [viewProposalGdocEditMode, setViewProposalGdocEditMode] = useState(false)
   const [viewProposalCreateGdocLoading, setViewProposalCreateGdocLoading] = useState(false)
@@ -485,6 +490,27 @@ const App = () => {
   const [workPlanTaskDraftByActivity, setWorkPlanTaskDraftByActivity] = useState({})
   const [workPlanTaskSavingByActivity, setWorkPlanTaskSavingByActivity] = useState({})
   const [workPlanTaskBusyById, setWorkPlanTaskBusyById] = useState({})
+
+  // ── Evaluative Instruments state ────────────────────────────────────────────
+  const [instrumentsSummary, setInstrumentsSummary] = useState([])
+  const [instrumentsList, setInstrumentsList] = useState([])
+  const [instrumentsSubject, setInstrumentsSubject] = useState(null) // {career, study_plan, subject}
+  const [instrumentsLoading, setInstrumentsLoading] = useState(false)
+  const [instrumentsError, setInstrumentsError] = useState('')
+  const [showUploadInstrumentModal, setShowUploadInstrumentModal] = useState(false)
+  const [uploadInstrumentFiles, setUploadInstrumentFiles] = useState([]) // [{file, type, title}]
+  const [uploadInstrumentLoading, setUploadInstrumentLoading] = useState(false)
+  const [uploadInstrumentError, setUploadInstrumentError] = useState('')
+  const [instrumentFolder, setInstrumentFolder] = useState(null)
+  const [instrumentFolderLoading, setInstrumentFolderLoading] = useState(false)
+  const [instrumentFolderError, setInstrumentFolderError] = useState('')
+  const [instrumentFolderLinkInput, setInstrumentFolderLinkInput] = useState('')
+  const [instrumentFolderLinkMode, setInstrumentFolderLinkMode] = useState(false)
+  const [instrumentDeleteLoading, setInstrumentDeleteLoading] = useState(null)
+  const [instrumentsFoldersList, setInstrumentsFoldersList] = useState([])
+  const [instrumentsTableSort, setInstrumentsTableSort] = useState({ key: '', direction: 'asc' })
+  const [instrumentsTableFilters, setInstrumentsTableFilters] = useState({ subject: '', yearLabel: '', quarterLabel: '' })
+
   const [editingPlanId, setEditingPlanId] = useState(null)
   const [correlativeMode, setCorrelativeMode] = useState(false)
   const [selectedSubjectForCorrelatives, setSelectedSubjectForCorrelatives] = useState(null)
@@ -808,6 +834,18 @@ const App = () => {
     setTeacherEditId(null)
     setTeacherEditForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
     setMatrixColumnFilters({})
+    // Reset Instrumentos state
+    setInstrumentsSubject(null)
+    setInstrumentsList([])
+    setInstrumentsError('')
+    setShowUploadInstrumentModal(false)
+    setUploadInstrumentFiles([])
+    setInstrumentFolderLinkMode(false)
+    setInstrumentFolderLinkInput('')
+    setInstrumentFolderError('')
+    setInstrumentsFoldersList([])
+    setInstrumentsTableSort({ key: '', direction: 'asc' })
+    setInstrumentsTableFilters({ subject: '', yearLabel: '', quarterLabel: '' })
   }
 
   useEffect(() => {
@@ -871,7 +909,7 @@ const App = () => {
     if (viewRole !== 'docente') {
       return
     }
-    const allowedMenus = ['propuestas', 'control-propuestas', 'resoluciones']
+    const allowedMenus = ['propuestas', 'control-propuestas', 'resoluciones', 'instrumentos']
     if (!allowedMenus.includes(activeMenu)) {
       setActiveMenu('propuestas')
     }
@@ -3130,7 +3168,8 @@ const App = () => {
 
   const fetchGdocStatuses = async (items) => {
     const target = Array.isArray(items) ? items : proposals
-    const ids = Array.from(new Set(target.filter((p) => p?.gdoc_url).map((p) => p.id).filter((id) => id != null)))
+    // Never check sync status for locked (closed) proposals — they can't be edited
+    const ids = Array.from(new Set(target.filter((p) => p?.gdoc_url && !p.editing_locked).map((p) => p.id).filter((id) => id != null)))
     if (ids.length === 0) {
       return
     }
@@ -3161,6 +3200,8 @@ const App = () => {
     const teacherSelected = !!selectedTeacherId
     return items.filter((proposal) => {
       if (!proposal?.gdoc_url) return false
+      // Skip locked (closed) proposals — sync is irrelevant when editing is disabled
+      if (proposal.editing_locked) return false
       if (normalizedCareer && normalizeCareer(proposal.career) !== normalizedCareer) return false
       if (docenteMode) {
         if (!teacherSelected) return false
@@ -3183,6 +3224,8 @@ const App = () => {
   }
 
   const getProposalGdocStatus = (proposal) => {
+    // Locked (closed) proposals never need sync — always report clean
+    if (proposal.editing_locked) return 'ok'
     // Si no tiene link de GDoc
     if (!proposal.gdoc_url) {
       return proposal.source_type === 'gdoc' ? 'lost' : 'missing'
@@ -3260,6 +3303,13 @@ const App = () => {
     fetchAccreditationTeachers(activeCareer)
     fetchWorkPlanRows(activeCareer)
   }, [activeMenu, accreditationSection, activeCareer, selectedPlanFilterId])
+
+  // Pre-load accreditation actors + workplan rows in docente mode to determine menu visibility
+  useEffect(() => {
+    if (viewRole !== 'docente' || !activeCareer) return
+    loadAccreditationSettings(activeCareer)
+    fetchWorkPlanRows(activeCareer)
+  }, [viewRole, activeCareer, selectedPlanFilterId])
 
   const mapCompetenciesToPlans = async (career) => {
     if (!career || competencyPlanMappedByCareer[career]) {
@@ -3621,7 +3671,8 @@ const App = () => {
     try {
       setViewProposalCreateGdocLoading(true)
       setViewProposalGdocError('')
-      const res = await fetch(`http://localhost:8001/proposals/${proposalId}/create-gdoc`, {
+      setViewProposalGdocAuthNeeded(false)
+      const res = await fetch(`${API_BASE_URL}/proposals/${proposalId}/create-gdoc`, {
         method: 'POST'
       })
       const data = await res.json().catch(() => ({}))
@@ -3635,10 +3686,21 @@ const App = () => {
       setGdocStatusById((prev) => ({ ...prev, [proposalId]: { status: 'ok' } }))
       fetchProposals()
     } catch (err) {
-      const message = err?.message === 'Failed to fetch'
-        ? 'No se pudo conectar al backend. Verifica que esté levantado.'
-        : (err?.message || 'No se pudo crear y vincular el documento')
-      setViewProposalGdocError(message)
+      const errMsg = err?.message || ''
+      const isAuthError =
+        errMsg.includes('GOOGLE_AUTH_EXPIRED') ||
+        errMsg.toLowerCase().includes('invalid_grant') ||
+        errMsg.toLowerCase().includes('token has been expired') ||
+        errMsg.toLowerCase().includes('token has been revoked')
+      if (isAuthError) {
+        setViewProposalGdocAuthNeeded(true)
+        setViewProposalGdocError('El token de Google Drive expiró o fue revocado.')
+      } else {
+        const message = errMsg === 'Failed to fetch'
+          ? 'No se pudo conectar al backend. Verifica que esté levantado.'
+          : (errMsg || 'No se pudo crear y vincular el documento')
+        setViewProposalGdocError(message)
+      }
     } finally {
       setViewProposalCreateGdocLoading(false)
     }
@@ -7434,6 +7496,7 @@ const App = () => {
       setViewProposalGdocInput(data.gdoc_url || '')
       setViewProposalGdocEditMode(false)
       setViewProposalGdocError('')
+      setViewProposalGdocAuthNeeded(false)
       setViewProposalGdocUpdateAvailable(false)
       setViewProposalGdocUpdateMessage('')
       fetchProposalIntelligentSummary(proposalId)
@@ -7446,12 +7509,61 @@ const App = () => {
       if (data.career) {
         setActiveCareer(normalizeCareer(data.career))
       }
-      if (data.gdoc_url) {
+      if (data.gdoc_url && !data.editing_locked) {
         await validateProposalGdocRemote(proposalId, { openDiffOnUpdated: true, notifyOnOk: false })
       }
     } catch (err) {
       setStatusMsg('Error al cargar propuesta: ' + err.message)
       setStatusType('error')
+    }
+  }
+
+  const toggleProposalLock = async (proposalId, locked) => {
+    try {
+      setLockLoading(true)
+      const res = await fetch(`${API_BASE_URL}/proposals/${proposalId}/lock`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locked })
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `Error ${res.status}`)
+      setStatusMsg(locked ? `Propuesta #${proposalId} cerrada para edición` : `Propuesta #${proposalId} habilitada para edición`)
+      setStatusType(locked ? 'warning' : 'success')
+      fetchProposals()
+      // Si la propuesta está abierta en el modal, actualizar su estado
+      if (viewProposal?.id === proposalId) {
+        setViewProposal(prev => prev ? { ...prev, editing_locked: locked } : prev)
+      }
+    } catch (err) {
+      setStatusMsg('Error: ' + err.message)
+      setStatusType('error')
+    } finally {
+      setLockLoading(false)
+    }
+  }
+
+  const bulkToggleProposalLock = async (locked) => {
+    if (selectedProposalIds.size === 0) return
+    try {
+      setLockLoading(true)
+      const res = await fetch(`${API_BASE_URL}/proposals/bulk-lock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedProposalIds), locked })
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `Error ${res.status}`)
+      const data = await res.json()
+      setStatusMsg(locked
+        ? `${data.updated?.length || 0} propuesta(s) cerradas para edición`
+        : `${data.updated?.length || 0} propuesta(s) habilitadas para edición`)
+      setStatusType(locked ? 'warning' : 'success')
+      setSelectedProposalIds(new Set())
+      fetchProposals()
+    } catch (err) {
+      setStatusMsg('Error: ' + err.message)
+      setStatusType('error')
+    } finally {
+      setLockLoading(false)
     }
   }
 
@@ -7478,6 +7590,207 @@ const App = () => {
       setStatusType('error')
     }
   }
+
+  // ── Evaluative Instruments functions ────────────────────────────────────────
+  const fetchInstrumentsSummary = async (career) => {
+    if (!career) { setInstrumentsSummary([]); return }
+    try {
+      setInstrumentsLoading(true)
+      setInstrumentsError('')
+      const res = await fetch(`${API_BASE_URL}/instruments/summary?career=${encodeURIComponent(career)}`)
+      const data = await res.json().catch(() => [])
+      setInstrumentsSummary(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setInstrumentsError('Error al cargar resumen: ' + err.message)
+    } finally {
+      setInstrumentsLoading(false)
+    }
+  }
+
+  const fetchInstrumentsFoldersList = async (career) => {
+    try {
+      const params = career ? `?career=${encodeURIComponent(career)}` : ''
+      const res = await fetch(`${API_BASE_URL}/instruments/folders${params}`)
+      const data = await res.json().catch(() => [])
+      setInstrumentsFoldersList(Array.isArray(data) ? data : [])
+    } catch {
+      setInstrumentsFoldersList([])
+    }
+  }
+
+  const fetchInstrumentsBySubject = async (career, subject) => {
+    try {
+      setInstrumentsLoading(true)
+      setInstrumentsList([])
+      setInstrumentsError('')
+      const res = await fetch(`${API_BASE_URL}/instruments?career=${encodeURIComponent(career)}&subject=${encodeURIComponent(subject)}`)
+      const data = await res.json().catch(() => [])
+      setInstrumentsList(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setInstrumentsError('Error al cargar instrumentos: ' + err.message)
+    } finally {
+      setInstrumentsLoading(false)
+    }
+  }
+
+  const fetchInstrumentFolder = async (career, subject, study_plan) => {
+    try {
+      setInstrumentFolderLoading(true)
+      let url = `${API_BASE_URL}/instruments/folder?career=${encodeURIComponent(career)}&subject=${encodeURIComponent(subject)}`
+      if (study_plan) url += `&study_plan=${encodeURIComponent(study_plan)}`
+      const res = await fetch(url)
+      if (res.ok) {
+        const data = await res.json().catch(() => null)
+        setInstrumentFolder(data)
+      } else {
+        setInstrumentFolder(null)
+      }
+    } catch {
+      setInstrumentFolder(null)
+    } finally {
+      setInstrumentFolderLoading(false)
+    }
+  }
+
+  const createInstrumentDriveFolder = async () => {
+    if (!instrumentsSubject) return
+    try {
+      setInstrumentFolderLoading(true)
+      setInstrumentFolderError('')
+      const res = await fetch(`${API_BASE_URL}/instruments/folder/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ career: instrumentsSubject.career, subject: instrumentsSubject.subject, study_plan: instrumentsSubject.study_plan || null }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'Error al crear carpeta')
+      setInstrumentFolder(data)
+    } catch (err) {
+      setInstrumentFolderError(err.message)
+    } finally {
+      setInstrumentFolderLoading(false)
+    }
+  }
+
+  const linkInstrumentDriveFolder = async (folderUrl) => {
+    if (!instrumentsSubject) return
+    const trimmed = (folderUrl || '').trim()
+    if (!isValidDriveFolderUrl(trimmed)) {
+      setInstrumentFolderError('URL inválida. Debe ser una URL de carpeta de Google Drive (debe contener /folders/).')
+      return
+    }
+    try {
+      setInstrumentFolderLoading(true)
+      setInstrumentFolderError('')
+      const res = await fetch(`${API_BASE_URL}/instruments/folder/link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ career: instrumentsSubject.career, subject: instrumentsSubject.subject, study_plan: instrumentsSubject.study_plan || null, folder_url: folderUrl }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'Error al vincular carpeta')
+      setInstrumentFolder(data)
+      setInstrumentFolderLinkMode(false)
+      setInstrumentFolderLinkInput('')
+    } catch (err) {
+      setInstrumentFolderError(err.message)
+    } finally {
+      setInstrumentFolderLoading(false)
+    }
+  }
+
+  const unlinkInstrumentDriveFolder = async () => {
+    if (!instrumentsSubject) return
+    if (!window.confirm('¿Desvincular la carpeta de Drive? Los archivos ya subidos no se eliminarán, pero futuros archivos no se enviarán a Drive.')) return
+    try {
+      setInstrumentFolderLoading(true)
+      setInstrumentFolderError('')
+      const params = `career=${encodeURIComponent(instrumentsSubject.career)}&subject=${encodeURIComponent(instrumentsSubject.subject)}`
+      const res = await fetch(`${API_BASE_URL}/instruments/folder?${params}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Error al desvincular carpeta')
+      }
+      setInstrumentFolder(null)
+      setInstrumentFolderLinkMode(false)
+      setInstrumentFolderLinkInput('')
+      await fetchInstrumentsFoldersList(activeCareer || '')
+    } catch (err) {
+      setInstrumentFolderError(err.message)
+    } finally {
+      setInstrumentFolderLoading(false)
+    }
+  }
+
+  const isValidDriveFolderUrl = (url) => {
+    try {
+      const u = new URL(url)
+      return (u.hostname === 'drive.google.com' || u.hostname.endsWith('.google.com')) && url.includes('/folders/')
+    } catch {
+      return false
+    }
+  }
+
+  const uploadInstrumentsFiles = async () => {
+    if (!instrumentsSubject || uploadInstrumentFiles.length === 0) return
+    if (uploadInstrumentFiles.some(item => !item.type)) {
+      setUploadInstrumentError('Asigná un tipo (TP, Parcial o Final) a cada archivo.')
+      return
+    }
+    try {
+      setUploadInstrumentLoading(true)
+      setUploadInstrumentError('')
+      const formData = new FormData()
+      uploadInstrumentFiles.forEach(item => formData.append('files', item.file))
+      formData.append('types', JSON.stringify(uploadInstrumentFiles.map(i => i.type)))
+      formData.append('titles', JSON.stringify(uploadInstrumentFiles.map(i => i.title || i.file.name)))
+      formData.append('career', instrumentsSubject.career)
+      formData.append('subject', instrumentsSubject.subject)
+      if (instrumentsSubject.study_plan) formData.append('study_plan', instrumentsSubject.study_plan)
+      const res = await fetch(`${API_BASE_URL}/instruments/upload`, { method: 'POST', body: formData })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || 'Error al subir archivos')
+      setShowUploadInstrumentModal(false)
+      setUploadInstrumentFiles([])
+      setUploadInstrumentError('')
+      await fetchInstrumentsBySubject(instrumentsSubject.career, instrumentsSubject.subject)
+      await fetchInstrumentsSummary(activeCareer)
+    } catch (err) {
+      setUploadInstrumentError(err.message)
+    } finally {
+      setUploadInstrumentLoading(false)
+    }
+  }
+
+  const deleteInstrument = async (instrumentId) => {
+    if (!window.confirm('¿Eliminar este instrumento? Esta acción no se puede deshacer.')) return
+    try {
+      setInstrumentDeleteLoading(instrumentId)
+      const res = await fetch(`${API_BASE_URL}/instruments/${instrumentId}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Error al eliminar')
+      }
+      setInstrumentsList(prev => prev.filter(i => i.id !== instrumentId))
+      await fetchInstrumentsSummary(activeCareer)
+    } catch (err) {
+      alert('Error: ' + err.message)
+    } finally {
+      setInstrumentDeleteLoading(null)
+    }
+  }
+
+  // Refresh instruments summary when career changes or instruments menu activates
+  useEffect(() => {
+    if (activeMenu === 'instrumentos') {
+      fetchInstrumentsSummary(activeCareer || '')
+      fetchInstrumentsFoldersList(activeCareer || '')
+      // Reset to list view if career changes
+      setInstrumentsSubject(null)
+      setInstrumentsList([])
+      setInstrumentFolder(null)
+    }
+  }, [activeCareer, activeMenu])
 
   const downloadProposalExport = async (proposalId, format = 'docx') => {
     try {
@@ -7842,6 +8155,18 @@ const App = () => {
     return false
   }
   const hasSelectedTeacher = !!(selectedTeacherId || selectedTeacherName)
+
+  // True when the currently selected docente is an actor or workplan collaborator in the accreditation process
+  const docenteIsAccreditationParticipant = isDocenteView && hasSelectedTeacher && (() => {
+    const normName = normalizeText(selectedTeacherName)
+    if (!normName) return false
+    const isActor = (accreditationConfigForm.actors || []).some(a => normalizeText(String(a.name || '')) === normName)
+    if (isActor) return true
+    return workPlanRows.some(row =>
+      (Array.isArray(row.collaborators) ? row.collaborators : []).some(c => normalizeText(String(c || '')) === normName)
+    )
+  })()
+
   const proposalHasTeacher = (proposal, teacherId, teacherName) => {
     if (!proposal || !Array.isArray(proposal.teaching_team)) {
       return false
@@ -9522,10 +9847,21 @@ const App = () => {
           onClick={() => handleMenuChange('control-propuestas')}
           active={activeMenu === 'control-propuestas'}
         />
+        <MenuButton
+          label="Instrumentos Evaluativos"
+          onClick={() => {
+            handleMenuChange('instrumentos')
+            fetchInstrumentsSummary(activeCareer || '')
+            fetchInstrumentsFoldersList(activeCareer || '')
+          }}
+          active={activeMenu === 'instrumentos'}
+        />
         {!isDocenteView && (
           <MenuButton label="Docentes" onClick={() => handleMenuChange('docentes')} active={activeMenu === 'docentes'} />
         )}
-        <MenuButton label="Acreditación" onClick={() => handleMenuChange('resoluciones')} active={activeMenu === 'resoluciones'} />
+        {(!isDocenteView || docenteIsAccreditationParticipant) && (
+          <MenuButton label="Acreditación" onClick={() => handleMenuChange('resoluciones')} active={activeMenu === 'resoluciones'} />
+        )}
 
         <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
           <label style={{ ...styles.label, marginTop: 0 }}>Carrera activa</label>
@@ -9777,9 +10113,48 @@ const App = () => {
               </div>
               {filteredProposals.length > 0 ? (
                 <div style={{ overflowX: 'auto' }}>
+                  {/* Toolbar de acciones masivas (solo director) */}
+                  {!isDocenteView && selectedProposalIds.size > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', padding: '8px 12px', background: '#e8f0fe', borderRadius: '6px', border: '1px solid #c6dafc' }}>
+                      <span style={{ fontWeight: 600, color: '#1a3d5c', fontSize: '13px' }}>{selectedProposalIds.size} seleccionada(s)</span>
+                      <button
+                        style={{ ...styles.button, background: '#d32f2f', marginRight: 0, padding: '6px 14px', fontSize: '12px' }}
+                        onClick={() => bulkToggleProposalLock(true)}
+                        disabled={lockLoading}
+                      >
+                        🔒 Cerrar edición
+                      </button>
+                      <button
+                        style={{ ...styles.button, background: '#2e7d32', marginRight: 0, padding: '6px 14px', fontSize: '12px' }}
+                        onClick={() => bulkToggleProposalLock(false)}
+                        disabled={lockLoading}
+                      >
+                        🔓 Habilitar edición
+                      </button>
+                      <button
+                        style={{ ...styles.button, background: '#999', marginRight: 0, padding: '6px 12px', fontSize: '12px' }}
+                        onClick={() => setSelectedProposalIds(new Set())}
+                      >
+                        Deseleccionar todo
+                      </button>
+                    </div>
+                  )}
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ backgroundColor: '#0066cc', color: 'white' }}>
+                        {!isDocenteView && (
+                          <th style={{ width: '36px', padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>
+                            <input
+                              type="checkbox"
+                              title="Seleccionar todo"
+                              checked={allProposalsFiltered.length > 0 && allProposalsFiltered.every(p => selectedProposalIds.has(p.id))}
+                              onChange={(e) => {
+                                if (e.target.checked) setSelectedProposalIds(new Set(allProposalsFiltered.map(p => p.id)))
+                                else setSelectedProposalIds(new Set())
+                              }}
+                            />
+                          </th>
+                        )}
                         <th
                           style={{ width: '70px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #0066cc', cursor: 'pointer' }}
                           onClick={() => toggleSort(setCompleteProposalSort, 'id')}
@@ -9837,6 +10212,7 @@ const App = () => {
                         <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>Acciones</th>
                       </tr>
                       <tr style={{ backgroundColor: '#f4f8ff' }}>
+                        {!isDocenteView && <th style={{ width: '36px', padding: '6px' }} />}
                         <th style={{ width: '70px', padding: '6px' }}>
                           <input
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
@@ -9941,12 +10317,30 @@ const App = () => {
                         <tr
                           key={prop.id}
                           style={{
-                            backgroundColor: prop.status === 'EnProceso'
+                            backgroundColor: prop.editing_locked
+                              ? (idx % 2 === 0 ? '#fce8e8' : '#fdf0f0')
+                              : prop.status === 'EnProceso'
                               ? (idx % 2 === 0 ? '#fff8ef' : '#fff5e6')
                               : (idx % 2 === 0 ? '#f9f9f9' : '#fff'),
                             borderBottom: '1px solid #eee'
                           }}
                         >
+                          {!isDocenteView && (
+                            <td style={{ width: '36px', padding: '10px', textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={selectedProposalIds.has(prop.id)}
+                                onChange={(e) => {
+                                  setSelectedProposalIds(prev => {
+                                    const next = new Set(prev)
+                                    if (e.target.checked) next.add(prop.id)
+                                    else next.delete(prop.id)
+                                    return next
+                                  })
+                                }}
+                              />
+                            </td>
+                          )}
                           <td style={{ width: '70px', padding: '10px' }}>#{prop.id}</td>
                           <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
                           <td style={{ padding: '10px' }}>{renderCapsule(prop.academic_year || '-', 'year')}</td>
@@ -9954,7 +10348,16 @@ const App = () => {
                           <td style={{ padding: '10px' }}>{renderCapsule(prop.quarter || '-', 'quarter')}</td>
                           <td style={{ padding: '10px' }}>{renderCapsule(prop.study_plan || prop.plan || '-', 'plan')}</td>
                           <td style={{ padding: '10px' }}>{formatDateTime(prop.updated_at || prop.created_at)}</td>
-                          <td style={{ padding: '10px' }}>{renderStatusCapsule(prop.status || '-')}</td>
+                          <td style={{ padding: '10px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                              {renderStatusCapsule(prop.status || '-')}
+                              {prop.editing_locked && (
+                                <span style={{ fontSize: '11px', fontWeight: 700, color: '#b71c1c', background: '#ffebee', border: '1px solid #ef9a9a', borderRadius: '999px', padding: '2px 8px', whiteSpace: 'nowrap' }}>
+                                  🔒 Cerrada
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td style={{ padding: '10px' }}>
                             {renderDriveCapsule(prop)}
                           </td>
@@ -9967,9 +10370,10 @@ const App = () => {
                               👁️
                             </button>
                             <button
-                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
-                              title="Editar propuesta"
-                              onClick={() => loadProposalForEdit(prop.id)}
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: prop.editing_locked ? '#bbb' : 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d', cursor: prop.editing_locked ? 'not-allowed' : 'pointer' }}
+                              title={prop.editing_locked ? 'Propuesta cerrada para edición' : 'Editar propuesta'}
+                              onClick={() => !prop.editing_locked && loadProposalForEdit(prop.id)}
+                              disabled={prop.editing_locked}
                             >
                               ✏️
                             </button>
@@ -9981,13 +10385,23 @@ const App = () => {
                               ⬇️
                             </button>
                             {!isDocenteView && (
-                              <button
-                                style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
-                                title="Eliminar propuesta"
-                                onClick={() => deleteProposal(prop.id)}
-                              >
-                                🗑️
-                              </button>
+                              <>
+                                <button
+                                  style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: prop.editing_locked ? '#2e7d32' : '#c62828', color: '#fff' }}
+                                  title={prop.editing_locked ? 'Habilitar edición' : 'Cerrar edición'}
+                                  onClick={() => toggleProposalLock(prop.id, !prop.editing_locked)}
+                                  disabled={lockLoading}
+                                >
+                                  {prop.editing_locked ? '🔓' : '🔒'}
+                                </button>
+                                <button
+                                  style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
+                                  title="Eliminar propuesta"
+                                  onClick={() => deleteProposal(prop.id)}
+                                >
+                                  🗑️
+                                </button>
+                              </>
                             )}
                           </td>
                         </tr>
@@ -11265,9 +11679,48 @@ const App = () => {
               <p style={{ color: '#999', marginTop: '20px' }}>No hay propuestas en edición aún.</p>
             ) : (
               <div style={{ overflowX: 'auto', marginTop: '20px' }}>
+                {/* Toolbar de acciones masivas (solo director) */}
+                {!isDocenteView && selectedProposalIds.size > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', padding: '8px 12px', background: '#fff3e0', borderRadius: '6px', border: '1px solid #ffcc80' }}>
+                    <span style={{ fontWeight: 600, color: '#5c3d00', fontSize: '13px' }}>{selectedProposalIds.size} seleccionada(s)</span>
+                    <button
+                      style={{ ...styles.button, background: '#d32f2f', marginRight: 0, padding: '6px 14px', fontSize: '12px' }}
+                      onClick={() => bulkToggleProposalLock(true)}
+                      disabled={lockLoading}
+                    >
+                      🔒 Cerrar edición
+                    </button>
+                    <button
+                      style={{ ...styles.button, background: '#2e7d32', marginRight: 0, padding: '6px 14px', fontSize: '12px' }}
+                      onClick={() => bulkToggleProposalLock(false)}
+                      disabled={lockLoading}
+                    >
+                      🔓 Habilitar edición
+                    </button>
+                    <button
+                      style={{ ...styles.button, background: '#999', marginRight: 0, padding: '6px 12px', fontSize: '12px' }}
+                      onClick={() => setSelectedProposalIds(new Set())}
+                    >
+                      Deseleccionar todo
+                    </button>
+                  </div>
+                )}
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#ff9900', color: 'white' }}>
+                      {!isDocenteView && (
+                        <th style={{ width: '36px', padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>
+                          <input
+                            type="checkbox"
+                            title="Seleccionar todo"
+                            checked={inProcessProposalsFiltered.length > 0 && inProcessProposalsFiltered.every(p => selectedProposalIds.has(p.id))}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedProposalIds(new Set(inProcessProposalsFiltered.map(p => p.id)))
+                              else setSelectedProposalIds(new Set())
+                            }}
+                          />
+                        </th>
+                      )}
                       <th
                         style={{ width: '70px', padding: '10px', textAlign: 'left', borderBottom: '2px solid #ff9900', cursor: 'pointer' }}
                         onClick={() => toggleSort(setPendingProposalSort, 'id')}
@@ -11316,6 +11769,7 @@ const App = () => {
                       <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>Acciones</th>
                     </tr>
                     <tr style={{ backgroundColor: '#fff6e6' }}>
+                      {!isDocenteView && <th style={{ width: '36px', padding: '6px' }} />}
                       <th style={{ width: '70px', padding: '6px' }}>
                         <input
                           style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
@@ -11405,7 +11859,28 @@ const App = () => {
                   </thead>
                   <tbody>
                     {inProcessProposalsFiltered.map((prop, idx) => (
-                      <tr key={prop.id} style={{ backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff', borderBottom: '1px solid #eee' }}>
+                      <tr key={prop.id} style={{
+                        backgroundColor: prop.editing_locked
+                          ? (idx % 2 === 0 ? '#fce8e8' : '#fdf0f0')
+                          : (idx % 2 === 0 ? '#f9f9f9' : '#fff'),
+                        borderBottom: '1px solid #eee'
+                      }}>
+                        {!isDocenteView && (
+                          <td style={{ width: '36px', padding: '10px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedProposalIds.has(prop.id)}
+                              onChange={(e) => {
+                                setSelectedProposalIds(prev => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.add(prop.id)
+                                  else next.delete(prop.id)
+                                  return next
+                                })
+                              }}
+                            />
+                          </td>
+                        )}
                         <td style={{ width: '70px', padding: '10px' }}>#{prop.id}</td>
                         <td style={{ padding: '10px' }}>{prop.subject || '-'}</td>
                         <td style={{ padding: '10px' }}>{renderCapsule(prop.academic_year || '-', 'year')}</td>
@@ -11422,30 +11897,41 @@ const App = () => {
                             title="Ver propuesta"
                             onClick={() => openProposalView(prop.id)}
                           >
-                            👁︎
+                            👁️
                           </button>
                           <button
-                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
-                            title="Editar propuesta"
-                            onClick={() => loadProposalForEdit(prop.id)}
+                            style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: prop.editing_locked ? '#bbb' : 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d', cursor: prop.editing_locked ? 'not-allowed' : 'pointer' }}
+                            title={prop.editing_locked ? 'Propuesta cerrada para edición' : 'Editar propuesta'}
+                            onClick={() => !prop.editing_locked && loadProposalForEdit(prop.id)}
+                            disabled={prop.editing_locked}
                           >
-                            ✏︎
+                            ✏️
                           </button>
                           <button
                             style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
                             title="Descargar propuesta"
                             onClick={() => downloadProposalDocx(prop.id)}
                           >
-                            ⬇︎
+                            ⬇️
                           </button>
                           {!isDocenteView && (
-                            <button
-                              style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
-                              title="Eliminar propuesta"
-                              onClick={() => deleteProposal(prop.id)}
-                            >
-                              🗑︎
-                            </button>
+                            <>
+                              <button
+                                style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: prop.editing_locked ? '#2e7d32' : '#c62828', color: '#fff' }}
+                                title={prop.editing_locked ? 'Habilitar edición' : 'Cerrar edición'}
+                                onClick={() => toggleProposalLock(prop.id, !prop.editing_locked)}
+                                disabled={lockLoading}
+                              >
+                                {prop.editing_locked ? '🔓' : '🔒'}
+                              </button>
+                              <button
+                                style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
+                                title="Eliminar propuesta"
+                                onClick={() => deleteProposal(prop.id)}
+                              >
+                                🗑️
+                              </button>
+                            </>
                           )}
                         </td>
                       </tr>
@@ -16414,24 +16900,520 @@ const App = () => {
           </div>
         )}
 
+        {/* INSTRUMENTOS EVALUATIVOS */}
+        {activeMenu === 'instrumentos' && (
+          <div style={styles.section}>
+            {!instrumentsSubject ? (
+              // ── LIST VIEW: subjects summary ──────────────────────────────
+              <>
+                {(() => {
+                  // Derive subject list from proposals (respects career/plan filter)
+                  // In docente mode, only show subjects where the selected teacher appears
+                  const instrumentProposalsSource = (isDocenteView && hasSelectedTeacher)
+                    ? filteredByPlan.filter(p => proposalHasTeacher(p, selectedTeacherId, selectedTeacherName))
+                    : filteredByPlan
+                  const instrumentSubjectMap = {}
+                  instrumentProposalsSource.forEach(p => {
+                    if (!p.subject) return
+                    const key = p.subject
+                    if (!instrumentSubjectMap[key]) {
+                      const yearVal = parseControlYear(p)
+                      const quarterInfo = parseControlQuarter(p)
+                      instrumentSubjectMap[key] = {
+                        career: p.career || activeCareer || '',
+                        study_plan: p.study_plan || p.plan || '',
+                        subject: p.subject,
+                        yearValue: yearVal,
+                        yearLabel: p.year_of_career || p.academic_year || '-',
+                        quarterOrder: quarterInfo.order,
+                        quarterLabel: quarterInfo.label,
+                        tp: 0, parcial: 0, final: 0, gdrive_folder_url: ''
+                      }
+                    }
+                  })
+                  // Enrich with instrument counts from summary
+                  instrumentsSummary.forEach(s => {
+                    if (instrumentSubjectMap[s.subject]) {
+                      instrumentSubjectMap[s.subject].tp = s.tp
+                      instrumentSubjectMap[s.subject].parcial = s.parcial
+                      instrumentSubjectMap[s.subject].final = s.final
+                      if (s.gdrive_folder_url) instrumentSubjectMap[s.subject].gdrive_folder_url = s.gdrive_folder_url
+                    }
+                  })
+                  // Enrich with folder URLs (covers subjects with 0 instruments too)
+                  instrumentsFoldersList.forEach(f => {
+                    if (instrumentSubjectMap[f.subject] && f.gdrive_folder_url) {
+                      instrumentSubjectMap[f.subject].gdrive_folder_url = f.gdrive_folder_url
+                    }
+                  })
+                  // Getters for sort/filter
+                  const instrGetters = {
+                    subject:      (r) => r.subject ?? '',
+                    yearLabel:    (r) => r.yearValue ?? Number.MAX_SAFE_INTEGER,
+                    quarterLabel: (r) => r.quarterOrder ?? 99,
+                    tp:           (r) => r.tp ?? 0,
+                    parcial:      (r) => r.parcial ?? 0,
+                    final:        (r) => r.final ?? 0,
+                    total:        (r) => (r.tp ?? 0) + (r.parcial ?? 0) + (r.final ?? 0),
+                  }
+                  const instrTextGetters = {
+                    subject:      (r) => r.subject ?? '',
+                    yearLabel:    (r) => r.yearLabel ?? '',
+                    quarterLabel: (r) => r.quarterLabel ?? '',
+                  }
+                  const baseRows = Object.values(instrumentSubjectMap).sort((a, b) => {
+                    if (a.yearValue !== b.yearValue) return a.yearValue - b.yearValue
+                    if (a.quarterOrder !== b.quarterOrder) return a.quarterOrder - b.quarterOrder
+                    return a.subject.localeCompare(b.subject, 'es', { sensitivity: 'base' })
+                  })
+                  const filteredRows = applyTableFilters(baseRows, instrumentsTableFilters, instrTextGetters)
+                  const instrumentSubjectRows = applyTableSort(filteredRows, instrumentsTableSort, instrGetters)
+
+                  return (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                        <h2 style={{ margin: 0 }}>
+                          Instrumentos Evaluativos
+                          {activeCareer && <span style={{ fontWeight: 400, fontSize: '15px', color: '#666', marginLeft: '12px' }}>{activeCareer}</span>}
+                        </h2>
+                      </div>
+
+                      {instrumentsLoading && <div style={{ color: '#888' }}>Cargando...</div>}
+                      {instrumentsError && <div style={{ color: '#b00020', marginBottom: '10px' }}>{instrumentsError}</div>}
+
+                      {!instrumentsLoading && instrumentSubjectRows.length === 0 && (
+                        <div style={{ color: '#888', padding: '32px', textAlign: 'center', background: '#f9f9f9', borderRadius: '8px', border: '1px dashed #ccc' }}>
+                          <div style={{ fontSize: '40px', marginBottom: '8px' }}>📚</div>
+                          {isDocenteView && !hasSelectedTeacher ? (
+                            <>
+                              <div>Seleccioná un docente en el panel lateral para ver sus asignaturas.</div>
+                            </>
+                          ) : (
+                            <>
+                              <div>No hay asignaturas con propuestas cargadas para {isDocenteView ? 'este docente' : 'esta carrera'}.</div>
+                              <div style={{ marginTop: '8px', fontSize: '13px', color: '#aaa' }}>Las asignaturas aparecen aquí automáticamente cuando tienen propuestas cargadas en el sistema.</div>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {!instrumentsLoading && instrumentSubjectRows.length > 0 && (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #ddd' }}>
+                          <thead>
+                            <tr style={{ background: '#0066cc', color: '#fff', borderBottom: '2px solid #ddd' }}>
+                              <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'subject')}>Asignatura{getSortIndicator(instrumentsTableSort, 'subject')}</th>
+                              <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'yearLabel')}>Año{getSortIndicator(instrumentsTableSort, 'yearLabel')}</th>
+                              <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'quarterLabel')}>Cuatrimestre{getSortIndicator(instrumentsTableSort, 'quarterLabel')}</th>
+                              <th style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold', borderRight: '1px solid #ddd' }}>📂 Drive</th>
+                              <th style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'tp')}>TP{getSortIndicator(instrumentsTableSort, 'tp')}</th>
+                              <th style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'parcial')}>Parciales{getSortIndicator(instrumentsTableSort, 'parcial')}</th>
+                              <th style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'final')}>Finales{getSortIndicator(instrumentsTableSort, 'final')}</th>
+                              <th style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'total')}>Total{getSortIndicator(instrumentsTableSort, 'total')}</th>
+                              <th style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold' }}>Acción</th>
+                            </tr>
+                            <tr style={{ background: '#eaf3ff' }}>
+                              <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                                <input style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }} value={instrumentsTableFilters.subject} onChange={e => setInstrumentsTableFilters(p => ({ ...p, subject: e.target.value }))} placeholder="Buscar" />
+                              </th>
+                              <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                                <input style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }} value={instrumentsTableFilters.yearLabel} onChange={e => setInstrumentsTableFilters(p => ({ ...p, yearLabel: e.target.value }))} placeholder="Buscar" />
+                              </th>
+                              <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
+                                <input style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }} value={instrumentsTableFilters.quarterLabel} onChange={e => setInstrumentsTableFilters(p => ({ ...p, quarterLabel: e.target.value }))} placeholder="Buscar" />
+                              </th>
+                              <th style={{ padding: '6px', borderRight: '1px solid #eee' }} />
+                              <th style={{ padding: '6px', borderRight: '1px solid #eee' }} />
+                              <th style={{ padding: '6px', borderRight: '1px solid #eee' }} />
+                              <th style={{ padding: '6px', borderRight: '1px solid #eee' }} />
+                              <th style={{ padding: '6px', borderRight: '1px solid #eee' }} />
+                              <th style={{ padding: '6px' }} />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {instrumentSubjectRows.map((row, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff' }}>
+                                <td style={{ padding: '8px' }}><strong>{row.subject}</strong></td>
+                                <td style={{ padding: '8px' }}>{row.yearLabel}</td>
+                                <td style={{ padding: '8px' }}>{row.quarterLabel}</td>
+                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                  {row.gdrive_folder_url
+                                    ? <a href={row.gdrive_folder_url} target="_blank" rel="noreferrer" title="Abrir carpeta en Drive" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#e8f5e9', color: '#2e7d32', border: '1px solid #a5d6a7', borderRadius: '6px', padding: '3px 10px', fontSize: '12px', fontWeight: 600, textDecoration: 'none' }}>📂 Abrir</a>
+                                    : <span style={{ color: '#aaa', fontSize: '12px' }}>Sin carpeta</span>
+                                  }
+                                </td>
+                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                  <span style={{ background: '#e3f2fd', color: '#1565c0', borderRadius: '999px', padding: '2px 10px', fontWeight: 600, fontSize: '13px' }}>{row.tp}</span>
+                                </td>
+                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                  <span style={{ background: '#fff3e0', color: '#e65100', borderRadius: '999px', padding: '2px 10px', fontWeight: 600, fontSize: '13px' }}>{row.parcial}</span>
+                                </td>
+                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                  <span style={{ background: '#f3e5f5', color: '#6a1b9a', borderRadius: '999px', padding: '2px 10px', fontWeight: 600, fontSize: '13px' }}>{row.final}</span>
+                                </td>
+                                <td style={{ padding: '8px', textAlign: 'center', fontWeight: 700 }}>{(row.tp || 0) + (row.parcial || 0) + (row.final || 0)}</td>
+                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                  <button
+                                    style={{ ...styles.button, background: '#1976d2', padding: '5px 14px', fontSize: '13px' }}
+                                    onClick={() => {
+                                      const ctx = { career: row.career, study_plan: row.study_plan || '', subject: row.subject }
+                                      setInstrumentsSubject(ctx)
+                                      setInstrumentsList([])
+                                      setInstrumentFolder(null)
+                                      fetchInstrumentsBySubject(ctx.career, ctx.subject)
+                                      fetchInstrumentFolder(ctx.career, ctx.subject, ctx.study_plan)
+                                    }}
+                                  >
+                                    Ver
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </>
+                  )
+                })()}
+              </>
+            ) : (
+              // ── DETAIL VIEW: instruments for a subject ────────────────────
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                  <button
+                    style={{ ...styles.button, background: '#78909c', padding: '5px 12px', fontSize: '13px' }}
+                    onClick={() => {
+                      setInstrumentsSubject(null)
+                      setInstrumentsList([])
+                      setInstrumentFolder(null)
+                      setInstrumentFolderError('')
+                      setInstrumentFolderLinkMode(false)
+                    }}
+                  >
+                    ← Volver
+                  </button>
+                  <h2 style={{ margin: 0, flex: 1 }}>
+                    {instrumentsSubject.subject}
+                    <span style={{ fontWeight: 400, fontSize: '14px', color: '#666', marginLeft: '10px' }}>{instrumentsSubject.career}</span>
+                  </h2>
+                  <button
+                    style={{ ...styles.button, background: '#2e7d32' }}
+                    onClick={() => {
+                      setUploadInstrumentFiles([])
+                      setUploadInstrumentError('')
+                      setShowUploadInstrumentModal(true)
+                    }}
+                  >
+                    ↑ Subir archivos
+                  </button>
+                </div>
+
+                {/* Drive folder card */}
+                <div style={{ background: '#f0f4ff', border: '1px solid #c5d5f5', borderRadius: '8px', padding: '14px 18px', marginBottom: '18px' }}>
+                  <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '8px' }}>📂 Carpeta de Google Drive para esta asignatura</div>
+                  {instrumentFolderLoading ? (
+                    <div style={{ color: '#888', fontSize: '13px' }}>Verificando carpeta...</div>
+                  ) : instrumentFolder && instrumentFolder.gdrive_folder_url ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <span style={{ background: '#d4edda', color: '#155724', border: '1px solid #c3e6cb', borderRadius: '6px', padding: '4px 10px', fontSize: '13px', fontWeight: 600 }}>✅ Carpeta vinculada</span>
+                      <a
+                        href={instrumentFolder.gdrive_folder_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9', borderRadius: '6px', padding: '4px 12px', fontSize: '13px', fontWeight: 600, textDecoration: 'none' }}
+                      >
+                        📂 Abrir carpeta
+                      </a>
+                      {!isDocenteView && <button style={{ ...styles.button, background: '#78909c', padding: '4px 10px', fontSize: '12px' }} onClick={() => { setInstrumentFolderLinkMode(true); setInstrumentFolderLinkInput(instrumentFolder.gdrive_folder_url || '') }}>Cambiar URL</button>}
+                      {!isDocenteView && <button style={{ ...styles.button, background: '#c62828', padding: '4px 10px', fontSize: '12px' }} onClick={unlinkInstrumentDriveFolder} disabled={instrumentFolderLoading}>Desvincular</button>}
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: '13px', color: '#555', marginBottom: '10px' }}
+                      >{isDocenteView
+                          ? 'No hay carpeta de Drive vinculada para esta asignatura. Los archivos se guardarán solo localmente. Podés crear una carpeta automáticamente.'
+                          : 'No hay carpeta de Drive vinculada para esta asignatura. Los archivos se guardarán solo localmente.\nPodés crear automáticamente una subcarpeta dentro de la carpeta raíz de la carrera, o pegar la URL de una carpeta existente.'}</div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button
+                          style={{ ...styles.button, background: '#1565c0' }}
+                          onClick={createInstrumentDriveFolder}
+                          disabled={instrumentFolderLoading}
+                        >
+                          {instrumentFolderLoading ? 'Creando...' : '➕ Crear carpeta en Drive'}
+                        </button>
+                        {!isDocenteView && (
+                          <button
+                            style={{ ...styles.button, background: '#6c757d' }}
+                            onClick={() => setInstrumentFolderLinkMode(v => !v)}
+                          >
+                            {instrumentFolderLinkMode ? 'Cancelar' : '🔗 Vincular URL existente'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {instrumentFolderLinkMode && !isDocenteView && (
+                    <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: '280px' }}>
+                        <input
+                          style={{ ...styles.input, marginBottom: 0, width: '100%', borderColor: instrumentFolderLinkInput && !isValidDriveFolderUrl(instrumentFolderLinkInput.trim()) ? '#d32f2f' : undefined }}
+                          placeholder="https://drive.google.com/drive/folders/..."
+                          value={instrumentFolderLinkInput}
+                          onChange={e => { setInstrumentFolderLinkInput(e.target.value); setInstrumentFolderError('') }}
+                        />
+                        {instrumentFolderLinkInput && !isValidDriveFolderUrl(instrumentFolderLinkInput.trim()) && (
+                          <div style={{ color: '#d32f2f', fontSize: '12px', marginTop: '4px' }}>URL inválida — debe ser una URL de carpeta de Google Drive.</div>
+                        )}
+                      </div>
+                      <button
+                        style={{ ...styles.button, background: '#4caf50' }}
+                        onClick={() => linkInstrumentDriveFolder(instrumentFolderLinkInput)}
+                        disabled={instrumentFolderLoading || !instrumentFolderLinkInput.trim() || !isValidDriveFolderUrl(instrumentFolderLinkInput.trim())}
+                      >
+                        Vincular
+                      </button>
+                      <button
+                        style={{ ...styles.button, background: '#999' }}
+                        onClick={() => { setInstrumentFolderLinkMode(false); setInstrumentFolderLinkInput(''); setInstrumentFolderError('') }}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                  {instrumentFolderError && (
+                    <div style={{ marginTop: '8px', color: '#b00020', fontSize: '13px' }}>{instrumentFolderError}</div>
+                  )}
+                </div>
+
+                {/* Instruments table */}
+                {instrumentsLoading && <div style={{ color: '#888' }}>Cargando instrumentos...</div>}
+                {instrumentsError && <div style={{ color: '#b00020', marginBottom: '10px' }}>{instrumentsError}</div>}
+
+                {!instrumentsLoading && instrumentsList.length === 0 && (
+                  <div style={{ color: '#888', padding: '32px', textAlign: 'center', background: '#f9f9f9', borderRadius: '8px', border: '1px dashed #ccc' }}>
+                    <div style={{ fontSize: '40px', marginBottom: '8px' }}>📂</div>
+                    <div>Todavía no hay instrumentos cargados para <strong>{instrumentsSubject.subject}</strong>.</div>
+                    <div style={{ marginTop: '8px', fontSize: '13px', color: '#aaa' }}>Presioná “↑ Subir archivos” para agregar TP, exámenes parciales o finales.</div>
+                  </div>
+                )}
+
+                {!instrumentsLoading && instrumentsList.length > 0 && (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                    <thead>
+                      <tr style={{ background: '#f0f4f8' }}>
+                        <th style={{ padding: '9px 12px', textAlign: 'left', borderBottom: '2px solid #dde3ea' }}>Archivo</th>
+                        <th style={{ padding: '9px 12px', textAlign: 'center', borderBottom: '2px solid #dde3ea' }}>Tipo</th>
+                        <th style={{ padding: '9px 12px', textAlign: 'center', borderBottom: '2px solid #dde3ea' }}>Tamaño</th>
+                        <th style={{ padding: '9px 12px', textAlign: 'center', borderBottom: '2px solid #dde3ea' }}>Drive</th>
+                        <th style={{ padding: '9px 12px', textAlign: 'center', borderBottom: '2px solid #dde3ea' }}>Fecha</th>
+                        <th style={{ padding: '9px 12px', textAlign: 'center', borderBottom: '2px solid #dde3ea' }}>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {instrumentsList.map((inst, idx) => {
+                        const typeBadge = inst.instrument_type === 'TP'
+                          ? { bg: '#e3f2fd', color: '#1565c0', label: 'TP' }
+                          : inst.instrument_type === 'Parcial'
+                            ? { bg: '#fff3e0', color: '#e65100', label: 'Parcial' }
+                            : { bg: '#f3e5f5', color: '#6a1b9a', label: 'Final' }
+                        const sizeStr = inst.file_size ? (inst.file_size < 1024 * 1024 ? `${(inst.file_size / 1024).toFixed(1)} KB` : `${(inst.file_size / (1024 * 1024)).toFixed(1)} MB`) : '-'
+                        const dateStr = inst.created_at ? new Date(inst.created_at).toLocaleDateString('es-AR', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '-'
+                        return (
+                          <tr key={inst.id} style={{ background: idx % 2 === 0 ? '#fff' : '#f7fafc', borderBottom: '1px solid #eee' }}>
+                            <td style={{ padding: '9px 12px', maxWidth: '300px' }}>
+                              <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inst.original_filename}>{inst.title || inst.original_filename}</div>
+                              {inst.title && inst.title !== inst.original_filename && (
+                                <div style={{ fontSize: '11px', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inst.original_filename}</div>
+                              )}
+                            </td>
+                            <td style={{ padding: '9px 12px', textAlign: 'center' }}>
+                              <span style={{ background: typeBadge.bg, color: typeBadge.color, borderRadius: '999px', padding: '3px 10px', fontWeight: 700, fontSize: '12px' }}>{typeBadge.label}</span>
+                            </td>
+                            <td style={{ padding: '9px 12px', textAlign: 'center', color: '#666', fontSize: '13px' }}>{sizeStr}</td>
+                            <td style={{ padding: '9px 12px', textAlign: 'center' }}>
+                              {inst.gdrive_url
+                                ? <a href={inst.gdrive_url} target="_blank" rel="noreferrer" style={{ color: '#1565c0', fontSize: '13px' }}>Ver en Drive</a>
+                                : <span style={{ color: '#bbb', fontSize: '12px' }}>Solo local</span>}
+                            </td>
+                            <td style={{ padding: '9px 12px', textAlign: 'center', color: '#666', fontSize: '13px' }}>{dateStr}</td>
+                            <td style={{ padding: '9px 12px', textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                <a
+                                  href={`${API_BASE_URL}/instruments/${inst.id}/file`}
+                                  download={inst.original_filename}
+                                  style={{ ...styles.button, background: '#1976d2', textDecoration: 'none', padding: '4px 10px', fontSize: '12px', display: 'inline-block' }}
+                                >
+                                  ↓ Descargar
+                                </a>
+                                <button
+                                  style={{ ...styles.button, background: '#c62828', padding: '4px 10px', fontSize: '12px' }}
+                                  onClick={() => deleteInstrument(inst.id)}
+                                  disabled={instrumentDeleteLoading === inst.id}
+                                >
+                                  {instrumentDeleteLoading === inst.id ? '...' : 'Eliminar'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* UPLOAD INSTRUMENTS MODAL */}
+        {showUploadInstrumentModal && instrumentsSubject && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+            <div style={{ background: '#fff', borderRadius: '10px', padding: '28px 32px', width: '580px', maxWidth: '96vw', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,.2)' }}>
+              <h3 style={{ marginTop: 0 }}>Subir instrumentos — {instrumentsSubject.subject}</h3>
+
+              <div
+                style={{ border: '2px dashed #90caf9', borderRadius: '8px', padding: '24px', textAlign: 'center', cursor: 'pointer', marginBottom: '16px', background: '#f0f8ff' }}
+                onClick={() => document.getElementById('instrUploadInput').click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault()
+                  const droppedFiles = Array.from(e.dataTransfer.files)
+                  setUploadInstrumentFiles(prev => [
+                    ...prev,
+                    ...droppedFiles.map(f => ({ file: f, type: '', title: '' }))
+                  ])
+                }}
+              >
+                <div style={{ fontSize: '32px' }}>📂</div>
+                <div style={{ color: '#555', marginTop: '6px' }}>Arrastrá archivos aquí o hace clic para seleccionar</div>
+                <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>PDF, DOCX, TXT, ZIP, RAR, imágenes y más</div>
+                <input
+                  id="instrUploadInput"
+                  type="file"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const selected = Array.from(e.target.files)
+                    setUploadInstrumentFiles(prev => [
+                      ...prev,
+                      ...selected.map(f => ({ file: f, type: '', title: '' }))
+                    ])
+                    e.target.value = ''
+                  }}
+                />
+              </div>
+
+              {uploadInstrumentFiles.length > 0 && (
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '14px', color: '#333' }}>Archivos seleccionados ({uploadInstrumentFiles.length})</div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: '#f5f5f5' }}>
+                        <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Archivo</th>
+                        <th style={{ padding: '7px 10px', textAlign: 'center', borderBottom: '1px solid #ddd', width: '130px' }}>Tipo *</th>
+                        <th style={{ padding: '7px 10px', textAlign: 'center', borderBottom: '1px solid #ddd', width: '36px' }}>-</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {uploadInstrumentFiles.map((item, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                          <td style={{ padding: '6px 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }} title={item.file.name}>
+                            {item.file.name}
+                            <div style={{ fontSize: '11px', color: '#999' }}>{item.file.size < 1024 * 1024 ? `${(item.file.size / 1024).toFixed(1)} KB` : `${(item.file.size / (1024 * 1024)).toFixed(1)} MB`}</div>
+                          </td>
+                          <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                            <select
+                              style={{ border: item.type ? '1px solid #90caf9' : '2px solid #f44336', borderRadius: '6px', padding: '3px 6px', fontSize: '13px', background: '#fff', cursor: 'pointer' }}
+                              value={item.type}
+                              onChange={e => {
+                                const newType = e.target.value
+                                setUploadInstrumentFiles(prev => prev.map((it, idx) => idx === i ? { ...it, type: newType } : it))
+                              }}
+                            >
+                              <option value="">-- tipo --</option>
+                              <option value="TP">TP</option>
+                              <option value="Parcial">Parcial</option>
+                              <option value="Final">Final</option>
+                            </select>
+                          </td>
+                          <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                            <button
+                              style={{ background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', fontWeight: 700, fontSize: '16px', lineHeight: 1 }}
+                              onClick={() => setUploadInstrumentFiles(prev => prev.filter((_, idx) => idx !== i))}
+                              title="Quitar archivo"
+                            >×</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {uploadInstrumentError && (
+                <div style={{ color: '#b00020', marginBottom: '12px', fontSize: '13px' }}>{uploadInstrumentError}</div>
+              )}
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  style={{ ...styles.button, background: '#999' }}
+                  onClick={() => { setShowUploadInstrumentModal(false); setUploadInstrumentFiles([]); setUploadInstrumentError('') }}
+                  disabled={uploadInstrumentLoading}
+                >
+                  Cancelar
+                </button>
+                <button
+                  style={{ ...styles.button, background: uploadInstrumentFiles.length === 0 ? '#bbb' : '#2e7d32' }}
+                  onClick={uploadInstrumentsFiles}
+                  disabled={uploadInstrumentLoading || uploadInstrumentFiles.length === 0}
+                >
+                  {uploadInstrumentLoading ? 'Subiendo...' : `Subir ${uploadInstrumentFiles.length} archivo${uploadInstrumentFiles.length !== 1 ? 's' : ''}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* VIEW PROPOSAL MODAL */}
         {viewProposal && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
             <div style={{ background: '#fff', borderRadius: '8px', width: '95vw', maxWidth: '1300px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
 
               {/* HEADER FIJO: título + botón cerrar */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 30px', borderBottom: '1px solid #e2e8f0', flexShrink: 0 }}>
-                <h2 style={{ margin: 0 }}>Resumen de Propuesta: {viewProposal.subject || viewProposal.title || `#${viewProposal.id}`}</h2>
-                <button
-                  style={{ ...styles.button, background: '#999', marginRight: 0 }}
-                  onClick={() => {
-                    setViewProposal(null)
-                    setViewProposalOriginMenu('')
-                    setViewProposalExpandedSuggestions({})
-                  }}
-                >
-                  Cerrar
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 30px', borderBottom: '1px solid #e2e8f0', flexShrink: 0, gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <h2 style={{ margin: 0 }}>Resumen de Propuesta: {viewProposal.subject || viewProposal.title || `#${viewProposal.id}`}</h2>
+                  {viewProposal.editing_locked ? (
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#b71c1c', background: '#ffebee', border: '1px solid #ef9a9a', borderRadius: '999px', padding: '4px 12px', whiteSpace: 'nowrap' }}>
+                      🔒 Cerrada para edición
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#2e7d32', background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: '999px', padding: '4px 12px', whiteSpace: 'nowrap' }}>
+                      🔓 Edición habilitada
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {!isDocenteView && (
+                    <button
+                      style={{ ...styles.button, marginRight: 0, background: viewProposal.editing_locked ? '#2e7d32' : '#c62828', color: '#fff', whiteSpace: 'nowrap' }}
+                      onClick={() => toggleProposalLock(viewProposal.id, !viewProposal.editing_locked)}
+                      disabled={lockLoading}
+                      title={viewProposal.editing_locked ? 'Habilitar edición de esta propuesta' : 'Cerrar edición de esta propuesta'}
+                    >
+                      {viewProposal.editing_locked ? '🔓 Habilitar edición' : '🔒 Cerrar edición'}
+                    </button>
+                  )}
+                  <button
+                    style={{ ...styles.button, background: '#999', marginRight: 0 }}
+                    onClick={() => {
+                      setViewProposal(null)
+                      setViewProposalOriginMenu('')
+                      setViewProposalExpandedSuggestions({})
+                    }}
+                  >
+                    Cerrar
+                  </button>
+                </div>
               </div>
 
               {/* CUERPO SCROLLEABLE */}
@@ -16483,10 +17465,10 @@ const App = () => {
                     Abrir en Google Docs
                   </button>
                   <button
-                    style={{ ...styles.button, background: viewProposal.gdoc_url ? '#00695c' : '#bbb' }}
+                    style={{ ...styles.button, background: (viewProposal.gdoc_url && !viewProposal.editing_locked) ? '#00695c' : '#bbb' }}
                     onClick={() => validateProposalGdocRemote(viewProposal.id, { openDiffOnUpdated: true, notifyOnOk: true })}
-                    disabled={!viewProposal.gdoc_url || viewProposalGdocValidateLoading}
-                    title={!viewProposal.gdoc_url ? 'Sin enlace de Google Docs' : 'Validar si hay cambios remotos en Google Docs'}
+                    disabled={!viewProposal.gdoc_url || viewProposalGdocValidateLoading || viewProposal.editing_locked}
+                    title={viewProposal.editing_locked ? 'La propuesta está cerrada, no se controla sincronización' : (!viewProposal.gdoc_url ? 'Sin enlace de Google Docs' : 'Validar si hay cambios remotos en Google Docs')}
                   >
                     {viewProposalGdocValidateLoading ? 'Validando remoto...' : 'Validar cambios remotos (GDoc)'}
                   </button>
@@ -16506,7 +17488,7 @@ const App = () => {
                 </div>
               )}
 
-              {(viewProposalGdocUpdateAvailable || viewProposalGdocUpdateMessage) && (
+              {(viewProposalGdocUpdateAvailable || viewProposalGdocUpdateMessage) && !viewProposal.editing_locked && (
                 <div style={{ marginTop: '12px', padding: '10px', background: '#e8f0fe', borderRadius: '6px', border: '1px solid #c6dafc', color: '#174ea6', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
                   <div>{viewProposalGdocUpdateMessage || 'El documento fue actualizado en Google Docs.'}</div>
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -16775,14 +17757,47 @@ const App = () => {
                         </button>
                       )}
                     </div>
-                    {viewProposalGdocError && (
+                    {viewProposalGdocAuthNeeded ? (
+                      <div style={{ marginTop: '10px', padding: '14px 16px', background: '#fff8e1', border: '1px solid #ffc107', borderRadius: '8px' }}>
+                        <div style={{ fontWeight: 700, color: '#b8860b', marginBottom: '6px' }}>⚠️ Token de Google expirado o revocado</div>
+                        <div style={{ fontSize: '13px', color: '#555', marginBottom: '12px' }}>
+                          El acceso a Google Drive expiró. Hacé clic en <strong>Reautorizar</strong>, completá el flujo de Google en la nueva ventana y luego presioná <strong>Ya autoricé, reintentar</strong>.
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            style={{ ...styles.button, background: '#f59e0b' }}
+                            onClick={async () => {
+                              try {
+                                const r = await fetch(`${API_BASE_URL}/auth/google/authorize`)
+                                const d = await r.json()
+                                if (d.auth_url) window.open(d.auth_url, '_blank', 'width=600,height=700,noopener')
+                              } catch (e) {
+                                alert('No se pudo obtener la URL de autorización: ' + e.message)
+                              }
+                            }}
+                          >
+                            🔑 Reautorizar con Google
+                          </button>
+                          <button
+                            style={{ ...styles.button, background: '#4caf50' }}
+                            onClick={() => {
+                              setViewProposalGdocAuthNeeded(false)
+                              setViewProposalGdocError('')
+                              createAndLinkProposalGdoc(viewProposal.id)
+                            }}
+                          >
+                            ✓ Ya autoricé, reintentar
+                          </button>
+                        </div>
+                      </div>
+                    ) : viewProposalGdocError ? (
                       <div style={{ marginTop: '8px', color: '#b00020' }}>{viewProposalGdocError}</div>
-                    )}
+                    ) : null}
                   </div>
                 )}
               </div>
 
-              {viewProposal.gdoc_url && (
+              {viewProposal.gdoc_url && !viewProposal.editing_locked && (
                 <div style={{ marginTop: '12px', padding: '12px', background: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
                   <div style={{ fontWeight: 600, marginBottom: '8px', color: '#15803d' }}>📤 Cambios locales a Google Docs</div>
                   <button
