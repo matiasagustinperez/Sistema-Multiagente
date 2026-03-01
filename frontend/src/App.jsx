@@ -516,6 +516,11 @@ const App = () => {
   const [selectedSubjectForCorrelatives, setSelectedSubjectForCorrelatives] = useState(null)
   const [confirmActivePlanId, setConfirmActivePlanId] = useState(null)
   const [showConfirmDelete, setShowConfirmDelete] = useState(null)
+  const [deleteProposalModal, setDeleteProposalModal] = useState(null) // {proposalId, subject, career, study_plan, subjectPlanId}
+  const [planIsDirty, setPlanIsDirty] = useState(false)
+  const [planUnsavedModal, setPlanUnsavedModal] = useState(null) // {type:'menu'|'career', value:string}
+  const planNavBypassRef = useRef(false)
+  const planJustEnteredRef = useRef(false)
   const [showDuplicatePlanModal, setShowDuplicatePlanModal] = useState(false)
   const [duplicatePlanTarget, setDuplicatePlanTarget] = useState(null)
   const [duplicatePlanName, setDuplicatePlanName] = useState('')
@@ -711,6 +716,13 @@ const App = () => {
     }
   }, [activeCareer, planName, editingPlanId, savedPlans])
 
+  // Detectar cambios sin guardar en el plan de estudios
+  useEffect(() => {
+    if (planMode !== 'edit' && planMode !== 'new') return
+    if (planJustEnteredRef.current) { planJustEnteredRef.current = false; return }
+    setPlanIsDirty(true)
+  }, [planName, planYears]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const normalizedPlanName = String(planName || '').trim().toLowerCase()
     if (!normalizedPlanName || !isPlanNameDuplicate) return
@@ -806,6 +818,11 @@ const App = () => {
 
   // Reset all form data when changing menus
   const handleMenuChange = (menu) => {
+    if (planIsDirty && !planNavBypassRef.current) {
+      setPlanUnsavedModal({ type: 'menu', value: menu })
+      return
+    }
+    planNavBypassRef.current = false
     setActiveMenu(menu)
     setFormData(emptyFormData)
     setProposalsMode(null)
@@ -846,6 +863,9 @@ const App = () => {
     setInstrumentsFoldersList([])
     setInstrumentsTableSort({ key: '', direction: 'asc' })
     setInstrumentsTableFilters({ subject: '', yearLabel: '', quarterLabel: '' })
+    setDeleteProposalModal(null)
+    setPlanIsDirty(false)
+    setPlanUnsavedModal(null)
   }
 
   useEffect(() => {
@@ -4597,7 +4617,7 @@ const App = () => {
     }
   }
 
-  async function fetchStudyPlans(career) {
+  async function fetchStudyPlans(career, { keepMode = false } = {}) {
     if (!career) return
     try {
       const res = await fetch(`${API_BASE_URL}/study-plans-storage?career=${encodeURIComponent(career)}`)
@@ -4613,7 +4633,7 @@ const App = () => {
       }))
       const activePlan = plans.find((p) => p.is_active === true) || plans[0] || null
       setSelectedPlanFilterId(activePlan?.id || null)
-      setPlanMode('list')
+      if (!keepMode) setPlanMode('list')
     } catch (err) {
       console.error('Error loading study plans:', err)
       setSavedPlans((prev) => ({
@@ -4621,8 +4641,47 @@ const App = () => {
         [career]: []
       }))
       setSelectedPlanFilterId(null)
-      setPlanMode('list')
+      if (!keepMode) setPlanMode('list')
       setStatusMsg(`Error al cargar planes: ${err.message || 'desconocido'}`)
+      setStatusType('error')
+    }
+  }
+
+  const handleSavePlan = async () => {
+    const trimmedPlanName = String(planName || '').trim()
+    if (!trimmedPlanName) { setPlanError('Ingresa un nombre para el plan'); return }
+    if (isPlanNameDuplicate) {
+      setPlanNameDuplicateValue(trimmedPlanName)
+      setShowPlanNameDuplicateModal(true)
+      return
+    }
+    const existingNames = (savedPlans[activeCareer] || [])
+      .filter((p) => p.id !== editingPlanId)
+      .map((p) => String(p.name || '').trim().toLowerCase())
+    if (existingNames.includes(trimmedPlanName.toLowerCase())) {
+      setPlanNameDuplicateValue(trimmedPlanName)
+      setShowPlanNameDuplicateModal(true)
+      return
+    }
+    if (planYears.length === 0) { setPlanError('Agrega al menos un año al plan'); return }
+    let isActive = false
+    if (editingPlanId) {
+      isActive = savedPlans[activeCareer]?.find((p) => p.id === editingPlanId)?.is_active === true
+    } else {
+      isActive = !(savedPlans[activeCareer] || []).some((p) => p.is_active === true)
+    }
+    const newPlan = { id: editingPlanId || undefined, name: trimmedPlanName, years: planYears, is_active: isActive }
+    try {
+      const saved = await saveStudyPlanToBackend(activeCareer, newPlan)
+      setStatusMsg(`Plan "${saved?.name || trimmedPlanName}" guardado correctamente`)
+      setStatusType('success')
+      setPlanMode('list')
+      setPlanName('')
+      setPlanYears([])
+      setEditingPlanId(null)
+      setPlanIsDirty(false)
+    } catch (err) {
+      setStatusMsg(`Error al guardar plan: ${err.message || 'desconocido'}`)
       setStatusType('error')
     }
   }
@@ -4650,7 +4709,7 @@ const App = () => {
       throw new Error(errorData.detail || `Error ${res.status}`)
     }
     const saved = await res.json()
-    await fetchStudyPlans(career)
+    await fetchStudyPlans(career, { keepMode: true })
     return saved
   }
 
@@ -7573,16 +7632,57 @@ const App = () => {
       setStatusType('error')
       return
     }
-    if (!window.confirm(`Eliminar propuesta #${proposalId}? Esta accion no se puede deshacer.`)) {
-      return
+    // Find the proposal to get its subject info
+    const proposal = proposals.find(p => p.id === proposalId)
+    const career = proposal?.career || activeCareer || ''
+    const subject = proposal?.subject || ''
+    const study_plan = proposal?.study_plan || proposal?.plan || ''
+    // Check if subject exists in any plan
+    let subjectPlanId = null
+    if (career && subject) {
+      const allSubjects = getPlanSubjects(career)
+      const found = allSubjects.find(s => normalizeText(s.name) === normalizeText(subject))
+      if (found) subjectPlanId = found.id
     }
+    setDeleteProposalModal({ proposalId, subject, career, study_plan, subjectPlanId })
+  }
+
+  const execDeleteProposal = async (proposalId, alsoDeleteSubject, modalData) => {
+    setDeleteProposalModal(null)
     try {
-      const res = await fetch(`http://localhost:8001/proposals/${proposalId}`, { method: 'DELETE' })
+      const res = await fetch(`${API_BASE_URL}/proposals/${proposalId}`, { method: 'DELETE' })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
-      setStatusMsg(`Propuesta #${proposalId} eliminada`)
+      if (alsoDeleteSubject && modalData?.subjectPlanId && modalData?.career) {
+        // Plans are stored as JSON blobs — remove the subject directly from the plan structure
+        const career = modalData.career
+        const plan = getActivePlan(career)
+        if (plan) {
+          const updatedYears = (plan.years || []).map(y => ({
+            ...y,
+            terms: (y.terms || []).map(t => ({
+              ...t,
+              subjects: (t.subjects || []).filter(s => s.id !== modalData.subjectPlanId)
+            }))
+          }))
+          try {
+            await saveStudyPlanToBackend(career, {
+              id: plan.id,
+              name: plan.name,
+              years: updatedYears,
+              is_active: plan.is_active
+            })
+            await fetchStudyPlans(career)
+          } catch (err) {
+            throw new Error(`Propuesta eliminada, pero error al quitar asignatura del plan: ${err.message}`)
+          }
+        }
+        setStatusMsg(`Propuesta #${proposalId} y asignatura "${modalData.subject}" eliminadas del plan`)
+      } else {
+        setStatusMsg(`Propuesta #${proposalId} eliminada`)
+      }
       setStatusType('success')
       fetchProposals()
     } catch (err) {
@@ -9868,7 +9968,13 @@ const App = () => {
           <select
             style={{ ...styles.input, marginBottom: 0 }}
             value={activeCareer}
-            onChange={(e) => setActiveCareer(e.target.value)}
+            onChange={(e) => {
+              if (planIsDirty) {
+                setPlanUnsavedModal({ type: 'career', value: e.target.value })
+                return
+              }
+              setActiveCareer(e.target.value)
+            }}
           >
             <option value="">Seleccionar carrera...</option>
             {careerOptions.map((career) => (
@@ -14280,6 +14386,8 @@ const App = () => {
                       <button
                         style={{ ...styles.button, background: '#4caf50' }}
                         onClick={() => {
+                          planJustEnteredRef.current = true
+                          setPlanIsDirty(false)
                           setPlanMode('new')
                           setPlanName('')
                           setPlanYears([{ id: Date.now(), year: 1, terms: [] }])
@@ -14333,6 +14441,8 @@ const App = () => {
                                   style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
                                   title="Editar plan"
                                   onClick={() => {
+                                    planJustEnteredRef.current = true
+                                    setPlanIsDirty(false)
                                     setPlanMode('edit')
                                     setPlanName(plan.name)
                                     setPlanYears(plan.years || [])
@@ -14388,6 +14498,7 @@ const App = () => {
                           setPlanYears([])
                           setEditingPlanId(null)
                           setPlanError('')
+                          setPlanIsDirty(false)
                         }}
                       >
                         ← Volver a Lista
@@ -14537,62 +14648,7 @@ const App = () => {
                           ...(isPlanNameDuplicate && styles.buttonDisabled)
                         }}
                         disabled={isPlanNameDuplicate}
-                        onClick={async () => {
-                          const trimmedPlanName = String(planName || '').trim()
-                          if (!trimmedPlanName) {
-                            setPlanError('Ingresa un nombre para el plan')
-                            return
-                          }
-                          if (isPlanNameDuplicate) {
-                            setPlanNameDuplicateValue(trimmedPlanName)
-                            setShowPlanNameDuplicateModal(true)
-                            return
-                          }
-                          const existingNames = (savedPlans[activeCareer] || [])
-                            .filter((p) => p.id !== editingPlanId)
-                            .map((p) => String(p.name || '').trim().toLowerCase())
-                          if (existingNames.includes(trimmedPlanName.toLowerCase())) {
-                            setPlanNameDuplicateValue(trimmedPlanName)
-                            setShowPlanNameDuplicateModal(true)
-                            return
-                          }
-
-                          if (planYears.length === 0) {
-                            setPlanError('Agrega al menos un año al plan')
-                            return
-                          }
-
-                          // Determinar si este plan debe ser vigente
-                          let isActive = false
-                          if (editingPlanId) {
-                            // Si estamos editando, mantener su estado actual
-                            isActive = savedPlans[activeCareer]?.find((p) => p.id === editingPlanId)?.is_active === true
-                          } else {
-                            // Si es nuevo plan, solo es vigente si no hay ninguno vigente actualmente
-                            const hasActivePlan = (savedPlans[activeCareer] || []).some((p) => p.is_active === true)
-                            isActive = !hasActivePlan
-                          }
-
-                          const newPlan = {
-                            id: editingPlanId || undefined,
-                            name: trimmedPlanName,
-                            years: planYears,
-                            is_active: isActive
-                          }
-
-                          try {
-                            const saved = await saveStudyPlanToBackend(activeCareer, newPlan)
-                            setStatusMsg(`Plan "${saved?.name || trimmedPlanName}" guardado correctamente`)
-                            setStatusType('success')
-                            setPlanMode('list')
-                            setPlanName('')
-                            setPlanYears([])
-                            setEditingPlanId(null)
-                          } catch (err) {
-                            setStatusMsg(`Error al guardar plan: ${err.message || 'desconocido'}`)
-                            setStatusType('error')
-                          }
-                        }}
+                        onClick={handleSavePlan}
                       >
                         {editingPlanId ? '✓ Guardar Cambios' : '✓ Guardar Nuevo Plan'}
                       </button>
@@ -15007,6 +15063,7 @@ const App = () => {
                               setStatusMsg('Correlativas guardadas')
                               setStatusType('success')
                               setCorrelativeMode(false)
+                              setPlanIsDirty(false)
                             }}
                           >
                             ✓ Guardar Correlativas
@@ -17261,6 +17318,118 @@ const App = () => {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* DELETE PROPOSAL MODAL */}
+        {deleteProposalModal && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+            <div style={{ background: '#fff', borderRadius: '10px', padding: '28px 32px', width: '480px', maxWidth: '96vw', boxShadow: '0 8px 32px rgba(0,0,0,.22)' }}>
+              <h3 style={{ marginTop: 0, color: '#c62828' }}>🗑️ Eliminar propuesta</h3>
+              <p style={{ color: '#333', marginBottom: '6px' }}>
+                Vas a eliminar la propuesta <strong>#{deleteProposalModal.proposalId}</strong>{deleteProposalModal.subject ? ` — ${deleteProposalModal.subject}` : ''}.
+              </p>
+              {deleteProposalModal.subjectPlanId ? (
+                <p style={{ color: '#555', fontSize: '14px', marginBottom: '20px' }}>
+                  La asignatura <strong>{deleteProposalModal.subject}</strong> también existe en el plan de estudios{deleteProposalModal.study_plan ? ` (${deleteProposalModal.study_plan})` : ''}. ¿Querés eliminarla del plan también?
+                </p>
+              ) : (
+                <p style={{ color: '#888', fontSize: '13px', marginBottom: '20px' }}>
+                  Esta acción no se puede deshacer.
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <button
+                  style={{ ...styles.button, background: '#78909c' }}
+                  onClick={() => setDeleteProposalModal(null)}
+                >Cancelar</button>
+                <button
+                  style={{ ...styles.button, background: '#e53935' }}
+                  onClick={() => execDeleteProposal(deleteProposalModal.proposalId, false, deleteProposalModal)}
+                >Solo eliminar propuesta</button>
+                {deleteProposalModal.subjectPlanId && (
+                  <button
+                    style={{ ...styles.button, background: '#b71c1c' }}
+                    onClick={() => execDeleteProposal(deleteProposalModal.proposalId, true, deleteProposalModal)}
+                  >Eliminar propuesta y del plan</button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* FLOATING PLAN SAVE BAR */}
+        {activeMenu === 'plan' && (planMode === 'edit' || planMode === 'new') && (
+          <div style={{
+            position: 'fixed', bottom: '24px', right: '28px', zIndex: 1050,
+            background: planIsDirty ? '#fff' : '#f5f5f5',
+            border: planIsDirty ? '2px solid #f59e0b' : '2px solid #e0e0e0',
+            borderRadius: '12px',
+            padding: '12px 18px',
+            boxShadow: planIsDirty ? '0 4px 20px rgba(245,158,11,0.25)' : '0 2px 8px rgba(0,0,0,0.1)',
+            display: 'flex', alignItems: 'center', gap: '14px',
+            transition: 'all 0.2s ease'
+          }}>
+            <span style={{ fontSize: '13px', color: planIsDirty ? '#92400e' : '#9e9e9e', fontWeight: planIsDirty ? 600 : 400 }}>
+              {planIsDirty ? '⚠️ Cambios sin guardar' : '✓ Sin cambios'}
+            </span>
+            {planIsDirty && (
+              <button
+                style={{ ...styles.button, background: 'transparent', color: '#64748b', padding: '6px 10px', fontSize: '12px', border: '1px solid #cbd5e1' }}
+                title="Descartar cambios y volver al listado"
+                onClick={() => {
+                  setPlanMode('list')
+                  setPlanName('')
+                  setPlanYears([])
+                  setEditingPlanId(null)
+                  setPlanError('')
+                  setPlanIsDirty(false)
+                }}
+              >✖ Descartar</button>
+            )}
+            <button
+              style={{ ...styles.button, background: planIsDirty ? '#16a34a' : '#bdbdbd', color: '#fff', padding: '8px 18px', fontSize: '13px', fontWeight: 700, cursor: planIsDirty ? 'pointer' : 'not-allowed', opacity: 1 }}
+              disabled={!planIsDirty}
+              onClick={handleSavePlan}
+              title={planIsDirty ? 'Guardar cambios' : 'No hay cambios por guardar'}
+            >💾 Guardar</button>
+          </div>
+        )}
+
+        {/* PLAN UNSAVED CHANGES MODAL */}
+        {planUnsavedModal && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+            <div style={{ background: '#fff', borderRadius: '12px', padding: '28px 32px', width: '440px', maxWidth: '95vw', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+              <h3 style={{ margin: '0 0 12px', fontSize: '17px' }}>⚠️ Cambios sin guardar</h3>
+              <p style={{ margin: '0 0 22px', color: '#555', fontSize: '14px', lineHeight: '1.5' }}>
+                Tenés cambios sin guardar en el plan de estudios.<br />Si salís ahora, se van a perder esos cambios.
+              </p>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  style={{ ...styles.button, background: '#e0e0e0', color: '#333', padding: '8px 18px' }}
+                  onClick={() => setPlanUnsavedModal(null)}
+                >Seguir editando</button>
+                <button
+                  style={{ ...styles.button, background: '#ef4444', color: '#fff', padding: '8px 18px', fontWeight: 700 }}
+                  onClick={() => {
+                    setPlanIsDirty(false)
+                    setPlanMode('list')
+                    setPlanName('')
+                    setPlanYears([])
+                    setEditingPlanId(null)
+                    setPlanError('')
+                    const pending = planUnsavedModal
+                    setPlanUnsavedModal(null)
+                    if (pending.type === 'menu') {
+                      planNavBypassRef.current = true
+                      handleMenuChange(pending.value)
+                    } else if (pending.type === 'career') {
+                      setActiveCareer(pending.value)
+                    }
+                  }}
+                >Descartar cambios</button>
+              </div>
+            </div>
           </div>
         )}
 
