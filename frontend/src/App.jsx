@@ -110,6 +110,43 @@ const AdminCareerInlineEdit = ({ career, apiBase, onSaved, onCancel }) => {
   )
 }
 
+// ── Shared animated-background blobs (used by LoginScreen & RolePickerScreen) ──
+const LOGIN_BLOB_CSS = `
+  @keyframes macauBlob1 {
+    0%,100% { transform: translate(0,0) scale(1); }
+    33%      { transform: translate(28px,-38px) scale(1.06); }
+    66%      { transform: translate(-18px,22px) scale(0.94); }
+  }
+  @keyframes macauBlob2 {
+    0%,100% { transform: translate(0,0) scale(1); }
+    40%     { transform: translate(-32px,26px) scale(1.09); }
+    70%     { transform: translate(22px,-22px) scale(0.92); }
+  }
+  @keyframes macauBlob3 {
+    0%,100% { transform: translate(0,0) scale(1); }
+    30%     { transform: translate(18px,36px) scale(1.04); }
+    60%     { transform: translate(-24px,-14px) scale(0.96); }
+  }
+  @keyframes macauBlob4 {
+    0%,100% { transform: translate(0,0) scale(1); }
+    50%     { transform: translate(-20px,-30px) scale(1.07); }
+  }
+  @keyframes macauBlob5 {
+    0%,100% { transform: translate(0,0) scale(1); }
+    45%     { transform: translate(30px,20px) scale(0.93); }
+  }
+`
+const LoginBlobs = () => (
+  <>
+    <style>{LOGIN_BLOB_CSS}</style>
+    <div style={{ position:'absolute', top:'-130px', left:'-140px', width:'550px', height:'550px', borderRadius:'50%', background:'radial-gradient(circle, rgba(26,93,160,0.11) 0%, transparent 68%)', animation:'macauBlob1 14s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', bottom:'-100px', right:'-120px', width:'480px', height:'480px', borderRadius:'50%', background:'radial-gradient(circle, rgba(0,120,180,0.09) 0%, transparent 68%)', animation:'macauBlob2 19s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', top:'35%', left:'55%', width:'400px', height:'400px', borderRadius:'50%', background:'radial-gradient(circle, rgba(2,119,189,0.07) 0%, transparent 65%)', animation:'macauBlob3 11s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', top:'10%', right:'8%', width:'300px', height:'300px', borderRadius:'50%', background:'radial-gradient(circle, rgba(0,150,136,0.07) 0%, transparent 65%)', animation:'macauBlob4 22s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', bottom:'15%', left:'5%', width:'260px', height:'260px', borderRadius:'50%', background:'radial-gradient(circle, rgba(63,81,181,0.06) 0%, transparent 65%)', animation:'macauBlob5 16s ease-in-out infinite', pointerEvents:'none' }} />
+  </>
+)
+
 // ── LoginScreen ───────────────────────────────────────────────────────────────
 const LoginScreen = ({ onLogin }) => {
   const [username, setUsername] = React.useState('')
@@ -132,35 +169,11 @@ const LoginScreen = ({ onLogin }) => {
     }
   }
 
-  React.useEffect(() => {
-    const id = 'macau-login-anim'
-    if (!document.getElementById(id)) {
-      const s = document.createElement('style')
-      s.id = id
-      s.textContent = [
-        '@keyframes mlFloat1{0%,100%{transform:translate(0,0) scale(1);opacity:.45}50%{transform:translate(18px,-38px) scale(1.08);opacity:.62}}',
-        '@keyframes mlFloat2{0%,100%{transform:translate(0,0) scale(1);opacity:.38}33%{transform:translate(-22px,-26px) scale(1.06);opacity:.52}66%{transform:translate(12px,14px) scale(.96);opacity:.42}}',
-        '@keyframes mlFloat3{0%,100%{transform:translate(0,0) scale(1);opacity:.32}50%{transform:translate(-16px,-42px) scale(1.1);opacity:.48}}',
-        '@keyframes mlPulse{0%,100%{opacity:.22;transform:scale(1)}50%{opacity:.38;transform:scale(1.06)}}'
-      ].join('')
-      document.head.appendChild(s)
-    }
-    return () => { const el = document.getElementById('macau-login-anim'); if (el) el.remove() }
-  }, [])
-
   return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(155deg, #dbeeff 0%, #c6e6f5 40%, #d2eaf6 70%, #e6f3fb 100%)', overflow: 'hidden' }}>
-      {/* Animated background blobs */}
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', width: 460, height: 460, borderRadius: '50%', background: 'radial-gradient(circle, rgba(144,202,249,.75) 0%, rgba(144,202,249,0) 70%)', top: -130, left: -110, animation: 'mlFloat1 8s ease-in-out infinite' }} />
-        <div style={{ position: 'absolute', width: 320, height: 320, borderRadius: '50%', background: 'radial-gradient(circle, rgba(128,222,234,.7) 0%, rgba(128,222,234,0) 70%)', bottom: -90, right: -70, animation: 'mlFloat2 11s ease-in-out infinite' }} />
-        <div style={{ position: 'absolute', width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(197,202,233,.65) 0%, rgba(197,202,233,0) 70%)', top: '58%', left: -80, animation: 'mlFloat3 9.5s ease-in-out infinite 1.2s' }} />
-        <div style={{ position: 'absolute', width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle, rgba(179,229,252,.68) 0%, rgba(179,229,252,0) 70%)', top: '12%', right: -40, animation: 'mlFloat1 13s ease-in-out infinite 2.5s' }} />
-        <div style={{ position: 'absolute', width: 380, height: 380, borderRadius: '50%', background: 'radial-gradient(circle, rgba(165,214,167,.42) 0%, rgba(165,214,167,0) 70%)', bottom: '22%', left: '38%', animation: 'mlFloat2 15s ease-in-out infinite 0.7s' }} />
-        <div style={{ position: 'absolute', width: 190, height: 190, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,204,128,.4) 0%, rgba(255,204,128,0) 70%)', top: '68%', right: '18%', animation: 'mlPulse 10s ease-in-out infinite 3.5s' }} />
-      </div>
-      <div style={{ position: 'relative', zIndex: 1, background: '#fff', borderRadius: '12px', boxShadow: '0 8px 40px rgba(26,61,92,0.18)', padding: '40px 36px', maxWidth: '380px', width: '100%' }}>
-        {/* Logo */
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #e8f4f8 0%, #d0e8f0 100%)', position: 'relative', overflow: 'hidden' }}>
+      <LoginBlobs />
+      <div style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 4px 32px rgba(26,61,92,0.16)', padding: '40px 36px', maxWidth: '380px', width: '100%', position: 'relative', zIndex: 1 }}>
+        {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
           <img src={logoMacau} alt="MACAU" style={{ maxWidth: '140px', height: 'auto' }} />
           <div style={{ color: '#1a3d5c', fontSize: '13px', marginTop: '8px', fontWeight: 600 }}>
@@ -244,6 +257,44 @@ const LoginScreen = ({ onLogin }) => {
   )
 }
 
+// ── RolePickerScreen ─────────────────────────────────────────────────────────
+const ROLE_PICKER_INFO = {
+  director:   { label: 'Director',   color: '#1565c0', bg: '#e3f2fd', border: '#90caf9', icon: '🎓' },
+  secretario: { label: 'Secretario', color: '#e65100', bg: '#fff3e0', border: '#ffcc80', icon: '📋' },
+  docente:    { label: 'Docente',    color: '#2e7d32', bg: '#e8f5e9', border: '#a5d6a7', icon: '👩‍🏫' },
+  admin:      { label: 'Admin',      color: '#7c3aed', bg: '#f3e8ff', border: '#c4b5fd', icon: '⚙️' },
+}
+const RolePickerScreen = ({ user, career, roles, onPick }) => (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #e8f4f8 0%, #d0e8f0 100%)', position: 'relative', overflow: 'hidden' }}>
+    <LoginBlobs />
+    <div style={{ background: '#fff', borderRadius: '16px', boxShadow: '0 6px 36px rgba(26,61,92,0.16)', padding: '40px 36px', maxWidth: '400px', width: '100%', position: 'relative', zIndex: 1, textAlign: 'center' }}>
+      <img src={logoMacau} alt="MACAU" style={{ maxWidth: '110px', height: 'auto', marginBottom: '20px' }} />
+      <h2 style={{ margin: '0 0 6px', color: '#1a3d5c', fontSize: '19px', fontWeight: 700 }}>Hola, {user.name}</h2>
+      <p style={{ margin: '0 0 24px', color: '#555', fontSize: '13px', lineHeight: 1.5 }}>
+        Tenés más de un rol{career ? <> en <strong>{career}</strong></> : ''}.<br />
+        ¿Con qué perfil querés trabajar hoy?
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {roles.map(role => {
+          const info = ROLE_PICKER_INFO[role] || { label: role, color: '#555', bg: '#f5f5f5', border: '#ccc', icon: '👤' }
+          return (
+            <button
+              key={role}
+              onClick={() => onPick(role)}
+              style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 18px', borderRadius: '10px', border: `2px solid ${info.border}`, background: info.bg, color: info.color, cursor: 'pointer', fontWeight: 700, fontSize: '15px', textAlign: 'left', transition: 'transform 0.12s ease, box-shadow 0.12s ease' }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = `0 4px 16px ${info.color}28` }}
+              onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '' }}
+            >
+              <span style={{ fontSize: '24px', lineHeight: 1 }}>{info.icon}</span>
+              <span>Ingresar como <span style={{ textDecoration: 'underline', textDecorationStyle: 'dotted' }}>{info.label}</span></span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  </div>
+)
+
 const App = () => {
   // Auth token ref — readable by fetch interceptor at call-time
   const authTokenRef = useRef(null)
@@ -310,7 +361,7 @@ const App = () => {
   const [proposalsMode, setProposalsMode] = useState(null)
   const [activeCareer, setActiveCareer] = useState(() => localStorage.getItem('activeCareer') || '')
   const [viewRole, setViewRole] = useState('director')
-  const [rolePickerModal, setRolePickerModal] = useState(null) // null | { roles: string[], career: string }
+  const [rolePickerPending, setRolePickerPending] = useState(null) // { career, roles } | null
   const [selectedTeacherId, setSelectedTeacherId] = useState(null)
   const [selectedTeacherName, setSelectedTeacherName] = useState('')
 
@@ -389,14 +440,19 @@ const App = () => {
       setSelectedTeacherId(data.user.id)
       setSelectedTeacherName(data.user.name)
     }
-    if (data.user.is_admin) setActiveMenu('admin-carreras')
-    else if (role === 'director' || role === 'secretario') setActiveMenu('home')
-    else setActiveMenu('propuestas')
-    // Show role picker when user has multiple roles in their first career
-    if (!data.user.is_admin && firstCareer) {
-      const rolesInCareer = [...new Set(assignments.filter(a => a.careerName === firstCareer).map(a => a.role))]
-      if (rolesInCareer.length > 1) {
-        setRolePickerModal({ roles: rolesInCareer, career: firstCareer })
+    if (data.user.is_admin) {
+      setActiveMenu('admin-carreras')
+    } else {
+      // If the user has multiple roles in their first career, show the role picker
+      const rolesInFirstCareer = firstCareer
+        ? [...new Set(assignments.filter(a => a.careerName === firstCareer).map(a => a.role))]
+        : [...new Set(assignments.map(a => a.role))]
+      if (rolesInFirstCareer.length > 1) {
+        setRolePickerPending({ career: firstCareer, roles: rolesInFirstCareer })
+        // activeMenu will be set in handleRolePick once the user selects a role
+      } else {
+        if (role === 'director' || role === 'secretario') setActiveMenu('home')
+        else setActiveMenu('propuestas')
       }
     }
   }
@@ -10423,7 +10479,22 @@ const App = () => {
       <div style={{ color: '#1a3d5c', fontWeight: 600, fontSize: '16px' }}>Cargando…</div>
     </div>
   )
+  const handleRolePick = (role) => {
+    setViewRole(role)
+    setRolePickerPending(null)
+    if (role === 'director' || role === 'secretario') setActiveMenu('home')
+    else setActiveMenu('propuestas')
+  }
+
   if (!currentUser) return <LoginScreen onLogin={handleLogin} />
+  if (rolePickerPending) return (
+    <RolePickerScreen
+      user={currentUser}
+      career={rolePickerPending.career}
+      roles={rolePickerPending.roles}
+      onPick={handleRolePick}
+    />
+  )
 
   return (
     <div style={styles.container}>
@@ -15497,51 +15568,6 @@ const App = () => {
         )}
 
         {/* PLAN DE ESTUDIOS */}
-        {/* Role selection modal – shown on fresh login when user has multiple roles in a career */}
-        {rolePickerModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9500 }}>
-            <div style={{ background: '#fff', borderRadius: '14px', padding: '36px 32px', maxWidth: '460px', width: '90%', boxShadow: '0 8px 40px rgba(0,0,0,0.18)', textAlign: 'center' }}>
-              <div style={{ fontSize: '44px', marginBottom: '14px' }}>👋</div>
-              <h2 style={{ margin: '0 0 8px', color: '#1a3d5c', fontSize: '20px', fontWeight: 700 }}>¿Con qué rol querés trabajar?</h2>
-              <p style={{ color: '#666', fontSize: '13px', marginBottom: '26px', lineHeight: 1.5 }}>
-                Tenés <strong>más de un rol</strong> en <strong>{rolePickerModal.career}</strong>.<br />
-                Podés cambiarlo cuando quieras desde la barra lateral.
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {rolePickerModal.roles.map(role => {
-                  const labels = { director: 'Director', secretario: 'Secretario', docente: 'Docente' }
-                  const descs = {
-                    director: 'Acceso completo: planes, propuestas, docentes y acreditación',
-                    secretario: 'Gestión de propuestas y seguimiento de acreditación',
-                    docente: 'Vista de tus propuestas asignadas'
-                  }
-                  const colors = { director: '#1565c0', secretario: '#e65100', docente: '#2e7d32' }
-                  const icons = { director: '🎓', secretario: '📋', docente: '📚' }
-                  return (
-                    <button
-                      key={role}
-                      onClick={() => {
-                        setViewRole(role)
-                        if (role === 'director' || role === 'secretario') setActiveMenu('home')
-                        else setActiveMenu('propuestas')
-                        setRolePickerModal(null)
-                      }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 18px', border: `2px solid ${colors[role] || '#888'}`, borderRadius: '10px', background: 'transparent', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'background 0.15s' }}
-                      onMouseEnter={e => { e.currentTarget.style.background = `${colors[role]}18` }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                    >
-                      <span style={{ fontSize: '28px', flexShrink: 0 }}>{icons[role] || '👤'}</span>
-                      <div>
-                        <div style={{ fontWeight: 700, color: colors[role] || '#333', fontSize: '15px' }}>{labels[role] || role}</div>
-                        <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>{descs[role] || ''}</div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        )}
         {/* Reset password modal */}
         {selfChangePwModal && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
