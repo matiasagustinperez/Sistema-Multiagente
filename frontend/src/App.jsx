@@ -4727,12 +4727,31 @@ const App = () => {
   const fetchAdminUsers = async () => {
     setAdminUsersLoading(true)
     try {
-      const res = await fetch(`${API_BASE_URL}/teachers`)
-      const data = await res.json().catch(() => [])
-      // Normalize: each user gets a roles array (future: populated from career assignments)
-      const users = (Array.isArray(data) ? data : []).map(t => ({
+      // Load teachers + all careers in parallel to compute real roles
+      const [teachersRes, careersRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/teachers`),
+        fetch(`${API_BASE_URL}/careers?include_inactive=true`)
+      ])
+      const teachers = await teachersRes.json().catch(() => [])
+      const careers = await careersRes.json().catch(() => [])
+
+      // Build role map: teacherId → [ { role: 'director'|'secretario', careerName } ]
+      const roleMap = {}
+      ;(Array.isArray(careers) ? careers : []).forEach(c => {
+        if (c.director_id) {
+          if (!roleMap[c.director_id]) roleMap[c.director_id] = []
+          roleMap[c.director_id].push({ role: 'director', careerName: c.name })
+        }
+        if (c.secretario_id) {
+          if (!roleMap[c.secretario_id]) roleMap[c.secretario_id] = []
+          roleMap[c.secretario_id].push({ role: 'secretario', careerName: c.name })
+        }
+      })
+
+      const users = (Array.isArray(teachers) ? teachers : []).map(t => ({
         ...t,
-        roles: ['docente'] // default; will expand when career section is built
+        // roleAssignments: [ { role, careerName } ] — empty means plain docente
+        roleAssignments: roleMap[t.id] || []
       }))
       users.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' }))
       setAdminUsers(users)
@@ -14687,6 +14706,8 @@ const App = () => {
                         })
                         setAdminCareerResponsableModal(null)
                         await fetchAdminCareers()
+                        // Refresh users too so role badges stay current
+                        fetchAdminUsers()
                       }}
                     >
                       Guardar
@@ -14921,17 +14942,18 @@ const App = () => {
                 const q = adminUsersSearch.toLowerCase()
                 return !q || (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
               })
-              const roleBadge = (role) => {
+              const roleBadge = (role, careerName) => {
                 const map = {
-                  director: { label: 'Director', bg: '#1565c0', color: '#fff' },
+                  director:   { label: 'Director',   bg: '#1565c0', color: '#fff' },
                   secretario: { label: 'Secretario', bg: '#0277bd', color: '#fff' },
-                  docente: { label: 'Docente', bg: '#2e7d32', color: '#fff' },
-                  admin: { label: 'Admin', bg: '#7c3aed', color: '#fff' }
+                  docente:    { label: 'Docente',    bg: '#2e7d32', color: '#fff' },
+                  admin:      { label: 'Admin',      bg: '#7c3aed', color: '#fff' },
                 }
                 const s = map[role] || { label: role, bg: '#90a4ae', color: '#fff' }
+                const key = `${role}-${careerName || ''}`
                 return (
-                  <span key={role} style={{ background: s.bg, color: s.color, borderRadius: '999px', padding: '2px 10px', fontSize: '11px', fontWeight: 700, marginRight: '4px', display: 'inline-block' }}>
-                    {s.label}
+                  <span key={key} style={{ background: s.bg, color: s.color, borderRadius: '999px', padding: '2px 10px', fontSize: '11px', fontWeight: 700, marginRight: '4px', marginBottom: '3px', display: 'inline-block' }}>
+                    {s.label}{careerName ? ` · ${careerName}` : ''}
                   </span>
                 )
               }
@@ -14957,7 +14979,10 @@ const App = () => {
                             {user.email || 'Sin email'}
                           </td>
                           <td style={{ padding: '10px 14px' }}>
-                            {(user.roles || ['docente']).map(r => roleBadge(r))}
+                            {user.roleAssignments && user.roleAssignments.length > 0
+                              ? user.roleAssignments.map(a => roleBadge(a.role, a.careerName))
+                              : roleBadge('docente', null)
+                            }
                           </td>
                         </tr>
                       ))}
