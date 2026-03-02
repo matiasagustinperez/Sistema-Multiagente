@@ -1068,6 +1068,12 @@ const App = () => {
     fetchCareers()
   }, [])
 
+  // Load admin data whenever the admin sections become active (covers login redirect + manual nav)
+  useEffect(() => {
+    if (activeMenu === 'admin-carreras') { fetchAdminCareers(); fetchAdminUsers() }
+    if (activeMenu === 'admin-usuarios') fetchAdminUsers()
+  }, [activeMenu])
+
   // Cargar planes de estudios guardados (backend)
   useEffect(() => {
     if (!activeCareer) {
@@ -1137,8 +1143,6 @@ const App = () => {
     setDeleteProposalModal(null)
     setPlanIsDirty(false)
     setPlanUnsavedModal(null)
-    if (menu === 'admin-usuarios') fetchAdminUsers()
-    if (menu === 'admin-carreras') { fetchAdminCareers(); fetchAdminUsers() }
   }
 
   useEffect(() => {
