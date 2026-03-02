@@ -578,6 +578,7 @@ const App = () => {
   const [adminUserFormSaving, setAdminUserFormSaving] = useState(false)
   // Careers (DB-backed, fallback to CAREER_FALLBACK)
   const [careerOptions, setCareerOptions] = useState(CAREER_FALLBACK)
+  const [careerOptionsFromDB, setCareerOptionsFromDB] = useState(false)  // true once a successful DB fetch completes
   const [adminCareers, setAdminCareers] = useState([])       // all (including inactive) for admin view
   const [adminCareersLoading, setAdminCareersLoading] = useState(false)
   const [adminCareerFormOpen, setAdminCareerFormOpen] = useState(false)
@@ -4744,13 +4745,29 @@ const App = () => {
 
   /** Loads active careers from backend and updates careerOptions; falls back to CAREER_FALLBACK on error. */
   const fetchCareers = async () => {
-    try {
+    const attemptFetch = async () => {
       const res = await fetch(`${API_BASE_URL}/careers`)
-      if (!res.ok) throw new Error('careers fetch failed')
-      const data = await res.json().catch(() => [])
-      const names = (Array.isArray(data) ? data : []).map(c => c.name)
-      setCareerOptions(names.length > 0 ? names : CAREER_FALLBACK)
-    } catch {
+      if (!res.ok) throw new Error(`careers ${res.status}`)
+      return res.json()
+    }
+    try {
+      let data
+      try {
+        data = await attemptFetch()
+      } catch (e) {
+        // retry once after 800 ms
+        await new Promise(r => setTimeout(r, 800))
+        data = await attemptFetch()
+      }
+      const names = (Array.isArray(data) ? data : []).map(c => c.name).filter(Boolean)
+      if (names.length > 0) {
+        setCareerOptions(names)
+        setCareerOptionsFromDB(true)
+      } else {
+        setCareerOptions(CAREER_FALLBACK)
+      }
+    } catch (err) {
+      console.warn('[fetchCareers] usando fallback hardcodeado:', err)
       setCareerOptions(CAREER_FALLBACK)
     }
   }
