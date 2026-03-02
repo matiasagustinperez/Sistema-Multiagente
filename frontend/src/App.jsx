@@ -8652,8 +8652,10 @@ const App = () => {
   const userCareers = currentUser
     ? [...new Set((currentUser.career_assignments || []).map(a => a.careerName).filter(Boolean))]
     : []
-  // Career dropdown options: locked to user's careers; open for pure docente with no TeacherCareer entries
-  const effectiveCareerOptions = userCareers.length > 0 ? userCareers : careerOptions
+  // Career dropdown options: locked to user's careers when logged in as non-admin; admins see all
+  const effectiveCareerOptions = (currentUser && !currentUser.is_admin)
+    ? userCareers
+    : (userCareers.length > 0 ? userCareers : careerOptions)
   // Roles available to the logged-in user IN THE CURRENTLY ACTIVE career
   const rolesForCurrentCareer = (() => {
     if (!currentUser) return ['docente']
@@ -10585,6 +10587,21 @@ const App = () => {
 
       {/* Main Content */}
       <div style={styles.main}>
+        {/* No-career empty state: shown when a logged-in non-admin has no career assignments */}
+        {currentUser && !currentUser.is_admin && userCareers.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '60vh' }}>
+            <div style={{ textAlign: 'center', maxWidth: '420px', padding: '44px 40px', background: '#fff', borderRadius: '14px', boxShadow: '0 4px 24px rgba(0,0,0,0.10)', border: '1px solid #e0e7ef' }}>
+              <div style={{ fontSize: '56px', marginBottom: '18px' }}>🔒</div>
+              <h2 style={{ margin: '0 0 12px', color: '#1a3d5c', fontSize: '20px', fontWeight: 700 }}>Sin carreras asignadas</h2>
+              <p style={{ color: '#555', fontSize: '14px', lineHeight: 1.6, margin: '0 0 10px' }}>
+                Tu usuario todavía no está vinculado a ninguna carrera.
+              </p>
+              <p style={{ color: '#888', fontSize: '13px', lineHeight: 1.5, margin: 0 }}>
+                Comunicate con tu <strong>Director</strong> o con <strong>Administración</strong> para que te asignen acceso a una carrera.
+              </p>
+            </div>
+          </div>
+        ) : null}
         {statusMsg && (
           <div style={{ ...styles.statusToast, ...(statusType === 'error' && styles.statusError), ...(statusType === 'success' && styles.statusSuccess), ...(statusType === 'info' && styles.statusInfo) }}>
             {statusMsg}
@@ -15395,8 +15412,17 @@ const App = () => {
                               {user.roleAssignments && user.roleAssignments.map(a => roleBadge(a.role, a.careerName))}
                             </div>
                           </td>
-                          <td style={{ padding: '10px 14px', fontSize: '12px', color: !user.has_password ? '#c0392b' : user.last_login ? '#555' : '#e65100', fontWeight: !user.has_password || !user.last_login ? 600 : 400 }}>
-                            {!user.has_password ? 'Sin contraseña' : user.last_login ? formatDateTime(user.last_login) : 'Nunca ingresó'}
+                          <td style={{ padding: '10px 14px' }}>
+                            {!user.has_password ? (
+                              <span style={{ fontSize: '12px', color: '#c0392b', fontWeight: 700 }}>Sin contraseña</span>
+                            ) : user.last_login ? (
+                              <span style={{ fontSize: '12px', color: '#555' }}>{formatDateTime(user.last_login)}</span>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                                <span style={{ background: '#e3f2fd', color: '#0d47a1', borderRadius: '999px', padding: '2px 9px', fontSize: '11px', fontWeight: 700, display: 'inline-block', border: '1px solid #90caf9', whiteSpace: 'nowrap' }}>Clave reseteada</span>
+                                <span style={{ fontSize: '11px', color: '#e65100', fontWeight: 600 }}>Nunca ingresó</span>
+                              </div>
+                            )}
                           </td>
                           <td style={{ padding: '10px 8px', textAlign: 'center' }}>
                             {(() => {
