@@ -1101,6 +1101,7 @@ const App = () => {
   useEffect(() => {
     if (activeMenu === 'admin-carreras') { fetchAdminCareers(); fetchAdminUsers() }
     if (activeMenu === 'admin-usuarios') fetchAdminUsers()
+    if (activeMenu !== 'admin-usuarios') setResetPasswordModal(null)
   }, [activeMenu])
 
   // Cargar planes de estudios guardados (backend)
@@ -15244,14 +15245,7 @@ const App = () => {
               >
                 ↻ Actualizar
               </button>
-              {selectedUserIds.size > 0 && (
-                <button
-                  style={{ ...styles.button, background: '#e65100', whiteSpace: 'nowrap' }}
-                  onClick={() => setResetPasswordModal({ userIds: new Set(selectedUserIds), newPw: '', confirmPw: '', saving: false, error: '' })}
-                >
-                  🔑 Resetear contraseña ({selectedUserIds.size})
-                </button>
-              )}
+
             </div>
 
             {/* Create user form */}
@@ -15525,74 +15519,128 @@ const App = () => {
           </div>
         )}
 
-        {resetPasswordModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
-            <div style={{ background: '#fff', borderRadius: '12px', padding: '28px 32px', maxWidth: '420px', width: '100%', boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}>
-              <h3 style={{ margin: '0 0 6px', fontSize: '16px', color: '#1a3d5c' }}>Resetear contraseña</h3>
-              <p style={{ margin: '0 0 18px', fontSize: '13px', color: '#555' }}>
-                Se cambiará la contraseña de <strong>{resetPasswordModal.userIds.size}</strong> usuario{resetPasswordModal.userIds.size !== 1 ? 's' : ''} seleccionado{resetPasswordModal.userIds.size !== 1 ? 's' : ''}.
-              </p>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Nueva contraseña</label>
-                <input
-                  type="password"
-                  value={resetPasswordModal.newPw}
-                  onChange={e => setResetPasswordModal(p => ({ ...p, newPw: e.target.value, error: '' }))}
-                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
-                  placeholder="Mínimo 4 caracteres"
-                />
+        {activeMenu === 'admin-usuarios' && selectedUserIds.size > 0 && (
+          <div style={{ position: 'fixed', bottom: '24px', right: '24px', width: '310px', background: '#fff', borderRadius: '14px', boxShadow: '0 12px 48px rgba(0,0,0,0.22)', border: '1px solid #c5d9f0', zIndex: 9500 }}>
+            {/* Header */}
+            <div style={{ padding: '13px 18px 11px', borderBottom: '1px solid #eaf0f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700, fontSize: '13px', color: '#1a3d5c', display: 'flex', alignItems: 'center', gap: '7px' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+                Resetear contraseña
               </div>
-              <div style={{ marginBottom: '18px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Confirmar contraseña</label>
-                <input
-                  type="password"
-                  value={resetPasswordModal.confirmPw}
-                  onChange={e => setResetPasswordModal(p => ({ ...p, confirmPw: e.target.value, error: '' }))}
-                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
-                  placeholder="Repetir contraseña"
-                />
+              <span style={{ background: '#e3f0ff', color: '#1a56db', borderRadius: '999px', padding: '2px 10px', fontSize: '11px', fontWeight: 700 }}>
+                {selectedUserIds.size} selecc.
+              </span>
+            </div>
+            {/* Mode selector */}
+            <div style={{ padding: '12px 18px 10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <button
+                onClick={() => setResetPasswordModal(p => ({ ...(p || { newPw: '', confirmPw: '', saving: false, error: '' }), mode: 'custom' }))}
+                style={{ padding: '10px 8px', border: `2px solid ${resetPasswordModal?.mode === 'custom' ? '#1a56db' : '#d8e6f3'}`, borderRadius: '9px', background: resetPasswordModal?.mode === 'custom' ? '#e8f0fe' : '#f8fbff', cursor: 'pointer', fontSize: '11px', fontWeight: 600, color: '#1a3d5c', textAlign: 'center', lineHeight: 1.5 }}
+              >
+                <div style={{ marginBottom: '4px' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={resetPasswordModal?.mode === 'custom' ? '#1a56db' : '#607d8b'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                  </svg>
+                </div>
+                Contraseña<br/>personalizada
+              </button>
+              <button
+                onClick={() => setResetPasswordModal(p => ({ ...(p || { newPw: '', confirmPw: '', saving: false, error: '' }), mode: 'email' }))}
+                style={{ padding: '10px 8px', border: `2px solid ${resetPasswordModal?.mode === 'email' ? '#1a56db' : '#d8e6f3'}`, borderRadius: '9px', background: resetPasswordModal?.mode === 'email' ? '#e8f0fe' : '#f8fbff', cursor: 'pointer', fontSize: '11px', fontWeight: 600, color: '#1a3d5c', textAlign: 'center', lineHeight: 1.5 }}
+              >
+                <div style={{ marginBottom: '4px' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={resetPasswordModal?.mode === 'email' ? '#1a56db' : '#607d8b'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+                  </svg>
+                </div>
+                Email como<br/>contraseña
+              </button>
+            </div>
+            {/* Custom password fields */}
+            {resetPasswordModal?.mode === 'custom' && (
+              <div style={{ padding: '0 18px 12px' }}>
+                <div style={{ marginBottom: '9px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#1a3d5c', marginBottom: '4px' }}>Nueva contraseña</label>
+                  <input
+                    type="password"
+                    value={resetPasswordModal.newPw}
+                    onChange={e => setResetPasswordModal(p => ({ ...p, newPw: e.target.value, error: '' }))}
+                    style={{ width: '100%', padding: '7px 10px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
+                    placeholder="Mínimo 4 caracteres"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#1a3d5c', marginBottom: '4px' }}>Confirmar</label>
+                  <input
+                    type="password"
+                    value={resetPasswordModal.confirmPw}
+                    onChange={e => setResetPasswordModal(p => ({ ...p, confirmPw: e.target.value, error: '' }))}
+                    style={{ width: '100%', padding: '7px 10px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
+                    placeholder="Repetir contraseña"
+                  />
+                </div>
               </div>
-              {resetPasswordModal.error && (
-                <div style={{ background: '#fdecea', border: '1px solid #f5c6cb', color: '#b00020', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', marginBottom: '14px' }}>
+            )}
+            {/* Email mode notice */}
+            {resetPasswordModal?.mode === 'email' && (
+              <div style={{ padding: '0 18px 12px' }}>
+                <div style={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '7px', padding: '9px 12px', fontSize: '12px', color: '#6d4c00', lineHeight: 1.5 }}>
+                  La contraseña de cada usuario se establecerá igual a su email. Si un usuario no tiene email asignado, no será modificado.
+                </div>
+              </div>
+            )}
+            {/* Error */}
+            {resetPasswordModal?.error && (
+              <div style={{ padding: '0 18px 10px' }}>
+                <div style={{ background: '#fdecea', border: '1px solid #f5c6cb', color: '#b00020', borderRadius: '6px', padding: '7px 11px', fontSize: '12px' }}>
                   {resetPasswordModal.error}
                 </div>
-              )}
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                <button
-                  style={{ ...styles.button, background: '#e0e0e0', color: '#333' }}
-                  onClick={() => setResetPasswordModal(null)}
-                  disabled={resetPasswordModal.saving}
-                >
-                  Cancelar
-                </button>
-                <button
-                  style={{ ...styles.button, background: resetPasswordModal.saving ? '#90a4ae' : '#e65100' }}
-                  disabled={resetPasswordModal.saving}
-                  onClick={async () => {
-                    const { newPw, confirmPw, userIds } = resetPasswordModal
+              </div>
+            )}
+            {/* Action row */}
+            <div style={{ padding: '0 18px 16px', display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => { setResetPasswordModal(null); setSelectedUserIds(new Set()) }}
+                style={{ flex: '0 0 auto', padding: '8px 12px', background: 'transparent', border: '1px solid #d0d8e4', borderRadius: '8px', fontSize: '12px', color: '#555', cursor: 'pointer', fontWeight: 500 }}
+              >
+                Cancelar
+              </button>
+              <button
+                disabled={!resetPasswordModal?.mode || resetPasswordModal?.saving}
+                onClick={async () => {
+                  const { mode, newPw, confirmPw } = resetPasswordModal || {}
+                  if (mode === 'custom') {
                     if (!newPw || newPw.length < 4) { setResetPasswordModal(p => ({ ...p, error: 'La contraseña debe tener al menos 4 caracteres.' })); return }
                     if (newPw !== confirmPw) { setResetPasswordModal(p => ({ ...p, error: 'Las contraseñas no coinciden.' })); return }
-                    setResetPasswordModal(p => ({ ...p, saving: true, error: '' }))
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/auth/reset-passwords`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
-                        body: JSON.stringify({ user_ids: Array.from(userIds), new_password: newPw }),
-                      })
-                      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || `Error ${res.status}`) }
-                      const data = await res.json()
-                      setResetPasswordModal(null)
-                      setSelectedUserIds(new Set())
-                      setStatusMsg(`Contraseña reseteada para ${data.count} usuario${data.count !== 1 ? 's' : ''}.`)
-                      setStatusType('success')
-                    } catch (err) {
-                      setResetPasswordModal(p => ({ ...p, saving: false, error: err.message }))
-                    }
-                  }}
-                >
-                  {resetPasswordModal.saving ? 'Guardando…' : 'Confirmar reset'}
-                </button>
-              </div>
+                  }
+                  setResetPasswordModal(p => ({ ...p, saving: true, error: '' }))
+                  try {
+                    const body = mode === 'email'
+                      ? { user_ids: Array.from(selectedUserIds), use_email_as_password: true, new_password: '' }
+                      : { user_ids: Array.from(selectedUserIds), new_password: newPw, use_email_as_password: false }
+                    const res = await fetch(`${API_BASE_URL}/auth/reset-passwords`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+                      body: JSON.stringify(body),
+                    })
+                    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || `Error ${res.status}`) }
+                    const data = await res.json()
+                    setResetPasswordModal(null)
+                    setSelectedUserIds(new Set())
+                    fetchAdminUsers()
+                    setStatusMsg(`Contraseña reseteada para ${data.count} usuario${data.count !== 1 ? 's' : ''}.`)
+                    setStatusType('success')
+                  } catch (err) {
+                    setResetPasswordModal(p => ({ ...p, saving: false, error: err.message }))
+                  }
+                }}
+                style={{ flex: 1, padding: '8px', background: !resetPasswordModal?.mode || resetPasswordModal?.saving ? '#b0bec5' : '#1565c0', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, fontSize: '12px', cursor: !resetPasswordModal?.mode || resetPasswordModal?.saving ? 'not-allowed' : 'pointer' }}
+              >
+                {resetPasswordModal?.saving ? 'Procesando…' : resetPasswordModal?.mode ? 'Confirmar reset' : 'Elegir opción…'}
+              </button>
             </div>
           </div>
         )}

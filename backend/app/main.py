@@ -135,7 +135,8 @@ class LoginRequest(BaseModel):
 
 class ResetPasswordsRequest(BaseModel):
     user_ids: list[int]
-    new_password: str
+    new_password: str = ""
+    use_email_as_password: bool = False
 
 
 class GdocStatusRequest(BaseModel):
@@ -5708,12 +5709,19 @@ def reset_passwords(request: Request, payload: ResetPasswordsRequest, db: Sessio
         raise HTTPException(status_code=403, detail="Solo el administrador puede resetear contraseñas.")
     if not payload.user_ids:
         raise HTTPException(status_code=422, detail="Debe especificar al menos un usuario.")
-    new_hash = hash_password(payload.new_password)
+    if not payload.use_email_as_password and len(payload.new_password) < 4:
+        raise HTTPException(status_code=422, detail="La contraseña debe tener al menos 4 caracteres.")
     updated = []
     for uid in payload.user_ids:
         t = db.query(models.Teacher).filter(models.Teacher.id == uid).first()
-        if t:
-            t.password_hash = new_hash
+        if not t:
+            continue
+        if payload.use_email_as_password:
+            if t.email:
+                t.password_hash = hash_password(t.email)
+                updated.append(uid)
+        else:
+            t.password_hash = hash_password(payload.new_password)
             updated.append(uid)
     db.commit()
     return {"updated": updated, "count": len(updated)}
