@@ -10588,7 +10588,7 @@ const App = () => {
           <div style={styles.section}>
             <h2>Propuestas Académicas</h2>
             
-            {/* CARDS SECTION */
+            {/* CARDS SECTION */}
             {!isDocenteView && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '30px', marginTop: '20px' }}>
                 <div style={{ 
