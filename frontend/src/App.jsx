@@ -10502,10 +10502,9 @@ const App = () => {
           {/* Role switcher – inline, directly under active badge */}
           {!isAdminView && rolesForCurrentCareer.length > 1 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'center', marginTop: '8px' }}>
-              {rolesForCurrentCareer.map(role => {
+              {rolesForCurrentCareer.filter(role => role !== viewRole).map(role => {
                 const labels = { director: 'Director', secretario: 'Secretario', docente: 'Docente', admin: 'Admin' }
                 const colors = { director: '#1565c0', secretario: '#e65100', docente: '#2e7d32', admin: '#7c3aed' }
-                const active = viewRole === role
                 return (
                   <button
                     key={role}
@@ -10517,8 +10516,8 @@ const App = () => {
                     style={{
                       padding: '3px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: 700, cursor: 'pointer',
                       border: `2px solid ${colors[role] || '#888'}`,
-                      background: active ? (colors[role] || '#888') : 'transparent',
-                      color: active ? '#fff' : (colors[role] || '#888'),
+                      background: 'transparent',
+                      color: colors[role] || '#888',
                     }}
                   >
                     {labels[role] || role}
