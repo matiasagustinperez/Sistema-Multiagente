@@ -114,36 +114,36 @@ const AdminCareerInlineEdit = ({ career, apiBase, onSaved, onCancel }) => {
 const LOGIN_BLOB_CSS = `
   @keyframes macauBlob1 {
     0%,100% { transform: translate(0,0) scale(1); }
-    33%      { transform: translate(28px,-38px) scale(1.06); }
-    66%      { transform: translate(-18px,22px) scale(0.94); }
+    33%      { transform: translate(40px,-55px) scale(1.08); }
+    66%      { transform: translate(-25px,35px) scale(0.93); }
   }
   @keyframes macauBlob2 {
     0%,100% { transform: translate(0,0) scale(1); }
-    40%     { transform: translate(-32px,26px) scale(1.09); }
-    70%     { transform: translate(22px,-22px) scale(0.92); }
+    40%     { transform: translate(-50px,40px) scale(1.1); }
+    70%     { transform: translate(35px,-35px) scale(0.91); }
   }
   @keyframes macauBlob3 {
     0%,100% { transform: translate(0,0) scale(1); }
-    30%     { transform: translate(18px,36px) scale(1.04); }
-    60%     { transform: translate(-24px,-14px) scale(0.96); }
+    30%     { transform: translate(30px,50px) scale(1.06); }
+    60%     { transform: translate(-40px,-20px) scale(0.95); }
   }
   @keyframes macauBlob4 {
     0%,100% { transform: translate(0,0) scale(1); }
-    50%     { transform: translate(-20px,-30px) scale(1.07); }
+    50%     { transform: translate(-30px,-45px) scale(1.09); }
   }
   @keyframes macauBlob5 {
     0%,100% { transform: translate(0,0) scale(1); }
-    45%     { transform: translate(30px,20px) scale(0.93); }
+    45%     { transform: translate(45px,30px) scale(0.92); }
   }
 `
 const LoginBlobs = () => (
   <>
     <style>{LOGIN_BLOB_CSS}</style>
-    <div style={{ position:'absolute', top:'-130px', left:'-140px', width:'550px', height:'550px', borderRadius:'50%', background:'radial-gradient(circle, rgba(26,93,160,0.11) 0%, transparent 68%)', animation:'macauBlob1 14s ease-in-out infinite', pointerEvents:'none' }} />
-    <div style={{ position:'absolute', bottom:'-100px', right:'-120px', width:'480px', height:'480px', borderRadius:'50%', background:'radial-gradient(circle, rgba(0,120,180,0.09) 0%, transparent 68%)', animation:'macauBlob2 19s ease-in-out infinite', pointerEvents:'none' }} />
-    <div style={{ position:'absolute', top:'35%', left:'55%', width:'400px', height:'400px', borderRadius:'50%', background:'radial-gradient(circle, rgba(2,119,189,0.07) 0%, transparent 65%)', animation:'macauBlob3 11s ease-in-out infinite', pointerEvents:'none' }} />
-    <div style={{ position:'absolute', top:'10%', right:'8%', width:'300px', height:'300px', borderRadius:'50%', background:'radial-gradient(circle, rgba(0,150,136,0.07) 0%, transparent 65%)', animation:'macauBlob4 22s ease-in-out infinite', pointerEvents:'none' }} />
-    <div style={{ position:'absolute', bottom:'15%', left:'5%', width:'260px', height:'260px', borderRadius:'50%', background:'radial-gradient(circle, rgba(63,81,181,0.06) 0%, transparent 65%)', animation:'macauBlob5 16s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', top:'-160px', left:'-160px', width:'600px', height:'600px', borderRadius:'50%', background:'#4fc3f7', opacity:0.18, filter:'blur(80px)', animation:'macauBlob1 14s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', bottom:'-140px', right:'-150px', width:'540px', height:'540px', borderRadius:'50%', background:'#1565c0', opacity:0.15, filter:'blur(90px)', animation:'macauBlob2 19s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', top:'30%', left:'50%', width:'460px', height:'460px', borderRadius:'50%', background:'#0288d1', opacity:0.12, filter:'blur(70px)', animation:'macauBlob3 11s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', top:'5%', right:'5%', width:'340px', height:'340px', borderRadius:'50%', background:'#00897b', opacity:0.14, filter:'blur(75px)', animation:'macauBlob4 22s ease-in-out infinite', pointerEvents:'none' }} />
+    <div style={{ position:'absolute', bottom:'10%', left:'3%', width:'300px', height:'300px', borderRadius:'50%', background:'#3949ab', opacity:0.13, filter:'blur(65px)', animation:'macauBlob5 16s ease-in-out infinite', pointerEvents:'none' }} />
   </>
 )
 
@@ -373,6 +373,39 @@ const App = () => {
   useEffect(() => { authTokenRef.current = authToken }, [authToken])
 
   // Validate stored token on mount
+  const applyUserSession = (user, token, { skipRolePicker = false } = {}) => {
+    setCurrentUser(user)
+    setAuthToken(token)
+    authTokenRef.current = token
+    const assignments = user.career_assignments || []
+    const firstCareer = assignments[0]?.careerName || ''
+    if (firstCareer) {
+      setActiveCareer(firstCareer)
+      localStorage.setItem('activeCareer', firstCareer)
+    }
+    if (!user.is_admin) {
+      setSelectedTeacherId(user.id)
+      setSelectedTeacherName(user.name)
+    }
+    if (user.is_admin) {
+      setViewRole('admin')
+      setActiveMenu('admin-carreras')
+      return
+    }
+    const rolesInFirstCareer = firstCareer
+      ? [...new Set(assignments.filter(a => a.careerName === firstCareer).map(a => a.role))]
+      : [...new Set(assignments.map(a => a.role))]
+    if (!skipRolePicker && rolesInFirstCareer.length > 1) {
+      setViewRole(rolesInFirstCareer[0])
+      setRolePickerPending({ career: firstCareer, roles: rolesInFirstCareer })
+    } else {
+      const role = rolesInFirstCareer[0] || user.role || 'docente'
+      setViewRole(role)
+      if (role === 'director' || role === 'secretario') setActiveMenu('home')
+      else setActiveMenu('propuestas')
+    }
+  }
+
   useEffect(() => {
     const token = localStorage.getItem('auth_token')
     if (!token) { setAuthChecked(true); return }
@@ -380,23 +413,7 @@ const App = () => {
       .then(r => r.ok ? r.json() : null)
       .then(user => {
         if (user) {
-          setCurrentUser(user)
-          setAuthToken(token)
-          authTokenRef.current = token
-          setViewRole(user.role)
-          const assignments = user.career_assignments || []
-          const firstCareer = assignments[0]?.careerName || ''
-          if (firstCareer) {
-            setActiveCareer(firstCareer)
-            localStorage.setItem('activeCareer', firstCareer)
-          }
-          if (!user.is_admin) {
-            setSelectedTeacherId(user.id)
-            setSelectedTeacherName(user.name)
-          }
-          if (user.is_admin) setActiveMenu('admin-carreras')
-          else if (user.role === 'director' || user.role === 'secretario') setActiveMenu('home')
-          else if (user.role === 'docente') setActiveMenu('propuestas')
+          applyUserSession(user, token)
         } else {
           localStorage.removeItem('auth_token')
           setAuthToken(null)
@@ -423,38 +440,7 @@ const App = () => {
     }
     const data = await res.json()
     localStorage.setItem('auth_token', data.access_token)
-    setAuthToken(data.access_token)
-    authTokenRef.current = data.access_token
-    setCurrentUser(data.user)
-    const role = data.user.role
-    setViewRole(role)
-    // Auto-set career from first assignment
-    const assignments = data.user.career_assignments || []
-    const firstCareer = assignments[0]?.careerName || ''
-    if (firstCareer) {
-      setActiveCareer(firstCareer)
-      localStorage.setItem('activeCareer', firstCareer)
-    }
-    // Auto-set teacher identity for proposal filtering
-    if (!data.user.is_admin) {
-      setSelectedTeacherId(data.user.id)
-      setSelectedTeacherName(data.user.name)
-    }
-    if (data.user.is_admin) {
-      setActiveMenu('admin-carreras')
-    } else {
-      // If the user has multiple roles in their first career, show the role picker
-      const rolesInFirstCareer = firstCareer
-        ? [...new Set(assignments.filter(a => a.careerName === firstCareer).map(a => a.role))]
-        : [...new Set(assignments.map(a => a.role))]
-      if (rolesInFirstCareer.length > 1) {
-        setRolePickerPending({ career: firstCareer, roles: rolesInFirstCareer })
-        // activeMenu will be set in handleRolePick once the user selects a role
-      } else {
-        if (role === 'director' || role === 'secretario') setActiveMenu('home')
-        else setActiveMenu('propuestas')
-      }
-    }
+    applyUserSession(data.user, data.access_token)
   }
 
   const handleLogout = () => {
