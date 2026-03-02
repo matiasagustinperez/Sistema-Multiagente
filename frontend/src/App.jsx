@@ -10089,7 +10089,7 @@ const App = () => {
           {/* Role badge */}
           <div style={{
             display: 'inline-block', marginTop: '10px',
-            background: isAdminView ? '#7c3aed' : isSecretarioView ? '#0277bd' : isDocenteView ? '#2e7d32' : '#1565c0',
+            background: isAdminView ? '#7c3aed' : isSecretarioView ? '#e65100' : isDocenteView ? '#2e7d32' : '#1565c0',
             color: '#fff', borderRadius: '999px', padding: '3px 12px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px'
           }}>
             {isAdminView ? 'Administrador' : isSecretarioView ? 'Secretario' : isDocenteView ? 'Docente' : 'Director'}
@@ -14996,14 +14996,14 @@ const App = () => {
               const roleBadge = (role, careerName) => {
                 const map = {
                   director:   { label: 'Director',   bg: '#1565c0', color: '#fff' },
-                  secretario: { label: 'Secretario', bg: '#0277bd', color: '#fff' },
+                  secretario: { label: 'Secretario', bg: '#e65100', color: '#fff' },
                   docente:    { label: 'Docente',    bg: '#2e7d32', color: '#fff' },
                   admin:      { label: 'Admin',      bg: '#7c3aed', color: '#fff' },
                 }
                 const s = map[role] || { label: role, bg: '#90a4ae', color: '#fff' }
                 const key = `${role}-${careerName || ''}`
                 return (
-                  <span key={key} style={{ background: s.bg, color: s.color, borderRadius: '999px', padding: '2px 10px', fontSize: '11px', fontWeight: 700, marginRight: '4px', marginBottom: '3px', display: 'inline-block' }}>
+                  <span key={key} style={{ background: s.bg, color: s.color, borderRadius: '999px', padding: '2px 10px', fontSize: '11px', fontWeight: 700, display: 'inline-block' }}>
                     {s.label}{careerName ? ` · ${careerName}` : ''}
                   </span>
                 )
@@ -15030,10 +15030,10 @@ const App = () => {
                             {user.email || 'Sin email'}
                           </td>
                           <td style={{ padding: '10px 14px' }}>
-                            {user.roleAssignments && user.roleAssignments.length > 0
-                              ? user.roleAssignments.map(a => roleBadge(a.role, a.careerName))
-                              : roleBadge('docente', null)
-                            }
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                              {roleBadge('docente', null)}
+                              {user.roleAssignments && user.roleAssignments.map(a => roleBadge(a.role, a.careerName))}
+                            </div>
                           </td>
                         </tr>
                       ))}
