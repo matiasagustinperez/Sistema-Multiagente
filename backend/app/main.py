@@ -5542,16 +5542,28 @@ def _build_user_payload(teacher: "models.Teacher", db) -> dict:
     """Build the JWT payload + public user info dict from a Teacher row."""
     # Compute role from career assignments
     career_assignments = []
-    # director/secretario assignments
+
+    # 1) director/secretario assignments (from Career.director_id / secretario_id)
     careers = db.query(models.Career).filter(
         (models.Career.director_id == teacher.id) |
         (models.Career.secretario_id == teacher.id)
     ).all()
+    assigned_career_names = set()
     for c in careers:
         if c.director_id == teacher.id:
             career_assignments.append({"role": "director", "careerId": c.id, "careerName": c.name})
+            assigned_career_names.add(c.name)
         if c.secretario_id == teacher.id:
             career_assignments.append({"role": "secretario", "careerId": c.id, "careerName": c.name})
+            assigned_career_names.add(c.name)
+
+    # 2) docente career assignments (from TeacherCareer junction table)
+    teacher_careers = db.query(models.TeacherCareer).filter(
+        models.TeacherCareer.teacher_id == teacher.id
+    ).all()
+    for tc in teacher_careers:
+        if tc.career and tc.career not in assigned_career_names:
+            career_assignments.append({"role": "docente", "careerId": None, "careerName": tc.career})
 
     if teacher.is_admin:
         top_role = "admin"

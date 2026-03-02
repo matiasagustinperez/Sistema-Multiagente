@@ -294,6 +294,16 @@ const App = () => {
           setAuthToken(token)
           authTokenRef.current = token
           setViewRole(user.role)
+          const assignments = user.career_assignments || []
+          const firstCareer = assignments[0]?.careerName || ''
+          if (firstCareer) {
+            setActiveCareer(firstCareer)
+            localStorage.setItem('activeCareer', firstCareer)
+          }
+          if (!user.is_admin) {
+            setSelectedTeacherId(user.id)
+            setSelectedTeacherName(user.name)
+          }
           if (user.is_admin) setActiveMenu('admin-carreras')
           else if (user.role === 'director' || user.role === 'secretario') setActiveMenu('home')
           else if (user.role === 'docente') setActiveMenu('propuestas')
@@ -326,10 +336,23 @@ const App = () => {
     setAuthToken(data.access_token)
     authTokenRef.current = data.access_token
     setCurrentUser(data.user)
-    setViewRole(data.user.role)
+    const role = data.user.role
+    setViewRole(role)
+    // Auto-set career from first assignment
+    const assignments = data.user.career_assignments || []
+    const firstCareer = assignments[0]?.careerName || ''
+    if (firstCareer) {
+      setActiveCareer(firstCareer)
+      localStorage.setItem('activeCareer', firstCareer)
+    }
+    // Auto-set teacher identity for proposal filtering
+    if (!data.user.is_admin) {
+      setSelectedTeacherId(data.user.id)
+      setSelectedTeacherName(data.user.name)
+    }
     if (data.user.is_admin) setActiveMenu('admin-carreras')
-    else if (data.user.role === 'director' || data.user.role === 'secretario') setActiveMenu('home')
-    else if (data.user.role === 'docente') setActiveMenu('propuestas')
+    else if (role === 'director' || role === 'secretario') setActiveMenu('home')
+    else setActiveMenu('propuestas')
   }
 
   const handleLogout = () => {
@@ -8555,6 +8578,19 @@ const App = () => {
   const isDirectorView = viewRole === 'director'
   // Solo el Director puede eliminar entidades
   const canDelete = viewRole === 'director'
+
+  // ── Per-user career + role access (derived from currentUser.career_assignments) ──
+  const userCareers = currentUser
+    ? [...new Set((currentUser.career_assignments || []).map(a => a.careerName).filter(Boolean))]
+    : []
+  // Roles this user can switch between (e.g. director who is also docente)
+  const userRoles = currentUser && !currentUser.is_admin
+    ? [...new Set((currentUser.career_assignments || []).map(a => a.role))]
+    : currentUser?.is_admin ? ['admin'] : ['docente']
+  // Career dropdown options: locked to user's careers; open for pure docente with no TeacherCareer entries
+  const effectiveCareerOptions = userCareers.length > 0 ? userCareers : careerOptions
+  // When viewRole changes to docente, re-bind the teacher identity
+  // (handled via the effect below)
   const normalizeText = (value) => {
     const raw = String(value || '')
     const noAccents = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -10348,92 +10384,86 @@ const App = () => {
         )}
 
         <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
-          <label style={{ ...styles.label, marginTop: 0 }}>Carrera activa</label>
-          <select
-            style={{ ...styles.input, marginBottom: 0 }}
-            value={activeCareer}
-            onChange={(e) => {
-              if (planIsDirty) {
-                setPlanUnsavedModal({ type: 'career', value: e.target.value })
-                return
-              }
-              setActiveCareer(e.target.value)
-            }}
-          >
-            <option value="">Seleccionar carrera...</option>
-            {careerOptions.map((career) => (
-              <option key={career} value={career}>{career}</option>
-            ))}
-          </select>
-          {activeCareer && (
-            <div style={{ marginTop: '8px', fontSize: '12px', color: '#1a3d5c', fontWeight: 600 }}>
-              Plan activo: {getActivePlan(activeCareer)?.name || 'Sin plan'}
-            </div>
-          )}
-          <label style={{ ...styles.label, marginTop: '10px' }}>Filtrar por plan</label>
-          <select
-            style={{ ...styles.input, marginBottom: 0 }}
-            value={selectedPlanFilterId || ''}
-            onChange={(e) => setSelectedPlanFilterId(e.target.value ? Number(e.target.value) : null)}
-            disabled={!activeCareer || !(savedPlans[activeCareer] || []).length}
-          >
-            <option value="">Todos los planes</option>
-            {(savedPlans[activeCareer] || []).map((plan) => (
-              <option key={plan.id} value={plan.id}>
-                {plan.name}{plan.is_active ? ' (vigente)' : ''}
-              </option>
-            ))}
-          </select>
-          {!activeCareer && (
-            <div style={{ color: '#b00020', fontWeight: 600, marginTop: '8px', fontSize: '12px' }}>
-              Selecciona una carrera para filtrar y crear contenido.
-            </div>
-          )}
-          <label style={{ ...styles.label, marginTop: '12px' }}>Vista</label>
-          <select
-            style={{ ...styles.input, marginBottom: 0 }}
-            value={viewRole}
-            onChange={(e) => {
-              const next = e.target.value
-              setViewRole(next)
-              if (next === 'admin') {
-                setActiveMenu('admin-carreras')
-              } else if (next === 'director' || next === 'secretario') {
-                setActiveMenu('home')
-              } else if (next === 'docente') {
-                setActiveMenu('propuestas')
-              }
-            }}
-          >
-            <option value="director">Director</option>
-            <option value="secretario">Secretario</option>
-            <option value="docente">Docente</option>
-            <option value="admin">Administrador</option>
-          </select>
-          {viewRole === 'docente' && (
+          {/* Career selector – locked to user's assigned careers when applicable */}
+          {!isAdminView && (
             <>
-              <label style={{ ...styles.label, marginTop: '12px' }}>Docente</label>
+              <label style={{ ...styles.label, marginTop: 0 }}>Carrera activa</label>
+              {effectiveCareerOptions.length === 1 ? (
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a3d5c', padding: '6px 0 8px' }}>
+                  {effectiveCareerOptions[0]}
+                </div>
+              ) : (
+                <select
+                  style={{ ...styles.input, marginBottom: 0 }}
+                  value={activeCareer}
+                  onChange={(e) => {
+                    if (planIsDirty) {
+                      setPlanUnsavedModal({ type: 'career', value: e.target.value })
+                      return
+                    }
+                    setActiveCareer(e.target.value)
+                  }}
+                >
+                  <option value="">Seleccionar carrera...</option>
+                  {effectiveCareerOptions.map((career) => (
+                    <option key={career} value={career}>{career}</option>
+                  ))}
+                </select>
+              )}
+              {activeCareer && (
+                <div style={{ marginTop: '8px', fontSize: '12px', color: '#1a3d5c', fontWeight: 600 }}>
+                  Plan activo: {getActivePlan(activeCareer)?.name || 'Sin plan'}
+                </div>
+              )}
+              <label style={{ ...styles.label, marginTop: '10px' }}>Filtrar por plan</label>
               <select
                 style={{ ...styles.input, marginBottom: 0 }}
-                value={selectedTeacherId || ''}
-                onChange={(e) => {
-                  const nextId = e.target.value || null
-                  const teacher = teacherCatalogItems.find((item) => String(item.id) === String(nextId))
-                  setSelectedTeacherId(nextId)
-                  setSelectedTeacherName(teacher?.name || '')
-                }}
-                disabled={!activeCareer}
+                value={selectedPlanFilterId || ''}
+                onChange={(e) => setSelectedPlanFilterId(e.target.value ? Number(e.target.value) : null)}
+                disabled={!activeCareer || !(savedPlans[activeCareer] || []).length}
               >
-                <option value="">Seleccionar docente...</option>
-                {teacherCatalogItems.map((teacher) => (
-                  <option key={teacher.id ?? teacher.name} value={teacher.id ?? ''}>
-                    {teacher.name}
+                <option value="">Todos los planes</option>
+                {(savedPlans[activeCareer] || []).map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name}{plan.is_active ? ' (vigente)' : ''}
                   </option>
                 ))}
               </select>
               {!activeCareer && (
                 <div style={{ color: '#b00020', fontWeight: 600, marginTop: '8px', fontSize: '12px' }}>
-                  Selecciona una carrera para elegir docente.
+                  Selecciona una carrera para filtrar y crear contenido.
+                </div>
+              )}
+
+              {/* Role switcher – only shown when user has more than one role */}
+              {userRoles.length > 1 && (
+                <div style={{ marginTop: '14px' }}>
+                  <label style={{ ...styles.label, marginTop: 0, marginBottom: '6px' }}>Vista</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {userRoles.map(role => {
+                      const labels = { director: 'Director', secretario: 'Secretario', docente: 'Docente', admin: 'Admin' }
+                      const colors = { director: '#1565c0', secretario: '#e65100', docente: '#2e7d32', admin: '#7c3aed' }
+                      const active = viewRole === role
+                      return (
+                        <button
+                          key={role}
+                          onClick={() => {
+                            setViewRole(role)
+                            if (role === 'director' || role === 'secretario') setActiveMenu('home')
+                            else if (role === 'docente') setActiveMenu('propuestas')
+                          }}
+                          style={{
+                            padding: '4px 12px', borderRadius: '999px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                            border: `2px solid ${colors[role] || '#888'}`,
+                            background: active ? (colors[role] || '#888') : 'transparent',
+                            color: active ? '#fff' : (colors[role] || '#888'),
+                          }}
+                        >
+                          {labels[role] || role}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </>
