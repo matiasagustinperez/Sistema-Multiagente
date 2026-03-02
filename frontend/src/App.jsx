@@ -16,7 +16,7 @@ const LEGACY_API_BASE_URLS = [
   'http://localhost:8011'
 ]
 
-const careerOptions = [
+const CAREER_FALLBACK = [
   'Ingeniería Mecatrónica',
   'Ingeniería en Sistemas',
   'Licenciatura en Sistemas',
@@ -56,6 +56,58 @@ const getLearningOutcomeLabelsByCareer = (careerValue) => {
       shortSingular: 'Resultado de Aprendizaje',
       shortIndexPrefix: 'RA'
     }
+}
+
+/** Inline edit row used inside the Admin Carreras table. */
+const AdminCareerInlineEdit = ({ career, apiBase, onSaved, onCancel }) => {
+  const [name, setName] = React.useState(career.name)
+  const [saving, setSaving] = React.useState(false)
+  const [error, setError] = React.useState('')
+
+  const save = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) { setError('El nombre no puede estar vacío.'); return }
+    setSaving(true); setError('')
+    try {
+      const res = await fetch(`${apiBase}/careers/${career.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed })
+      })
+      if (res.status === 409) { setError('Ya existe una carrera con ese nombre.'); return }
+      if (!res.ok) { setError('Error al guardar.'); return }
+      onSaved()
+    } catch { setError('Error de red.') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          style={{ border: '1px solid #90caf9', borderRadius: '6px', padding: '4px 8px', fontSize: '14px', flex: 1, minWidth: '200px' }}
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel() }}
+          autoFocus
+        />
+        <button
+          style={{ background: '#1976d2', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '13px', cursor: saving ? 'not-allowed' : 'pointer' }}
+          disabled={saving}
+          onClick={save}
+        >
+          {saving ? '...' : '✓ Guardar'}
+        </button>
+        <button
+          style={{ background: '#90a4ae', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '13px', cursor: 'pointer' }}
+          onClick={onCancel}
+        >
+          Cancelar
+        </button>
+      </div>
+      {error && <div style={{ color: '#c62828', fontSize: '12px', marginTop: '4px' }}>{error}</div>}
+    </div>
+  )
 }
 
 const App = () => {
@@ -517,6 +569,22 @@ const App = () => {
   const [confirmActivePlanId, setConfirmActivePlanId] = useState(null)
   const [showConfirmDelete, setShowConfirmDelete] = useState(null)
   const [deleteProposalModal, setDeleteProposalModal] = useState(null) // {proposalId, subject, career, study_plan, subjectPlanId}
+  const [adminUsers, setAdminUsers] = useState([])
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false)
+  const [adminUsersSearch, setAdminUsersSearch] = useState('')
+  const [adminUserFormOpen, setAdminUserFormOpen] = useState(false)
+  const [adminUserForm, setAdminUserForm] = useState({ name: '', email: '' })
+  const [adminUserFormError, setAdminUserFormError] = useState('')
+  const [adminUserFormSaving, setAdminUserFormSaving] = useState(false)
+  // Careers (DB-backed, fallback to CAREER_FALLBACK)
+  const [careerOptions, setCareerOptions] = useState(CAREER_FALLBACK)
+  const [adminCareers, setAdminCareers] = useState([])       // all (including inactive) for admin view
+  const [adminCareersLoading, setAdminCareersLoading] = useState(false)
+  const [adminCareerFormOpen, setAdminCareerFormOpen] = useState(false)
+  const [adminCareerForm, setAdminCareerForm] = useState({ name: '', is_active: true })
+  const [adminCareerFormError, setAdminCareerFormError] = useState('')
+  const [adminCareerFormSaving, setAdminCareerFormSaving] = useState(false)
+  const [adminCareerEditId, setAdminCareerEditId] = useState(null)  // id of career being edited inline
   const [planIsDirty, setPlanIsDirty] = useState(false)
   const [planUnsavedModal, setPlanUnsavedModal] = useState(null) // {type:'menu'|'career', value:string}
   const planNavBypassRef = useRef(false)
@@ -795,6 +863,7 @@ const App = () => {
   useEffect(() => {
     fetchProposals()
     fetchTeacherTotals()
+    fetchCareers()
   }, [])
 
   // Cargar planes de estudios guardados (backend)
@@ -866,6 +935,8 @@ const App = () => {
     setDeleteProposalModal(null)
     setPlanIsDirty(false)
     setPlanUnsavedModal(null)
+    if (menu === 'admin-usuarios') fetchAdminUsers()
+    if (menu === 'admin-carreras') fetchAdminCareers()
   }
 
   useEffect(() => {
@@ -1196,25 +1267,27 @@ const App = () => {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
         <strong>{term.name}</strong>
-        <button
-          style={{ ...styles.button, padding: '4px 8px', fontSize: '12px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
-          title="Eliminar cuatrimestre"
-          onClick={() => {
-            const updatedYears = planYears.map((y) => {
-              if (y.id === year.id) {
-                return {
-                  ...y,
-                  terms: y.terms.filter((t) => t.id !== term.id)
+        {canDelete && (
+          <button
+            style={{ ...styles.button, padding: '4px 8px', fontSize: '12px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+            title="Eliminar cuatrimestre"
+            onClick={() => {
+              const updatedYears = planYears.map((y) => {
+                if (y.id === year.id) {
+                  return {
+                    ...y,
+                    terms: y.terms.filter((t) => t.id !== term.id)
+                  }
                 }
-              }
-              return y
-            })
-            setPlanYears(updatedYears)
-            setPlanError('')
-          }}
-        >
-          🗑️
-        </button>
+                return y
+              })
+              setPlanYears(updatedYears)
+              setPlanError('')
+            }}
+          >
+            🗑️
+          </button>
+        )}
       </div>
 
       {term.subjects && term.subjects.length > 0 && (
@@ -1302,6 +1375,7 @@ const App = () => {
                       >
                         ✏️
                       </button>
+                      {canDelete && (
                       <button
                         style={{ ...styles.button, padding: '2px 4px', fontSize: '10px', marginRight: 0, background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
                         title="Eliminar asignatura"
@@ -1328,6 +1402,7 @@ const App = () => {
                       >
                         🗑️
                       </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -4647,6 +4722,52 @@ const App = () => {
     }
   }
 
+  const fetchAdminUsers = async () => {
+    setAdminUsersLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/teachers`)
+      const data = await res.json().catch(() => [])
+      // Normalize: each user gets a roles array (future: populated from career assignments)
+      const users = (Array.isArray(data) ? data : []).map(t => ({
+        ...t,
+        roles: ['docente'] // default; will expand when career section is built
+      }))
+      users.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' }))
+      setAdminUsers(users)
+    } catch {
+      setAdminUsers([])
+    } finally {
+      setAdminUsersLoading(false)
+    }
+  }
+
+  /** Loads active careers from backend and updates careerOptions; falls back to CAREER_FALLBACK on error. */
+  const fetchCareers = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/careers`)
+      if (!res.ok) throw new Error('careers fetch failed')
+      const data = await res.json().catch(() => [])
+      const names = (Array.isArray(data) ? data : []).map(c => c.name)
+      setCareerOptions(names.length > 0 ? names : CAREER_FALLBACK)
+    } catch {
+      setCareerOptions(CAREER_FALLBACK)
+    }
+  }
+
+  /** Loads ALL careers (including inactive) for the Admin Carreras panel. */
+  const fetchAdminCareers = async () => {
+    setAdminCareersLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/careers?include_inactive=true`)
+      const data = await res.json().catch(() => [])
+      setAdminCareers(Array.isArray(data) ? data : [])
+    } catch {
+      setAdminCareers([])
+    } finally {
+      setAdminCareersLoading(false)
+    }
+  }
+
   const handleSavePlan = async () => {
     const trimmedPlanName = String(planName || '').trim()
     if (!trimmedPlanName) { setPlanError('Ingresa un nombre para el plan'); return }
@@ -7627,8 +7748,8 @@ const App = () => {
   }
 
   const deleteProposal = async (proposalId) => {
-    if (isDocenteView) {
-      setStatusMsg('La vista Docente no puede eliminar propuestas')
+    if (isDocenteView || isSecretarioView) {
+      setStatusMsg(isDocenteView ? 'La vista Docente no puede eliminar propuestas' : 'El Secretario no puede eliminar propuestas')
       setStatusType('error')
       return
     }
@@ -8215,6 +8336,11 @@ const App = () => {
   }
 
   const isDocenteView = viewRole === 'docente'
+  const isAdminView = viewRole === 'admin'
+  const isSecretarioView = viewRole === 'secretario'
+  const isDirectorView = viewRole === 'director'
+  // Solo el Director puede eliminar entidades
+  const canDelete = viewRole === 'director'
   const normalizeText = (value) => {
     const raw = String(value || '')
     const noAccents = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -9923,43 +10049,65 @@ const App = () => {
           <div style={{ color: '#1a3d5c', fontSize: '12px', marginTop: '10px', fontWeight: 600, lineHeight: 1.3 }}>
             Multiagente para la Acreditacion ante CONEAU
           </div>
+          {/* Role badge */}
+          <div style={{
+            display: 'inline-block', marginTop: '10px',
+            background: isAdminView ? '#7c3aed' : isSecretarioView ? '#0277bd' : isDocenteView ? '#2e7d32' : '#1565c0',
+            color: '#fff', borderRadius: '999px', padding: '3px 12px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px'
+          }}>
+            {isAdminView ? 'Administrador' : isSecretarioView ? 'Secretario' : isDocenteView ? 'Docente' : 'Director'}
+          </div>
         </div>
-        {!isDocenteView && (
+        {/* === ADMINISTRADOR === */}
+        {isAdminView && (
+          <>
+            <MenuButton label="Carreras" onClick={() => handleMenuChange('admin-carreras')} active={activeMenu === 'admin-carreras'} />
+            <MenuButton label="Usuarios" onClick={() => handleMenuChange('admin-usuarios')} active={activeMenu === 'admin-usuarios'} />
+          </>
+        )}
+        {/* === DIRECTOR / SECRETARIO / DOCENTE === */}
+        {!isAdminView && !isDocenteView && (
           <MenuButton label="Inicio" onClick={() => handleMenuChange('home')} active={activeMenu === 'home'} />
         )}
-        {!isDocenteView && (
+        {!isAdminView && !isDocenteView && (
           <MenuButton label="Plan de Estudios" onClick={() => handleMenuChange('plan')} active={activeMenu === 'plan'} />
         )}
-        {!isDocenteView && !isTechnicalCareerName(activeCareer) && (
+        {!isAdminView && !isDocenteView && !isTechnicalCareerName(activeCareer) && (
           <MenuButton
             label="Competencias"
             onClick={() => handleMenuChange('competencias')}
             active={activeMenu === 'competencias'}
           />
         )}
-        <MenuButton
-          label="Propuestas"
-          onClick={() => handleMenuChange('propuestas')}
-          active={activeMenu === 'propuestas'}
-        />
-        <MenuButton
-          label="Control de Propuestas"
-          onClick={() => handleMenuChange('control-propuestas')}
-          active={activeMenu === 'control-propuestas'}
-        />
-        <MenuButton
-          label="Instrumentos Evaluativos"
-          onClick={() => {
-            handleMenuChange('instrumentos')
-            fetchInstrumentsSummary(activeCareer || '')
-            fetchInstrumentsFoldersList(activeCareer || '')
-          }}
-          active={activeMenu === 'instrumentos'}
-        />
-        {!isDocenteView && (
+        {!isAdminView && (
+          <MenuButton
+            label="Propuestas"
+            onClick={() => handleMenuChange('propuestas')}
+            active={activeMenu === 'propuestas'}
+          />
+        )}
+        {!isAdminView && (
+          <MenuButton
+            label="Control de Propuestas"
+            onClick={() => handleMenuChange('control-propuestas')}
+            active={activeMenu === 'control-propuestas'}
+          />
+        )}
+        {!isAdminView && (
+          <MenuButton
+            label="Instrumentos Evaluativos"
+            onClick={() => {
+              handleMenuChange('instrumentos')
+              fetchInstrumentsSummary(activeCareer || '')
+              fetchInstrumentsFoldersList(activeCareer || '')
+            }}
+            active={activeMenu === 'instrumentos'}
+          />
+        )}
+        {!isAdminView && !isDocenteView && (
           <MenuButton label="Docentes" onClick={() => handleMenuChange('docentes')} active={activeMenu === 'docentes'} />
         )}
-        {(!isDocenteView || docenteIsAccreditationParticipant) && (
+        {!isAdminView && (!isDocenteView || docenteIsAccreditationParticipant) && (
           <MenuButton label="Acreditación" onClick={() => handleMenuChange('resoluciones')} active={activeMenu === 'resoluciones'} />
         )}
 
@@ -10009,10 +10157,22 @@ const App = () => {
           <select
             style={{ ...styles.input, marginBottom: 0 }}
             value={viewRole}
-            onChange={(e) => setViewRole(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value
+              setViewRole(next)
+              if (next === 'admin') {
+                setActiveMenu('admin-carreras')
+              } else if (next === 'director' || next === 'secretario') {
+                setActiveMenu('home')
+              } else if (next === 'docente') {
+                setActiveMenu('propuestas')
+              }
+            }}
           >
             <option value="director">Director</option>
+            <option value="secretario">Secretario</option>
             <option value="docente">Docente</option>
+            <option value="admin">Administrador</option>
           </select>
           {viewRole === 'docente' && (
             <>
@@ -10500,13 +10660,15 @@ const App = () => {
                                 >
                                   {prop.editing_locked ? '🔓' : '🔒'}
                                 </button>
-                                <button
-                                  style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
-                                  title="Eliminar propuesta"
-                                  onClick={() => deleteProposal(prop.id)}
-                                >
-                                  🗑️
-                                </button>
+                                {canDelete && (
+                                  <button
+                                    style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
+                                    title="Eliminar propuesta"
+                                    onClick={() => deleteProposal(prop.id)}
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
                               </>
                             )}
                           </td>
@@ -12030,13 +12192,15 @@ const App = () => {
                               >
                                 {prop.editing_locked ? '🔓' : '🔒'}
                               </button>
-                              <button
-                                style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
-                                title="Eliminar propuesta"
-                                onClick={() => deleteProposal(prop.id)}
-                              >
-                                🗑️
-                              </button>
+                              {canDelete && (
+                                <button
+                                  style={{ ...styles.button, padding: '6px 10px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d' }}
+                                  title="Eliminar propuesta"
+                                  onClick={() => deleteProposal(prop.id)}
+                                >
+                                  🗑️
+                                </button>
+                              )}
                             </>
                           )}
                         </td>
@@ -13217,13 +13381,15 @@ const App = () => {
                                   >
                                     ✏️
                                   </button>
-                                  <button
-                                    style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px', marginRight: 0 }}
-                                    onClick={() => openDeleteTeacherModal(teacher)}
-                                    title="Eliminar docente"
-                                  >
-                                    🗑️
-                                  </button>
+                                  {canDelete && (
+                                    <button
+                                      style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', padding: '6px 10px', marginRight: 0 }}
+                                      onClick={() => openDeleteTeacherModal(teacher)}
+                                      title="Eliminar docente"
+                                    >
+                                      🗑️
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             </>
@@ -13331,12 +13497,14 @@ const App = () => {
                               >
                                 Editar
                               </button>
-                              <button
-                                style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', marginRight: 0 }}
-                                onClick={() => openDeleteTeacherModal(teacher)}
-                              >
-                                Eliminar
-                              </button>
+                              {canDelete && (
+                                <button
+                                  style={{ ...styles.button, background: 'rgba(69, 90, 100, 0.85)', color: '#fff', marginRight: 0 }}
+                                  onClick={() => openDeleteTeacherModal(teacher)}
+                                >
+                                  Eliminar
+                                </button>
+                              )}
                             </div>
                           </>
                         )}
@@ -14368,6 +14536,336 @@ const App = () => {
           </div>
         )}
 
+        {/* ADMIN — CARRERAS */}
+        {activeMenu === 'admin-carreras' && (
+          <div style={styles.section}>
+            <h2>🏛️ Carreras</h2>
+            <p style={{ color: '#555', marginBottom: '16px' }}>
+              Gestioná las carreras disponibles en el sistema. Los cambios afectan los desplegables de toda la aplicación.
+            </p>
+
+            {/* Warning about renaming */}
+            <div style={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '8px', padding: '10px 14px', marginBottom: '18px', fontSize: '13px', color: '#7b5800' }}>
+              ⚠️ <strong>Atención:</strong> Renombrar una carrera <em>no</em> actualiza automáticamente las propuestas y planes existentes que ya usan ese nombre. Usá con cuidado.
+            </div>
+
+            {/* Actions bar */}
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap' }}>
+              <span style={{ flex: 1, color: '#555', fontSize: '14px' }}>
+                {adminCareers.length} carrera{adminCareers.length !== 1 ? 's' : ''} en total
+              </span>
+              <button
+                style={{ ...styles.button, background: '#4caf50', whiteSpace: 'nowrap' }}
+                onClick={() => { setAdminCareerFormOpen(true); setAdminCareerForm({ name: '', is_active: true }); setAdminCareerFormError(''); setAdminCareerEditId(null) }}
+              >
+                + Nueva carrera
+              </button>
+              <button
+                style={{ ...styles.button, background: '#78909c', whiteSpace: 'nowrap' }}
+                onClick={fetchAdminCareers}
+                disabled={adminCareersLoading}
+              >
+                {adminCareersLoading ? '...' : '↺ Actualizar'}
+              </button>
+            </div>
+
+            {/* New career form */}
+            {adminCareerFormOpen && (
+              <div style={{ background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '16px', marginBottom: '18px' }}>
+                <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px' }}>Nueva carrera</div>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                  <input
+                    style={{ ...styles.input, flex: 1, minWidth: '260px', marginBottom: 0 }}
+                    placeholder="Nombre de la carrera..."
+                    value={adminCareerForm.name}
+                    onChange={e => setAdminCareerForm(f => ({ ...f, name: e.target.value }))}
+                  />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', whiteSpace: 'nowrap', paddingTop: '8px' }}>
+                    <input
+                      type="checkbox"
+                      checked={adminCareerForm.is_active}
+                      onChange={e => setAdminCareerForm(f => ({ ...f, is_active: e.target.checked }))}
+                    />
+                    Activa
+                  </label>
+                  <button
+                    style={{ ...styles.button, background: '#2196f3', whiteSpace: 'nowrap' }}
+                    disabled={adminCareerFormSaving || !adminCareerForm.name.trim()}
+                    onClick={async () => {
+                      setAdminCareerFormSaving(true)
+                      setAdminCareerFormError('')
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/careers`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ name: adminCareerForm.name.trim(), is_active: adminCareerForm.is_active })
+                        })
+                        if (res.status === 409) { setAdminCareerFormError('Ya existe una carrera con ese nombre.'); return }
+                        if (!res.ok) { setAdminCareerFormError('Error al crear la carrera.'); return }
+                        setAdminCareerFormOpen(false)
+                        setAdminCareerForm({ name: '', is_active: true })
+                        await fetchAdminCareers()
+                        await fetchCareers()
+                      } catch { setAdminCareerFormError('Error de red.') }
+                      finally { setAdminCareerFormSaving(false) }
+                    }}
+                  >
+                    {adminCareerFormSaving ? 'Guardando...' : 'Guardar'}
+                  </button>
+                  <button
+                    style={{ ...styles.button, background: '#90a4ae' }}
+                    onClick={() => { setAdminCareerFormOpen(false); setAdminCareerFormError('') }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                {adminCareerFormError && <div style={{ color: '#c62828', fontSize: '13px', marginTop: '8px' }}>{adminCareerFormError}</div>}
+              </div>
+            )}
+
+            {/* Careers table */}
+            {adminCareersLoading ? (
+              <div style={{ padding: '30px', textAlign: 'center', color: '#888' }}>Cargando...</div>
+            ) : adminCareers.length === 0 ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: '#aaa', fontStyle: 'italic' }}>No hay carreras registradas.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                <thead>
+                  <tr style={{ background: '#eceff1', borderBottom: '2px solid #cfd8dc' }}>
+                    <th style={{ padding: '10px 12px', textAlign: 'left' }}>Nombre</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', width: '90px' }}>Estado</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'right', width: '160px' }}>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminCareers.map(career => (
+                    <tr key={career.id} style={{ borderBottom: '1px solid #e0e0e0', background: career.is_active ? '#fff' : '#fafafa' }}>
+                      <td style={{ padding: '10px 12px', color: career.is_active ? '#212121' : '#9e9e9e' }}>
+                        {adminCareerEditId === career.id ? (
+                          <AdminCareerInlineEdit
+                            career={career}
+                            apiBase={API_BASE_URL}
+                            onSaved={async () => { setAdminCareerEditId(null); await fetchAdminCareers(); await fetchCareers() }}
+                            onCancel={() => setAdminCareerEditId(null)}
+                          />
+                        ) : (
+                          <span>{career.name}</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 600,
+                          background: career.is_active ? '#e8f5e9' : '#fce4ec',
+                          color: career.is_active ? '#2e7d32' : '#b71c1c'
+                        }}>
+                          {career.is_active ? 'Activa' : 'Inactiva'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                        {adminCareerEditId !== career.id && (
+                          <>
+                            <button
+                              style={{ ...styles.button, padding: '4px 10px', fontSize: '13px', background: '#1976d2', marginRight: '6px' }}
+                              onClick={() => setAdminCareerEditId(career.id)}
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button
+                              style={{ ...styles.button, padding: '4px 10px', fontSize: '13px', background: career.is_active ? '#ef6c00' : '#43a047', marginRight: '6px' }}
+                              onClick={async () => {
+                                await fetch(`${API_BASE_URL}/careers/${career.id}`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ is_active: !career.is_active })
+                                })
+                                await fetchAdminCareers()
+                                await fetchCareers()
+                              }}
+                            >
+                              {career.is_active ? 'Desactivar' : 'Activar'}
+                            </button>
+                            <button
+                              style={{ ...styles.button, padding: '4px 10px', fontSize: '13px', background: '#c62828' }}
+                              onClick={async () => {
+                                if (!window.confirm(`¿Eliminar la carrera "${career.name}"? Esta acción no se puede deshacer.`)) return
+                                const res = await fetch(`${API_BASE_URL}/careers/${career.id}`, { method: 'DELETE' })
+                                if (res.ok || res.status === 204) { await fetchAdminCareers(); await fetchCareers() }
+                              }}
+                            >
+                              🗑️
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* ADMIN — USUARIOS */}
+        {activeMenu === 'admin-usuarios' && (
+          <div style={styles.section}>
+            <h2>👤 Usuarios</h2>
+
+            {/* Actions bar */}
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap' }}>
+              <input
+                style={{ ...styles.input, flex: 1, minWidth: '200px', marginBottom: 0 }}
+                placeholder="Buscar por nombre o email..."
+                value={adminUsersSearch}
+                onChange={e => setAdminUsersSearch(e.target.value)}
+              />
+              <button
+                style={{ ...styles.button, background: '#4caf50', whiteSpace: 'nowrap' }}
+                onClick={() => { setAdminUserFormOpen(true); setAdminUserForm({ name: '', email: '' }); setAdminUserFormError('') }}
+              >
+                + Nuevo usuario
+              </button>
+              <button
+                style={{ ...styles.button, background: 'rgba(69,90,100,0.85)', whiteSpace: 'nowrap' }}
+                onClick={fetchAdminUsers}
+              >
+                ↻ Actualizar
+              </button>
+            </div>
+
+            {/* Create user form */}
+            {adminUserFormOpen && (
+              <div style={{ background: '#f8fafc', border: '1px solid #d0e4f7', borderRadius: '10px', padding: '20px 24px', marginBottom: '20px' }}>
+                <h3 style={{ margin: '0 0 14px', fontSize: '15px' }}>Nuevo usuario</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                  <div>
+                    <label style={styles.label}>Apellido y Nombre *</label>
+                    <input
+                      style={styles.input}
+                      placeholder="Ej: García, Juan"
+                      value={adminUserForm.name}
+                      onChange={e => setAdminUserForm(p => ({ ...p, name: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label style={styles.label}>Email</label>
+                    <input
+                      style={styles.input}
+                      type="email"
+                      placeholder="usuario@institucion.edu.ar"
+                      value={adminUserForm.email}
+                      onChange={e => setAdminUserForm(p => ({ ...p, email: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                {adminUserFormError && (
+                  <div style={{ color: '#b00020', fontSize: '13px', marginBottom: '10px' }}>{adminUserFormError}</div>
+                )}
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    style={{ ...styles.button, background: '#4caf50' }}
+                    disabled={adminUserFormSaving}
+                    onClick={async () => {
+                      const name = adminUserForm.name.trim()
+                      if (!name) { setAdminUserFormError('El nombre es obligatorio'); return }
+                      setAdminUserFormSaving(true)
+                      setAdminUserFormError('')
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/teachers`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ name, email: adminUserForm.email.trim() || null, category: 'Sin Informar', dedication: 'Sin Informar' })
+                        })
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}))
+                          throw new Error(err.detail || `Error ${res.status}`)
+                        }
+                        await fetchAdminUsers()
+                        setAdminUserFormOpen(false)
+                        setStatusMsg(`Usuario "${name}" creado correctamente`)
+                        setStatusType('success')
+                      } catch (err) {
+                        setAdminUserFormError(err.message)
+                      } finally {
+                        setAdminUserFormSaving(false)
+                      }
+                    }}
+                  >
+                    {adminUserFormSaving ? 'Guardando...' : '✓ Crear usuario'}
+                  </button>
+                  <button
+                    style={{ ...styles.button, background: '#e0e0e0', color: '#333' }}
+                    onClick={() => setAdminUserFormOpen(false)}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Users table */}
+            {adminUsersLoading ? (
+              <div style={{ color: '#777', padding: '20px', textAlign: 'center' }}>Cargando usuarios...</div>
+            ) : (() => {
+              const filtered = adminUsers.filter(u => {
+                const q = adminUsersSearch.toLowerCase()
+                return !q || (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
+              })
+              const roleBadge = (role) => {
+                const map = {
+                  director: { label: 'Director', bg: '#1565c0', color: '#fff' },
+                  secretario: { label: 'Secretario', bg: '#0277bd', color: '#fff' },
+                  docente: { label: 'Docente', bg: '#2e7d32', color: '#fff' },
+                  admin: { label: 'Admin', bg: '#7c3aed', color: '#fff' }
+                }
+                const s = map[role] || { label: role, bg: '#90a4ae', color: '#fff' }
+                return (
+                  <span key={role} style={{ background: s.bg, color: s.color, borderRadius: '999px', padding: '2px 10px', fontSize: '11px', fontWeight: 700, marginRight: '4px', display: 'inline-block' }}>
+                    {s.label}
+                  </span>
+                )
+              }
+              return filtered.length === 0 ? (
+                <div style={{ color: '#999', padding: '30px', textAlign: 'center', fontStyle: 'italic' }}>
+                  {adminUsersSearch ? 'No hay usuarios que coincidan con la búsqueda.' : 'No hay usuarios registrados aún.'}
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: '#eaf3ff', borderBottom: '2px solid #c5d9f0' }}>
+                        <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Apellido y Nombre</th>
+                        <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Email</th>
+                        <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Roles</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((user, i) => (
+                        <tr key={user.id} style={{ borderBottom: '1px solid #e8eef3', background: i % 2 === 0 ? '#fff' : '#f9fbfd' }}>
+                          <td style={{ padding: '10px 14px', fontWeight: 600 }}>{user.name || '—'}</td>
+                          <td style={{ padding: '10px 14px', color: user.email ? '#1a3d5c' : '#bbb', fontStyle: user.email ? 'normal' : 'italic' }}>
+                            {user.email || 'Sin email'}
+                          </td>
+                          <td style={{ padding: '10px 14px' }}>
+                            {(user.roles || ['docente']).map(r => roleBadge(r))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ color: '#999', fontSize: '12px', marginTop: '10px', textAlign: 'right' }}>
+                    {filtered.length} usuario{filtered.length !== 1 ? 's' : ''}
+                    {adminUsersSearch && ` (de ${adminUsers.length} total)`}
+                  </div>
+                </div>
+              )
+            })()}
+
+            <div style={{ marginTop: '16px', padding: '12px 16px', background: '#fef9e7', border: '1px solid #f0cc66', borderRadius: '8px', fontSize: '12px', color: '#7d5a00' }}>
+              ℹ️ Los roles <strong>Director</strong> y <strong>Secretario</strong> se asignarán automáticamente al vincular un usuario a una carrera (disponible próximamente en la sección <strong>Carreras</strong>).
+            </div>
+          </div>
+        )}
+
         {/* PLAN DE ESTUDIOS */}
         {activeMenu === 'plan' && (
           <div style={styles.section}>
@@ -14467,13 +14965,15 @@ const App = () => {
                                     ⭐
                                   </button>
                                 )}
-                                <button
-                                  style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
-                                  title="Eliminar plan"
-                                  onClick={() => setShowConfirmDelete(plan.id)}
-                                >
-                                  🗑️
-                                </button>
+                                {canDelete && (
+                                  <button
+                                    style={{ ...styles.button, padding: '6px 10px', background: 'rgba(69, 90, 100, 0.85)', color: '#fff' }}
+                                    title="Eliminar plan"
+                                    onClick={() => setShowConfirmDelete(plan.id)}
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -14543,15 +15043,17 @@ const App = () => {
                             <div key={year.id} style={{ border: '1px solid #d9e1e6', borderRadius: '8px', padding: '12px', background: '#fff' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                                 <h4 style={{ margin: 0 }}>Año {year.year}</h4>
-                                <button
-                                  style={{ ...styles.button, padding: '6px 10px', background: '#999', marginRight: 0 }}
-                                  onClick={() => {
-                                    const filtered = planYears.filter((y) => y.id !== year.id)
-                                    setPlanYears(filtered)
-                                  }}
-                                >
-                                  Eliminar Año
-                                </button>
+                                {canDelete && (
+                                  <button
+                                    style={{ ...styles.button, padding: '6px 10px', background: '#999', marginRight: 0 }}
+                                    onClick={() => {
+                                      const filtered = planYears.filter((y) => y.id !== year.id)
+                                      setPlanYears(filtered)
+                                    }}
+                                  >
+                                    Eliminar Año
+                                  </button>
+                                )}
                               </div>
 
                               {/* Mostrar Anual primero si existe */}

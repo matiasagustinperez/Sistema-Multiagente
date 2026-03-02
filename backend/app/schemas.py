@@ -778,3 +778,27 @@ class EvaluativeInstrumentFolderOut(BaseModel):
     class Config:
         from_attributes = True
 
+
+# ── Careers ──────────────────────────────────────────────────────────────────
+
+class CareerBase(BaseModel):
+    name: str
+    is_active: bool = True
+
+
+class CareerCreate(CareerBase):
+    pass
+
+
+class CareerUpdate(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class CareerOut(CareerBase):
+    id: int
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+

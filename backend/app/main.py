@@ -5521,6 +5521,91 @@ def build_proposal_response(db: Session, proposal: models.Proposal) -> dict:
     return base
 
 
+# ── Careers helper & CRUD ───────────────────────────────────────────────────
+
+_DEFAULT_CAREERS = [
+    "Ingeniería Mecatrónica",
+    "Ingeniería en Sistemas",
+    "Licenciatura en Sistemas",
+    "Tecnicatura Universitaria en Ciencia de Datos",
+    "Tecnicatura Universitaria en Desarrollo Web",
+]
+
+
+def seed_careers() -> None:
+    """Seed default careers if the table is empty."""
+    db = SessionLocal()
+    try:
+        if db.query(models.Career).count() == 0:
+            for name in _DEFAULT_CAREERS:
+                db.add(models.Career(name=name, is_active=True))
+            db.commit()
+            print(f"[INFO] Seeded {len(_DEFAULT_CAREERS)} default careers")
+    finally:
+        db.close()
+
+
+@app.get("/careers", response_model=list[schemas.CareerOut], tags=["Careers"])
+def list_careers(
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.Career)
+    if not include_inactive:
+        q = q.filter(models.Career.is_active == True)
+    return q.order_by(models.Career.name).all()
+
+
+@app.post("/careers", response_model=schemas.CareerOut, status_code=201, tags=["Careers"])
+def create_career(payload: schemas.CareerCreate, db: Session = Depends(get_db)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="El nombre de la carrera no puede estar vacío.")
+    existing = db.query(models.Career).filter(
+        func.lower(models.Career.name) == func.lower(name)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Ya existe una carrera con ese nombre.")
+    career = models.Career(name=name, is_active=payload.is_active)
+    db.add(career)
+    db.commit()
+    db.refresh(career)
+    return career
+
+
+@app.patch("/careers/{career_id}", response_model=schemas.CareerOut, tags=["Careers"])
+def update_career(career_id: int, payload: schemas.CareerUpdate, db: Session = Depends(get_db)):
+    career = db.query(models.Career).filter(models.Career.id == career_id).first()
+    if not career:
+        raise HTTPException(status_code=404, detail="Carrera no encontrada.")
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="El nombre no puede estar vacío.")
+        dup = db.query(models.Career).filter(
+            func.lower(models.Career.name) == func.lower(name),
+            models.Career.id != career_id,
+        ).first()
+        if dup:
+            raise HTTPException(status_code=409, detail="Ya existe una carrera con ese nombre.")
+        career.name = name
+    if payload.is_active is not None:
+        career.is_active = payload.is_active
+    db.commit()
+    db.refresh(career)
+    return career
+
+
+@app.delete("/careers/{career_id}", status_code=204, tags=["Careers"])
+def delete_career(career_id: int, db: Session = Depends(get_db)):
+    career = db.query(models.Career).filter(models.Career.id == career_id).first()
+    if not career:
+        raise HTTPException(status_code=404, detail="Carrera no encontrada.")
+    db.delete(career)
+    db.commit()
+    return Response(status_code=204)
+
+
 @app.on_event("startup")
 def on_startup():
     print(f"[DEBUG] Loaded backend module: {__file__}")
@@ -5534,7 +5619,8 @@ def on_startup():
     # Initialize database
     init_db()
     sync_teachers_from_existing_proposals()
-    
+    seed_careers()
+
     print("[OK] Backend startup validation passed")
     print("   - OpenAI API Key: configured")
     print("   - Database: initialized")

@@ -452,3 +452,14 @@ class EvaluativeInstrumentFolder(Base):
     gdrive_folder_id = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# ── Careers ─────────────────────────────────────────────────────────────────
+
+class Career(Base):
+    __tablename__ = "careers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
