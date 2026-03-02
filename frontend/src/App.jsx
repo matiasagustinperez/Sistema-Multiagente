@@ -12241,7 +12241,7 @@ const App = () => {
                       <td style={{ padding: '10px' }}>{p.title || 'Sin título'}</td>
                       <td style={{ padding: '10px' }}>{p.career || '-'}</td>
                       <td style={{ padding: '10px' }}>{p.study_plan || p.plan || '-'}</td>
-                      <td style={{ padding: '10px' }}>{new Date(p.created_at).toLocaleDateString()}</td>
+                      <td style={{ padding: '10px' }}>{formatDateTime(p.created_at)}</td>
                       <td style={{ padding: '10px' }}>{formatDateTime(p.updated_at || p.created_at)}</td>
                       <td style={{ padding: '10px' }}>{renderStatusCapsule(p.status || '-')}</td>
                       <td style={{ padding: '10px', textAlign: 'center' }}>
@@ -15351,7 +15351,7 @@ const App = () => {
                             </div>
                           </td>
                           <td style={{ padding: '10px 14px', fontSize: '12px', color: user.last_login ? '#555' : '#e65100', fontWeight: user.last_login ? 400 : 600 }}>
-                            {user.last_login ? new Date(user.last_login).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Nunca ingresó'}
+                            {user.last_login ? new Date(user.last_login).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : 'Nunca ingresó'}
                           </td>
                         </tr>
                       ))}
@@ -18346,7 +18346,7 @@ const App = () => {
                             ? { bg: '#fff3e0', color: '#e65100', label: 'Parcial' }
                             : { bg: '#f3e5f5', color: '#6a1b9a', label: 'Final' }
                         const sizeStr = inst.file_size ? (inst.file_size < 1024 * 1024 ? `${(inst.file_size / 1024).toFixed(1)} KB` : `${(inst.file_size / (1024 * 1024)).toFixed(1)} MB`) : '-'
-                        const dateStr = inst.created_at ? new Date(inst.created_at).toLocaleDateString('es-AR', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '-'
+                        const dateStr = inst.created_at ? new Date(inst.created_at).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }) : '-'
                         return (
                           <tr key={inst.id} style={{ background: idx % 2 === 0 ? '#fff' : '#f7fafc', borderBottom: '1px solid #eee' }}>
                             <td style={{ padding: '9px 12px', maxWidth: '300px' }}>
