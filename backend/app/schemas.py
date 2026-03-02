@@ -793,11 +793,17 @@ class CareerCreate(CareerBase):
 class CareerUpdate(BaseModel):
     name: Optional[str] = None
     is_active: Optional[bool] = None
+    director_id: Optional[int] = None
+    secretario_id: Optional[int] = None
 
 
 class CareerOut(CareerBase):
     id: int
     created_at: Optional[datetime] = None
+    director_id: Optional[int] = None
+    secretario_id: Optional[int] = None
+    director_name: Optional[str] = None
+    secretario_name: Optional[str] = None
 
     class Config:
         from_attributes = True

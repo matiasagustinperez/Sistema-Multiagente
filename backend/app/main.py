@@ -5545,7 +5545,7 @@ def seed_careers() -> None:
         db.close()
 
 
-@app.get("/careers", response_model=list[schemas.CareerOut], tags=["Careers"])
+@app.get("/careers", tags=["Careers"])
 def list_careers(
     include_inactive: bool = False,
     db: Session = Depends(get_db),
@@ -5553,7 +5553,28 @@ def list_careers(
     q = db.query(models.Career)
     if not include_inactive:
         q = q.filter(models.Career.is_active == True)
-    return q.order_by(models.Career.name).all()
+    careers = q.order_by(models.Career.name).all()
+    teacher_cache: dict[int, str] = {}
+    def teacher_name(tid):
+        if not tid:
+            return None
+        if tid not in teacher_cache:
+            t = db.query(models.Teacher).filter(models.Teacher.id == tid).first()
+            teacher_cache[tid] = t.name if t else None
+        return teacher_cache[tid]
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "is_active": c.is_active,
+            "created_at": c.created_at,
+            "director_id": c.director_id,
+            "secretario_id": c.secretario_id,
+            "director_name": teacher_name(c.director_id),
+            "secretario_name": teacher_name(c.secretario_id),
+        }
+        for c in careers
+    ]
 
 
 @app.post("/careers", response_model=schemas.CareerOut, status_code=201, tags=["Careers"])
@@ -5573,13 +5594,17 @@ def create_career(payload: schemas.CareerCreate, db: Session = Depends(get_db)):
     return career
 
 
-@app.patch("/careers/{career_id}", response_model=schemas.CareerOut, tags=["Careers"])
+@app.patch("/careers/{career_id}", tags=["Careers"])
 def update_career(career_id: int, payload: schemas.CareerUpdate, db: Session = Depends(get_db)):
     career = db.query(models.Career).filter(models.Career.id == career_id).first()
     if not career:
         raise HTTPException(status_code=404, detail="Carrera no encontrada.")
-    if payload.name is not None:
-        name = payload.name.strip()
+    try:
+        update_data = payload.model_dump(exclude_unset=True)
+    except AttributeError:
+        update_data = payload.dict(exclude_unset=True)
+    if "name" in update_data:
+        name = update_data["name"].strip()
         if not name:
             raise HTTPException(status_code=422, detail="El nombre no puede estar vacío.")
         dup = db.query(models.Career).filter(
@@ -5588,12 +5613,22 @@ def update_career(career_id: int, payload: schemas.CareerUpdate, db: Session = D
         ).first()
         if dup:
             raise HTTPException(status_code=409, detail="Ya existe una carrera con ese nombre.")
-        career.name = name
-    if payload.is_active is not None:
-        career.is_active = payload.is_active
+        update_data["name"] = name
+    for field, value in update_data.items():
+        setattr(career, field, value)
     db.commit()
     db.refresh(career)
-    return career
+    # Return enriched dict with teacher names
+    def tname(tid):
+        if not tid: return None
+        t = db.query(models.Teacher).filter(models.Teacher.id == tid).first()
+        return t.name if t else None
+    return {
+        "id": career.id, "name": career.name, "is_active": career.is_active,
+        "created_at": career.created_at,
+        "director_id": career.director_id, "secretario_id": career.secretario_id,
+        "director_name": tname(career.director_id), "secretario_name": tname(career.secretario_id),
+    }
 
 
 @app.delete("/careers/{career_id}", status_code=204, tags=["Careers"])

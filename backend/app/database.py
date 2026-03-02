@@ -26,6 +26,20 @@ def init_db():
     ensure_intelligent_settings_columns()
     ensure_accreditation_settings_columns()
     ensure_accreditation_workplan_columns()
+    ensure_careers_columns()
+
+
+def ensure_careers_columns():
+    """Add missing columns to careers table (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        for col, col_type in [("director_id", "INTEGER"), ("secretario_id", "INTEGER")]:
+            try:
+                conn.execute(text(f"ALTER TABLE careers ADD COLUMN {col} {col_type}"))
+                conn.commit()
+            except Exception:
+                pass
 
 
 def ensure_proposals_columns():

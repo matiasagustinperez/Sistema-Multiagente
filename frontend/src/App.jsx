@@ -585,6 +585,7 @@ const App = () => {
   const [adminCareerFormError, setAdminCareerFormError] = useState('')
   const [adminCareerFormSaving, setAdminCareerFormSaving] = useState(false)
   const [adminCareerEditId, setAdminCareerEditId] = useState(null)  // id of career being edited inline
+  const [adminCareerResponsableModal, setAdminCareerResponsableModal] = useState(null) // {careerId, type:'director'|'secretario', currentId, selectedId}
   const [planIsDirty, setPlanIsDirty] = useState(false)
   const [planUnsavedModal, setPlanUnsavedModal] = useState(null) // {type:'menu'|'career', value:string}
   const planNavBypassRef = useRef(false)
@@ -936,7 +937,7 @@ const App = () => {
     setPlanIsDirty(false)
     setPlanUnsavedModal(null)
     if (menu === 'admin-usuarios') fetchAdminUsers()
-    if (menu === 'admin-carreras') fetchAdminCareers()
+    if (menu === 'admin-carreras') { fetchAdminCareers(); fetchAdminUsers() }
   }
 
   useEffect(() => {
@@ -14550,7 +14551,7 @@ const App = () => {
             </div>
 
             {/* Actions bar */}
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap' }}>
               <span style={{ flex: 1, color: '#555', fontSize: '14px' }}>
                 {adminCareers.length} carrera{adminCareers.length !== 1 ? 's' : ''} en total
               </span>
@@ -14623,84 +14624,177 @@ const App = () => {
               </div>
             )}
 
+            {/* Responsable assignment modal */}
+            {adminCareerResponsableModal && (
+              <div style={{
+                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3000,
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                <div style={{ background: '#fff', borderRadius: '12px', padding: '28px', maxWidth: '420px', width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+                  <h3 style={{ margin: '0 0 18px', fontSize: '16px' }}>
+                    Asignar {adminCareerResponsableModal.type === 'director' ? 'Director/a' : 'Secretario/a'}
+                  </h3>
+                  <p style={{ color: '#555', fontSize: '13px', marginBottom: '14px' }}>
+                    Carrera: <strong>{adminCareers.find(c => c.id === adminCareerResponsableModal.careerId)?.name}</strong>
+                  </p>
+                  <select
+                    style={{ ...styles.input, width: '100%', marginBottom: '18px' }}
+                    value={adminCareerResponsableModal.selectedId ?? ''}
+                    onChange={e => setAdminCareerResponsableModal(m => ({ ...m, selectedId: e.target.value }))}
+                    id="responsable-select"
+                  >
+                    <option value="">— Sin asignar —</option>
+                    {adminUsers.map(u => (
+                      <option key={u.id} value={u.id}>{u.name}{u.email ? ` (${u.email})` : ''}</option>
+                    ))}
+                  </select>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button
+                      style={{ ...styles.button, background: '#90a4ae' }}
+                      onClick={() => setAdminCareerResponsableModal(null)}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      style={{ ...styles.button, background: '#1976d2' }}
+                      onClick={async () => {
+                        const rawVal = adminCareerResponsableModal.selectedId
+                        const body = {
+                          [adminCareerResponsableModal.type === 'director' ? 'director_id' : 'secretario_id']:
+                            rawVal ? parseInt(rawVal, 10) : null
+                        }
+                        await fetch(`${API_BASE_URL}/careers/${adminCareerResponsableModal.careerId}`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(body)
+                        })
+                        setAdminCareerResponsableModal(null)
+                        await fetchAdminCareers()
+                      }}
+                    >
+                      Guardar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Careers table */}
             {adminCareersLoading ? (
               <div style={{ padding: '30px', textAlign: 'center', color: '#888' }}>Cargando...</div>
             ) : adminCareers.length === 0 ? (
               <div style={{ padding: '24px', textAlign: 'center', color: '#aaa', fontStyle: 'italic' }}>No hay carreras registradas.</div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                <thead>
-                  <tr style={{ background: '#eceff1', borderBottom: '2px solid #cfd8dc' }}>
-                    <th style={{ padding: '10px 12px', textAlign: 'left' }}>Nombre</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', width: '90px' }}>Estado</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'right', width: '160px' }}>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminCareers.map(career => (
-                    <tr key={career.id} style={{ borderBottom: '1px solid #e0e0e0', background: career.is_active ? '#fff' : '#fafafa' }}>
-                      <td style={{ padding: '10px 12px', color: career.is_active ? '#212121' : '#9e9e9e' }}>
-                        {adminCareerEditId === career.id ? (
-                          <AdminCareerInlineEdit
-                            career={career}
-                            apiBase={API_BASE_URL}
-                            onSaved={async () => { setAdminCareerEditId(null); await fetchAdminCareers(); await fetchCareers() }}
-                            onCancel={() => setAdminCareerEditId(null)}
-                          />
-                        ) : (
-                          <span>{career.name}</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                        <span style={{
-                          display: 'inline-block', padding: '2px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 600,
-                          background: career.is_active ? '#e8f5e9' : '#fce4ec',
-                          color: career.is_active ? '#2e7d32' : '#b71c1c'
-                        }}>
-                          {career.is_active ? 'Activa' : 'Inactiva'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                        {adminCareerEditId !== career.id && (
-                          <>
-                            <button
-                              style={{ ...styles.button, padding: '4px 10px', fontSize: '13px', background: '#1976d2', marginRight: '6px' }}
-                              onClick={() => setAdminCareerEditId(career.id)}
-                            >
-                              ✏️ Editar
-                            </button>
-                            <button
-                              style={{ ...styles.button, padding: '4px 10px', fontSize: '13px', background: career.is_active ? '#ef6c00' : '#43a047', marginRight: '6px' }}
-                              onClick={async () => {
-                                await fetch(`${API_BASE_URL}/careers/${career.id}`, {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ is_active: !career.is_active })
-                                })
-                                await fetchAdminCareers()
-                                await fetchCareers()
-                              }}
-                            >
-                              {career.is_active ? 'Desactivar' : 'Activar'}
-                            </button>
-                            <button
-                              style={{ ...styles.button, padding: '4px 10px', fontSize: '13px', background: '#c62828' }}
-                              onClick={async () => {
-                                if (!window.confirm(`¿Eliminar la carrera "${career.name}"? Esta acción no se puede deshacer.`)) return
-                                const res = await fetch(`${API_BASE_URL}/careers/${career.id}`, { method: 'DELETE' })
-                                if (res.ok || res.status === 204) { await fetchAdminCareers(); await fetchCareers() }
-                              }}
-                            >
-                              🗑️
-                            </button>
-                          </>
-                        )}
-                      </td>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '640px' }}>
+                  <thead>
+                    <tr style={{ background: '#eceff1', borderBottom: '2px solid #cfd8dc' }}>
+                      <th style={{ padding: '10px 12px', textAlign: 'left' }}>Nombre</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'center', width: '80px' }}>Estado</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', width: '200px' }}>Director/a</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', width: '200px' }}>Secretario/a</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right', width: '170px' }}>Acciones</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {adminCareers.map(career => (
+                      <tr key={career.id} style={{ borderBottom: '1px solid #e0e0e0', background: career.is_active ? '#fff' : '#fafafa' }}>
+                        {/* Name */}
+                        <td style={{ padding: '10px 12px', color: career.is_active ? '#212121' : '#9e9e9e' }}>
+                          {adminCareerEditId === career.id ? (
+                            <AdminCareerInlineEdit
+                              career={career}
+                              apiBase={API_BASE_URL}
+                              onSaved={async () => { setAdminCareerEditId(null); await fetchAdminCareers(); await fetchCareers() }}
+                              onCancel={() => setAdminCareerEditId(null)}
+                            />
+                          ) : (
+                            <span>{career.name}</span>
+                          )}
+                        </td>
+                        {/* Estado */}
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                          <span style={{
+                            display: 'inline-block', padding: '2px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 600,
+                            background: career.is_active ? '#e8f5e9' : '#fce4ec',
+                            color: career.is_active ? '#2e7d32' : '#b71c1c'
+                          }}>
+                            {career.is_active ? 'Activa' : 'Inactiva'}
+                          </span>
+                        </td>
+                        {/* Director */}
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '13px', color: career.director_name ? '#212121' : '#aaa', fontStyle: career.director_name ? 'normal' : 'italic' }}>
+                              {career.director_name || 'Sin asignar'}
+                            </span>
+                            <button
+                              style={{ background: 'none', border: '1px solid #90caf9', borderRadius: '4px', padding: '2px 7px', fontSize: '12px', color: '#1565c0', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              onClick={() => setAdminCareerResponsableModal({ careerId: career.id, type: 'director', currentId: career.director_id ?? null, selectedId: career.director_id ?? '' })}
+                            >
+                              ✏️
+                            </button>
+                          </div>
+                        </td>
+                        {/* Secretaria/o */}
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '13px', color: career.secretario_name ? '#212121' : '#aaa', fontStyle: career.secretario_name ? 'normal' : 'italic' }}>
+                              {career.secretario_name || 'Sin asignar'}
+                            </span>
+                            <button
+                              style={{ background: 'none', border: '1px solid #90caf9', borderRadius: '4px', padding: '2px 7px', fontSize: '12px', color: '#1565c0', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              onClick={() => setAdminCareerResponsableModal({ careerId: career.id, type: 'secretario', currentId: career.secretario_id ?? null, selectedId: career.secretario_id ?? '' })}
+                            >
+                              ✏️
+                            </button>
+                          </div>
+                        </td>
+                        {/* Acciones */}
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                          {adminCareerEditId !== career.id && (
+                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                              <button
+                                style={{ ...styles.button, padding: '4px 9px', fontSize: '12px', background: '#1976d2' }}
+                                onClick={() => setAdminCareerEditId(career.id)}
+                                title="Renombrar"
+                              >
+                                ✏️ Renombrar
+                              </button>
+                              <button
+                                style={{ ...styles.button, padding: '4px 9px', fontSize: '12px', background: career.is_active ? '#ef6c00' : '#43a047' }}
+                                onClick={async () => {
+                                  await fetch(`${API_BASE_URL}/careers/${career.id}`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ is_active: !career.is_active })
+                                  })
+                                  await fetchAdminCareers()
+                                  await fetchCareers()
+                                }}
+                                title={career.is_active ? 'Desactivar (ocultarla del selector)' : 'Activar (volverla visible)'}
+                              >
+                                {career.is_active ? '⏸' : '▶'}
+                              </button>
+                              <button
+                                style={{ ...styles.button, padding: '4px 9px', fontSize: '12px', background: '#c62828' }}
+                                onClick={async () => {
+                                  if (!window.confirm(`¿Eliminar la carrera "${career.name}"? Esta acción no se puede deshacer.`)) return
+                                  const res = await fetch(`${API_BASE_URL}/careers/${career.id}`, { method: 'DELETE' })
+                                  if (res.ok || res.status === 204) { await fetchAdminCareers(); await fetchCareers() }
+                                }}
+                                title="Eliminar carrera"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
