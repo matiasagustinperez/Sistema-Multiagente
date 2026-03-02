@@ -1171,16 +1171,25 @@ const App = () => {
   }, [teacherFocusTargetId, teacherCatalogItems, teacherViewMode])
 
   useEffect(() => {
-    setSelectedTeacherId(null)
-    setSelectedTeacherName('')
+    // When career changes, restore current user's teacher identity (don't clear it)
+    if (currentUser && !currentUser.is_admin) {
+      setSelectedTeacherId(currentUser.id)
+      setSelectedTeacherName(currentUser.name)
+    } else {
+      setSelectedTeacherId(null)
+      setSelectedTeacherName('')
+    }
     setSubjectAutocompleteQuery('')
     setSubjectAutocompleteFocus(false)
   }, [activeCareer])
 
   useEffect(() => {
     if (viewRole !== 'docente') {
-      setSelectedTeacherId(null)
-      setSelectedTeacherName('')
+      // Only clear teacher selection if no logged-in user (legacy picker mode)
+      if (!currentUser || currentUser.is_admin) {
+        setSelectedTeacherId(null)
+        setSelectedTeacherName('')
+      }
     }
   }, [viewRole])
 
@@ -10568,13 +10577,8 @@ const App = () => {
         {activeMenu === 'propuestas' && !proposalsMode && (
           <div style={styles.section}>
             <h2>Propuestas Académicas</h2>
-            {isDocenteView && !hasSelectedTeacher && (
-              <div style={{ marginTop: '10px', background: '#fff6e6', border: '1px solid #ffcc80', padding: '10px 12px', borderRadius: '6px', color: '#7a4b00' }}>
-                Selecciona un docente para ver solo sus propuestas en la carrera activa.
-              </div>
-            )}
             
-            {/* CARDS SECTION */}
+            {/* CARDS SECTION */
             {!isDocenteView && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '30px', marginTop: '20px' }}>
                 <div style={{ 
@@ -13796,10 +13800,6 @@ const App = () => {
             {!activeCareer ? (
               <div style={{ color: '#777', fontStyle: 'italic' }}>
                 Selecciona una carrera para ver el control.
-              </div>
-            ) : (isDocenteView && !hasSelectedTeacher) ? (
-              <div style={{ marginTop: '10px', background: '#fff6e6', border: '1px solid #ffcc80', padding: '10px 12px', borderRadius: '6px', color: '#7a4b00' }}>
-                Selecciona un docente para ver el control solo de sus asignaturas.
               </div>
             ) : (
               <>
@@ -18075,16 +18075,8 @@ const App = () => {
                       {!instrumentsLoading && instrumentSubjectRows.length === 0 && (
                         <div style={{ color: '#888', padding: '32px', textAlign: 'center', background: '#f9f9f9', borderRadius: '8px', border: '1px dashed #ccc' }}>
                           <div style={{ fontSize: '40px', marginBottom: '8px' }}>📚</div>
-                          {isDocenteView && !hasSelectedTeacher ? (
-                            <>
-                              <div>Seleccioná un docente en el panel lateral para ver sus asignaturas.</div>
-                            </>
-                          ) : (
-                            <>
-                              <div>No hay asignaturas con propuestas cargadas para {isDocenteView ? 'este docente' : 'esta carrera'}.</div>
-                              <div style={{ marginTop: '8px', fontSize: '13px', color: '#aaa' }}>Las asignaturas aparecen aquí automáticamente cuando tienen propuestas cargadas en el sistema.</div>
-                            </>
-                          )}
+                          <div>No hay asignaturas con propuestas cargadas para {isDocenteView ? 'este docente' : 'esta carrera'}.</div>
+                          <div style={{ marginTop: '8px', fontSize: '13px', color: '#aaa' }}>Las asignaturas aparecen aquí automáticamente cuando tienen propuestas cargadas en el sistema.</div>
                         </div>
                       )}
 
