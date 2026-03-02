@@ -15351,7 +15351,7 @@ const App = () => {
                             </div>
                           </td>
                           <td style={{ padding: '10px 14px', fontSize: '12px', color: user.last_login ? '#555' : '#e65100', fontWeight: user.last_login ? 400 : 600 }}>
-                            {user.last_login ? new Date(user.last_login).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : 'Nunca ingresó'}
+                            {user.last_login ? formatDateTime(user.last_login) : 'Nunca ingresó'}
                           </td>
                         </tr>
                       ))}
