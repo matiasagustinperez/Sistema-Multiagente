@@ -14673,17 +14673,68 @@ const App = () => {
                   <p style={{ color: '#555', fontSize: '13px', marginBottom: '14px' }}>
                     Carrera: <strong>{adminCareers.find(c => c.id === adminCareerResponsableModal.careerId)?.name}</strong>
                   </p>
-                  <select
-                    style={{ ...styles.input, width: '100%', marginBottom: '18px' }}
-                    value={adminCareerResponsableModal.selectedId ?? ''}
-                    onChange={e => setAdminCareerResponsableModal(m => ({ ...m, selectedId: e.target.value }))}
-                    id="responsable-select"
-                  >
-                    <option value="">— Sin asignar —</option>
-                    {adminUsers.map(u => (
-                      <option key={u.id} value={u.id}>{u.name}{u.email ? ` (${u.email})` : ''}</option>
-                    ))}
-                  </select>
+                  {/* Searchable combobox */}
+                  {(() => {
+                    const q = (adminCareerResponsableModal.search || '').toLowerCase()
+                    const filtered = adminUsers.filter(u =>
+                      !q ||
+                      (u.name || '').toLowerCase().includes(q) ||
+                      (u.email || '').toLowerCase().includes(q)
+                    )
+                    const setM = patch => setAdminCareerResponsableModal(m => ({ ...m, ...patch }))
+                    return (
+                      <div style={{ position: 'relative', marginBottom: '18px' }}>
+                        <input
+                          style={{ ...styles.input, width: '100%', marginBottom: 0, boxSizing: 'border-box' }}
+                          placeholder="Buscar por nombre o email… (vacío = sin asignar)"
+                          value={adminCareerResponsableModal.search}
+                          autoFocus
+                          onChange={e => setM({ search: e.target.value, selectedId: '', dropdownOpen: true })}
+                          onFocus={() => setM({ dropdownOpen: true })}
+                          onBlur={() => setTimeout(() => setM({ dropdownOpen: false }), 150)}
+                        />
+                        {adminCareerResponsableModal.dropdownOpen && (
+                          <div style={{
+                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
+                            background: '#fff', border: '1px solid #90caf9', borderTop: 'none',
+                            borderRadius: '0 0 8px 8px', maxHeight: '220px', overflowY: 'auto',
+                            boxShadow: '0 4px 16px rgba(0,0,0,0.12)'
+                          }}>
+                            {/* Clear option */}
+                            <div
+                              style={{ padding: '8px 12px', fontSize: '13px', color: '#888', cursor: 'pointer', borderBottom: '1px solid #e3eaf2', fontStyle: 'italic' }}
+                              onMouseDown={() => setM({ selectedId: '', search: '', dropdownOpen: false })}
+                            >
+                              — Sin asignar —
+                            </div>
+                            {filtered.length === 0 ? (
+                              <div style={{ padding: '10px 12px', color: '#aaa', fontSize: '13px', fontStyle: 'italic' }}>Sin resultados</div>
+                            ) : filtered.map(u => (
+                              <div
+                                key={u.id}
+                                style={{
+                                  padding: '8px 12px', cursor: 'pointer', fontSize: '13px',
+                                  background: String(adminCareerResponsableModal.selectedId) === String(u.id) ? '#e3f2fd' : 'transparent',
+                                  borderBottom: '1px solid #f0f4f8'
+                                }}
+                                onMouseDown={() => setM({ selectedId: String(u.id), search: u.name + (u.email ? ` (${u.email})` : ''), dropdownOpen: false })}
+                                onMouseEnter={e => e.currentTarget.style.background = '#f0f7ff'}
+                                onMouseLeave={e => e.currentTarget.style.background = String(adminCareerResponsableModal.selectedId) === String(u.id) ? '#e3f2fd' : 'transparent'}
+                              >
+                                <span style={{ fontWeight: 600 }}>{u.name}</span>
+                                {u.email && <span style={{ color: '#777', marginLeft: '6px', fontSize: '12px' }}>{u.email}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {adminCareerResponsableModal.selectedId && (
+                          <div style={{ marginTop: '6px', fontSize: '12px', color: '#1565c0' }}>
+                            ✓ Seleccionado: <strong>{adminCareerResponsableModal.search.split(' (')[0]}</strong>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                   <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                     <button
                       style={{ ...styles.button, background: '#90a4ae' }}
@@ -14768,7 +14819,7 @@ const App = () => {
                             </span>
                             <button
                               style={{ background: 'none', border: '1px solid #90caf9', borderRadius: '4px', padding: '2px 7px', fontSize: '12px', color: '#1565c0', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                              onClick={() => setAdminCareerResponsableModal({ careerId: career.id, type: 'director', currentId: career.director_id ?? null, selectedId: career.director_id ?? '' })}
+                              onClick={() => setAdminCareerResponsableModal({ careerId: career.id, type: 'director', currentId: career.director_id ?? null, selectedId: career.director_id ?? '', search: career.director_name ?? '', dropdownOpen: false })}
                             >
                               ✏️
                             </button>
@@ -14782,7 +14833,7 @@ const App = () => {
                             </span>
                             <button
                               style={{ background: 'none', border: '1px solid #90caf9', borderRadius: '4px', padding: '2px 7px', fontSize: '12px', color: '#1565c0', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                              onClick={() => setAdminCareerResponsableModal({ careerId: career.id, type: 'secretario', currentId: career.secretario_id ?? null, selectedId: career.secretario_id ?? '' })}
+                              onClick={() => setAdminCareerResponsableModal({ careerId: career.id, type: 'secretario', currentId: career.secretario_id ?? null, selectedId: career.secretario_id ?? '', search: career.secretario_name ?? '', dropdownOpen: false })}
                             >
                               ✏️
                             </button>
