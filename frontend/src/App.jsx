@@ -110,7 +110,106 @@ const AdminCareerInlineEdit = ({ career, apiBase, onSaved, onCancel }) => {
   )
 }
 
+// ── LoginScreen ───────────────────────────────────────────────────────────────
+const LoginScreen = ({ onLogin }) => {
+  const [username, setUsername] = React.useState('')
+  const [password, setPassword] = React.useState('')
+  const [showPassword, setShowPassword] = React.useState(false)
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState('')
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!username.trim() || !password) { setError('Completá usuario y contraseña.'); return }
+    setLoading(true)
+    setError('')
+    try {
+      await onLogin(username.trim(), password)
+    } catch (err) {
+      setError(err.message || 'Error al iniciar sesión.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #e8f4f8 0%, #d0e8f0 100%)' }}>
+      <div style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 4px 32px rgba(26,61,92,0.13)', padding: '40px 36px', maxWidth: '380px', width: '100%' }}>
+        {/* Logo */}
+        <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+          <img src={logoMacau} alt="MACAU" style={{ maxWidth: '140px', height: 'auto' }} />
+          <div style={{ color: '#1a3d5c', fontSize: '13px', marginTop: '8px', fontWeight: 600 }}>
+            Multiagente para la Acreditación ante CONEAU
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>
+              Usuario
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder="Tu email o 'admin'"
+              autoFocus
+              autoComplete="username"
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>
+              Contraseña
+            </label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Contraseña"
+                autoComplete="current-password"
+                style={{ width: '100%', padding: '9px 36px 9px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(v => !v)}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#888', fontSize: '13px', padding: 0 }}
+              >
+                {showPassword ? 'Ocultar' : 'Ver'}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div style={{ background: '#fdecea', border: '1px solid #f5c6cb', color: '#b00020', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', marginBottom: '14px' }}>
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{ width: '100%', padding: '10px', background: loading ? '#90a4ae' : '#1565c0', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '15px', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer' }}
+          >
+            {loading ? 'Ingresando…' : 'Ingresar'}
+          </button>
+        </form>
+
+        <div style={{ marginTop: '20px', fontSize: '11px', color: '#999', textAlign: 'center', lineHeight: 1.6 }}>
+          Para el administrador, usuario: <strong>admin</strong><br />
+          La contraseña inicial de cada docente es su email.
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const App = () => {
+  // Auth token ref — readable by fetch interceptor at call-time
+  const authTokenRef = useRef(null)
+
   useEffect(() => {
     const nativeFetch = window.fetch.bind(window)
     const replaceLegacyApiBase = (url, preferredBase = API_BASE_URL) => {
@@ -122,12 +221,22 @@ const App = () => {
       })
       return nextUrl
     }
+    // Inject Authorization header for all backend API calls
+    const injectAuth = (initObj) => {
+      const token = authTokenRef.current
+      if (!token) return initObj
+      const existingHeaders = (initObj?.headers) ? new Headers(initObj.headers) : new Headers()
+      if (!existingHeaders.has('Authorization')) {
+        existingHeaders.set('Authorization', `Bearer ${token}`)
+      }
+      return { ...(initObj || {}), headers: existingHeaders }
+    }
     const fetchWithFallback = async (input, init) => {
       if (typeof input === 'string') {
         let lastError = null
         for (const candidateBase of API_BASE_FALLBACKS) {
           try {
-            return await nativeFetch(replaceLegacyApiBase(input, candidateBase), init)
+            return await nativeFetch(replaceLegacyApiBase(input, candidateBase), injectAuth(init))
           } catch (err) {
             lastError = err
           }
@@ -141,16 +250,16 @@ const App = () => {
             const nextUrl = replaceLegacyApiBase(input.url, candidateBase)
             if (nextUrl !== input.url) {
               const nextRequest = new Request(nextUrl, input)
-              return await nativeFetch(nextRequest, init)
+              return await nativeFetch(nextRequest, injectAuth(init))
             }
-            return await nativeFetch(input, init)
+            return await nativeFetch(input, injectAuth(init))
           } catch (err) {
             lastError = err
           }
         }
         throw lastError || new Error('No se pudo conectar con el backend')
       }
-      return await nativeFetch(input, init)
+      return await nativeFetch(input, injectAuth(init))
     }
     window.fetch = fetchWithFallback
     return () => {
@@ -165,6 +274,72 @@ const App = () => {
   const [viewRole, setViewRole] = useState('director')
   const [selectedTeacherId, setSelectedTeacherId] = useState(null)
   const [selectedTeacherName, setSelectedTeacherName] = useState('')
+
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  const [currentUser, setCurrentUser] = useState(null)
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token') || null)
+  const [authChecked, setAuthChecked] = useState(false)
+  // Keep authTokenRef in sync so the fetch interceptor always has the latest token
+  useEffect(() => { authTokenRef.current = authToken }, [authToken])
+
+  // Validate stored token on mount
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token')
+    if (!token) { setAuthChecked(true); return }
+    fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(user => {
+        if (user) {
+          setCurrentUser(user)
+          setAuthToken(token)
+          authTokenRef.current = token
+          setViewRole(user.role)
+          if (user.is_admin) setActiveMenu('admin-carreras')
+          else if (user.role === 'director' || user.role === 'secretario') setActiveMenu('home')
+          else if (user.role === 'docente') setActiveMenu('propuestas')
+        } else {
+          localStorage.removeItem('auth_token')
+          setAuthToken(null)
+          authTokenRef.current = null
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem('auth_token')
+        setAuthToken(null)
+        authTokenRef.current = null
+      })
+      .finally(() => setAuthChecked(true))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleLogin = async (username, password) => {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Credenciales incorrectas')
+    }
+    const data = await res.json()
+    localStorage.setItem('auth_token', data.access_token)
+    setAuthToken(data.access_token)
+    authTokenRef.current = data.access_token
+    setCurrentUser(data.user)
+    setViewRole(data.user.role)
+    if (data.user.is_admin) setActiveMenu('admin-carreras')
+    else if (data.user.role === 'director' || data.user.role === 'secretario') setActiveMenu('home')
+    else if (data.user.role === 'docente') setActiveMenu('propuestas')
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token')
+    setAuthToken(null)
+    authTokenRef.current = null
+    setCurrentUser(null)
+    setViewRole('director')
+    setActiveMenu('home')
+  }
 
   // Lock / bulk selection
   const [selectedProposalIds, setSelectedProposalIds] = useState(new Set())
@@ -576,6 +751,8 @@ const App = () => {
   const [adminUserForm, setAdminUserForm] = useState({ name: '', email: '' })
   const [adminUserFormError, setAdminUserFormError] = useState('')
   const [adminUserFormSaving, setAdminUserFormSaving] = useState(false)
+  const [selectedUserIds, setSelectedUserIds] = useState(new Set())
+  const [resetPasswordModal, setResetPasswordModal] = useState(null) // null | { userIds: Set, newPw: '', confirmPw: '', saving: false, error: '' }
   // Careers (DB-backed, fallback to CAREER_FALLBACK)
   const [careerOptions, setCareerOptions] = useState(CAREER_FALLBACK)
   const [careerOptionsFromDB, setCareerOptionsFromDB] = useState(false)  // true once a successful DB fetch completes
@@ -10077,6 +10254,15 @@ const App = () => {
     )
   }
 
+  // ── Auth render guard ─────────────────────────────────────────────────────
+  if (!authChecked) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f0f4f8', flexDirection: 'column', gap: '16px' }}>
+      <img src={logoMacau} alt="MACAU" style={{ maxWidth: '120px', height: 'auto', opacity: 0.7 }} />
+      <div style={{ color: '#1a3d5c', fontWeight: 600, fontSize: '16px' }}>Cargando…</div>
+    </div>
+  )
+  if (!currentUser) return <LoginScreen onLogin={handleLogin} />
+
   return (
     <div style={styles.container}>
       {/* Sidebar */}
@@ -10093,6 +10279,19 @@ const App = () => {
             color: '#fff', borderRadius: '999px', padding: '3px 12px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px'
           }}>
             {isAdminView ? 'Administrador' : isSecretarioView ? 'Secretario' : isDocenteView ? 'Docente' : 'Director'}
+          </div>
+          {currentUser && (
+            <div style={{ marginTop: '6px', fontSize: '11px', color: '#555', wordBreak: 'break-word' }}>
+              {currentUser.name}
+            </div>
+          )}
+          <div style={{ marginTop: '8px' }}>
+            <button
+              onClick={handleLogout}
+              style={{ fontSize: '11px', background: 'none', border: '1px solid #bbb', borderRadius: '6px', padding: '3px 10px', cursor: 'pointer', color: '#666' }}
+            >
+              Cerrar sesión
+            </button>
           </div>
         </div>
         {/* === ADMINISTRADOR === */}
@@ -14913,6 +15112,14 @@ const App = () => {
               >
                 ↻ Actualizar
               </button>
+              {selectedUserIds.size > 0 && (
+                <button
+                  style={{ ...styles.button, background: '#e65100', whiteSpace: 'nowrap' }}
+                  onClick={() => setResetPasswordModal({ userIds: new Set(selectedUserIds), newPw: '', confirmPw: '', saving: false, error: '' })}
+                >
+                  🔑 Resetear contraseña ({selectedUserIds.size})
+                </button>
+              )}
             </div>
 
             {/* Create user form */}
@@ -15017,14 +15224,40 @@ const App = () => {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                     <thead>
                       <tr style={{ background: '#eaf3ff', borderBottom: '2px solid #c5d9f0' }}>
+                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '36px' }}>
+                          <input
+                            type="checkbox"
+                            checked={filtered.length > 0 && filtered.every(u => selectedUserIds.has(u.id))}
+                            onChange={e => {
+                              if (e.target.checked) setSelectedUserIds(new Set(filtered.map(u => u.id)))
+                              else setSelectedUserIds(new Set())
+                            }}
+                            title="Seleccionar todos"
+                          />
+                        </th>
                         <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Apellido y Nombre</th>
                         <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Email</th>
                         <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Roles</th>
+                        <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Último ingreso</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filtered.map((user, i) => (
-                        <tr key={user.id} style={{ borderBottom: '1px solid #e8eef3', background: i % 2 === 0 ? '#fff' : '#f9fbfd' }}>
+                        <tr key={user.id} style={{ borderBottom: '1px solid #e8eef3', background: selectedUserIds.has(user.id) ? '#e3f0ff' : i % 2 === 0 ? '#fff' : '#f9fbfd' }}>
+                          <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedUserIds.has(user.id)}
+                              onChange={e => {
+                                setSelectedUserIds(prev => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.add(user.id)
+                                  else next.delete(user.id)
+                                  return next
+                                })
+                              }}
+                            />
+                          </td>
                           <td style={{ padding: '10px 14px', fontWeight: 600 }}>{user.name || '—'}</td>
                           <td style={{ padding: '10px 14px', color: user.email ? '#1a3d5c' : '#bbb', fontStyle: user.email ? 'normal' : 'italic' }}>
                             {user.email || 'Sin email'}
@@ -15034,6 +15267,9 @@ const App = () => {
                               {roleBadge('docente', null)}
                               {user.roleAssignments && user.roleAssignments.map(a => roleBadge(a.role, a.careerName))}
                             </div>
+                          </td>
+                          <td style={{ padding: '10px 14px', fontSize: '12px', color: user.last_login ? '#555' : '#e65100', fontWeight: user.last_login ? 400 : 600 }}>
+                            {user.last_login ? new Date(user.last_login).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Nunca ingresó'}
                           </td>
                         </tr>
                       ))}
@@ -15049,6 +15285,80 @@ const App = () => {
 
             <div style={{ marginTop: '16px', padding: '12px 16px', background: '#fef9e7', border: '1px solid #f0cc66', borderRadius: '8px', fontSize: '12px', color: '#7d5a00' }}>
               ℹ️ Los roles <strong>Director</strong> y <strong>Secretario</strong> se asignarán automáticamente al vincular un usuario a una carrera (disponible próximamente en la sección <strong>Carreras</strong>).
+            </div>
+          </div>
+        )}
+
+        {/* PLAN DE ESTUDIOS */}
+        {/* Reset password modal */}
+        {resetPasswordModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+            <div style={{ background: '#fff', borderRadius: '12px', padding: '28px 32px', maxWidth: '420px', width: '100%', boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: '16px', color: '#1a3d5c' }}>Resetear contraseña</h3>
+              <p style={{ margin: '0 0 18px', fontSize: '13px', color: '#555' }}>
+                Se cambiará la contraseña de <strong>{resetPasswordModal.userIds.size}</strong> usuario{resetPasswordModal.userIds.size !== 1 ? 's' : ''} seleccionado{resetPasswordModal.userIds.size !== 1 ? 's' : ''}.
+              </p>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Nueva contraseña</label>
+                <input
+                  type="password"
+                  value={resetPasswordModal.newPw}
+                  onChange={e => setResetPasswordModal(p => ({ ...p, newPw: e.target.value, error: '' }))}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                  placeholder="Mínimo 4 caracteres"
+                />
+              </div>
+              <div style={{ marginBottom: '18px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Confirmar contraseña</label>
+                <input
+                  type="password"
+                  value={resetPasswordModal.confirmPw}
+                  onChange={e => setResetPasswordModal(p => ({ ...p, confirmPw: e.target.value, error: '' }))}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                  placeholder="Repetir contraseña"
+                />
+              </div>
+              {resetPasswordModal.error && (
+                <div style={{ background: '#fdecea', border: '1px solid #f5c6cb', color: '#b00020', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', marginBottom: '14px' }}>
+                  {resetPasswordModal.error}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  style={{ ...styles.button, background: '#e0e0e0', color: '#333' }}
+                  onClick={() => setResetPasswordModal(null)}
+                  disabled={resetPasswordModal.saving}
+                >
+                  Cancelar
+                </button>
+                <button
+                  style={{ ...styles.button, background: resetPasswordModal.saving ? '#90a4ae' : '#e65100' }}
+                  disabled={resetPasswordModal.saving}
+                  onClick={async () => {
+                    const { newPw, confirmPw, userIds } = resetPasswordModal
+                    if (!newPw || newPw.length < 4) { setResetPasswordModal(p => ({ ...p, error: 'La contraseña debe tener al menos 4 caracteres.' })); return }
+                    if (newPw !== confirmPw) { setResetPasswordModal(p => ({ ...p, error: 'Las contraseñas no coinciden.' })); return }
+                    setResetPasswordModal(p => ({ ...p, saving: true, error: '' }))
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/auth/reset-passwords`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+                        body: JSON.stringify({ user_ids: Array.from(userIds), new_password: newPw }),
+                      })
+                      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || `Error ${res.status}`) }
+                      const data = await res.json()
+                      setResetPasswordModal(null)
+                      setSelectedUserIds(new Set())
+                      setStatusMsg(`Contraseña reseteada para ${data.count} usuario${data.count !== 1 ? 's' : ''}.`)
+                      setStatusType('success')
+                    } catch (err) {
+                      setResetPasswordModal(p => ({ ...p, saving: false, error: err.message }))
+                    }
+                  }}
+                >
+                  {resetPasswordModal.saving ? 'Guardando…' : 'Confirmar reset'}
+                </button>
+              </div>
             </div>
           </div>
         )}

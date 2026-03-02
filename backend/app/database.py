@@ -27,6 +27,25 @@ def init_db():
     ensure_accreditation_settings_columns()
     ensure_accreditation_workplan_columns()
     ensure_careers_columns()
+    ensure_auth_columns()
+
+
+def ensure_auth_columns():
+    """Add auth columns to teachers table (SQLite only)."""
+    if "sqlite" not in DATABASE_URL:
+        return
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(teachers)"))
+        existing = {row[1] for row in result}
+        additions = [
+            ("password_hash", "VARCHAR(255)"),
+            ("last_login", "DATETIME"),
+            ("is_admin", "BOOLEAN DEFAULT 0 NOT NULL"),
+        ]
+        for col, col_type in additions:
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE teachers ADD COLUMN {col} {col_type}"))
+                conn.commit()
 
 
 def ensure_careers_columns():

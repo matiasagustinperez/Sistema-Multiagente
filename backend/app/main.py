@@ -1,7 +1,7 @@
 import os
 import glob
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Body
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Body, Request
 from fastapi.responses import FileResponse, Response, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from . import models, schemas
 from .database import SessionLocal, init_db
+from .auth import hash_password, verify_password, create_access_token, decode_access_token
 from agents import extract as extract_agent
 from .docx_import import import_proposal_from_docx
 from openai import OpenAI
@@ -125,6 +126,16 @@ TEMPLATE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "T
 
 class AiPrompt(BaseModel):
     prompt: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ResetPasswordsRequest(BaseModel):
+    user_ids: list[int]
+    new_password: str
 
 
 class GdocStatusRequest(BaseModel):
@@ -5521,6 +5532,161 @@ def build_proposal_response(db: Session, proposal: models.Proposal) -> dict:
     return base
 
 
+# ── Auth helpers & CRUD ────────────────────────────────────────────────────
+
+ADMIN_EMAIL = "admin"   # special username for the admin user
+ADMIN_DEFAULT_PASSWORD = "admin"
+
+
+def _build_user_payload(teacher: "models.Teacher", db) -> dict:
+    """Build the JWT payload + public user info dict from a Teacher row."""
+    # Compute role from career assignments
+    career_assignments = []
+    # director/secretario assignments
+    careers = db.query(models.Career).filter(
+        (models.Career.director_id == teacher.id) |
+        (models.Career.secretario_id == teacher.id)
+    ).all()
+    for c in careers:
+        if c.director_id == teacher.id:
+            career_assignments.append({"role": "director", "careerId": c.id, "careerName": c.name})
+        if c.secretario_id == teacher.id:
+            career_assignments.append({"role": "secretario", "careerId": c.id, "careerName": c.name})
+
+    if teacher.is_admin:
+        top_role = "admin"
+    elif any(a["role"] == "director" for a in career_assignments):
+        top_role = "director"
+    elif any(a["role"] == "secretario" for a in career_assignments):
+        top_role = "secretario"
+    else:
+        top_role = "docente"
+
+    return {
+        "id": teacher.id,
+        "name": teacher.name,
+        "email": teacher.email,
+        "is_admin": teacher.is_admin,
+        "role": top_role,
+        "career_assignments": career_assignments,
+        "last_login": teacher.last_login.isoformat() if teacher.last_login else None,
+    }
+
+
+def seed_admin_user():
+    """Ensure an admin user exists in the teachers table."""
+    db = SessionLocal()
+    try:
+        admin = db.query(models.Teacher).filter(models.Teacher.is_admin == True).first()
+        if not admin:
+            admin = models.Teacher(
+                name="Administrador",
+                normalized_key="administrador",
+                email=ADMIN_EMAIL,
+                is_admin=True,
+                password_hash=hash_password(ADMIN_DEFAULT_PASSWORD),
+                category="Admin",
+                dedication="",
+            )
+            db.add(admin)
+            db.commit()
+            print("[INFO] Admin user created (username=admin, password=admin)")
+    finally:
+        db.close()
+
+
+def seed_default_passwords():
+    """
+    For any non-admin teacher without a password, set their password to their email.
+    For teachers without an email, skip (they cannot log in yet).
+    """
+    db = SessionLocal()
+    try:
+        teachers = db.query(models.Teacher).filter(
+            models.Teacher.is_admin == False,
+            models.Teacher.password_hash == None,
+            models.Teacher.email != None,
+            models.Teacher.email != "",
+        ).all()
+        for t in teachers:
+            t.password_hash = hash_password(t.email)
+        if teachers:
+            db.commit()
+            print(f"[INFO] Set default passwords for {len(teachers)} teachers (password = email)")
+    finally:
+        db.close()
+
+
+@app.post("/auth/login", tags=["Auth"])
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    username = payload.username.strip()
+    password = payload.password
+
+    # Admin login
+    if username.lower() == ADMIN_EMAIL:
+        teacher = db.query(models.Teacher).filter(models.Teacher.is_admin == True).first()
+    else:
+        # Regular user: look up by email
+        teacher = db.query(models.Teacher).filter(
+            func.lower(models.Teacher.email) == func.lower(username),
+            models.Teacher.is_admin == False,
+        ).first()
+
+    if not teacher:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado.")
+    if not teacher.password_hash:
+        raise HTTPException(status_code=401, detail="El usuario no tiene contrase\u00f1a configurada. Contact\u00e1 al administrador.")
+    if not verify_password(password, teacher.password_hash):
+        raise HTTPException(status_code=401, detail="Contrase\u00f1a incorrecta.")
+
+    # Update last_login
+    teacher.last_login = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(teacher)
+
+    user_info = _build_user_payload(teacher, db)
+    token = create_access_token(user_info)
+    return {"access_token": token, "token_type": "bearer", "user": user_info}
+
+
+@app.get("/auth/me", tags=["Auth"])
+def auth_me(request: Request, db: Session = Depends(get_db)):
+    """Validate a stored JWT and return fresh user info."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No autorizado.")
+    token = auth_header[7:]
+    data = decode_access_token(token)
+    if not data:
+        raise HTTPException(status_code=401, detail="Token inv\u00e1lido o expirado.")
+    teacher = db.query(models.Teacher).filter(models.Teacher.id == data.get("id")).first()
+    if not teacher:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado.")
+    return _build_user_payload(teacher, db)
+
+
+@app.post("/auth/reset-passwords", tags=["Auth"])
+def reset_passwords(request: Request, payload: ResetPasswordsRequest, db: Session = Depends(get_db)):
+    """Admin-only: reset password for one or more users."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=403, detail="No autorizado.")
+    token_data = decode_access_token(auth_header[7:])
+    if not token_data or not token_data.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Solo el administrador puede resetear contraseñas.")
+    if not payload.user_ids:
+        raise HTTPException(status_code=422, detail="Debe especificar al menos un usuario.")
+    new_hash = hash_password(payload.new_password)
+    updated = []
+    for uid in payload.user_ids:
+        t = db.query(models.Teacher).filter(models.Teacher.id == uid).first()
+        if t:
+            t.password_hash = new_hash
+            updated.append(uid)
+    db.commit()
+    return {"updated": updated, "count": len(updated)}
+
+
 # ── Careers helper & CRUD ───────────────────────────────────────────────────
 
 _DEFAULT_CAREERS = [
@@ -5655,6 +5821,8 @@ def on_startup():
     init_db()
     sync_teachers_from_existing_proposals()
     seed_careers()
+    seed_admin_user()
+    seed_default_passwords()
 
     print("[OK] Backend startup validation passed")
     print("   - OpenAI API Key: configured")

@@ -52,6 +52,8 @@ class TeacherUpdate(BaseModel):
 
 class TeacherOut(TeacherBase):
     id: int
+    last_login: Optional[datetime] = None
+    is_admin: Optional[bool] = False
 
     class Config:
         from_attributes = True
