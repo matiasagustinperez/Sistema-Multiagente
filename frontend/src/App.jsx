@@ -8874,6 +8874,16 @@ const App = () => {
   const filteredByCareer = normalizedActiveCareer
     ? proposals.filter((proposal) => normalizeCareer(proposal.career) === normalizedActiveCareer)
     : []
+  // For docente view: only show plans where the logged-in teacher has at least one proposal
+  const visiblePlansForCareer = (() => {
+    const allPlans = savedPlans[activeCareer] || []
+    if (!isDocenteView || !hasSelectedTeacher) return allPlans
+    const docenteProposals = filteredByCareer.filter(p => proposalHasTeacher(p, selectedTeacherId, selectedTeacherName))
+    const planNamesWithProposals = new Set(
+      docenteProposals.map(p => (p.study_plan || p.plan || '').trim()).filter(Boolean)
+    )
+    return allPlans.filter(plan => planNamesWithProposals.has(plan.name))
+  })()
   const selectedPlan = selectedPlanFilterId ? getPlanById(activeCareer, selectedPlanFilterId) : null
   const selectedPlanName = selectedPlan?.name || ''
   const filteredByPlan = selectedPlanName
@@ -10434,10 +10444,10 @@ const App = () => {
                 style={{ ...styles.input, marginBottom: 0 }}
                 value={selectedPlanFilterId || ''}
                 onChange={(e) => setSelectedPlanFilterId(e.target.value ? Number(e.target.value) : null)}
-                disabled={!activeCareer || !(savedPlans[activeCareer] || []).length}
+                disabled={!activeCareer || !visiblePlansForCareer.length}
               >
                 <option value="">Todos los planes</option>
-                {(savedPlans[activeCareer] || []).map((plan) => (
+                {visiblePlansForCareer.map((plan) => (
                   <option key={plan.id} value={plan.id}>
                     {plan.name}{plan.is_active ? ' (vigente)' : ''}
                   </option>
