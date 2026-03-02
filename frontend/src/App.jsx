@@ -1260,6 +1260,27 @@ const App = () => {
     setSelectedPlanFilterId(null)
   }, [activeCareer])
 
+  // Auto-adapt viewRole to the highest-priority role the user has in the new career
+  useEffect(() => {
+    if (!currentUser || currentUser.is_admin || !activeCareer) return
+    const assignments = currentUser.career_assignments || []
+    const rolesInCareer = assignments
+      .filter(a => a.careerName === activeCareer)
+      .map(a => a.role)
+    const priority = ['director', 'secretario', 'docente']
+    const best = priority.find(r => rolesInCareer.includes(r))
+    if (!best) return
+    setViewRole(prev => {
+      if (prev === best) return prev          // role unchanged → no re-render, no menu jump
+      // role is switching → adjust menu in a microtask to avoid setState-in-render
+      setTimeout(() => {
+        if (best === 'director' || best === 'secretario') setActiveMenu('home')
+        else setActiveMenu('propuestas')
+      }, 0)
+      return best
+    })
+  }, [activeCareer, currentUser])
+
   // Reload matriz when competencies change and modal is open
   useEffect(() => {
     if (showMatrizModal && editingPlanId && activeCareer) {
@@ -8597,12 +8618,24 @@ const App = () => {
   const userCareers = currentUser
     ? [...new Set((currentUser.career_assignments || []).map(a => a.careerName).filter(Boolean))]
     : []
-  // Roles this user can switch between (e.g. director who is also docente)
-  const userRoles = currentUser && !currentUser.is_admin
-    ? [...new Set((currentUser.career_assignments || []).map(a => a.role))]
-    : currentUser?.is_admin ? ['admin'] : ['docente']
   // Career dropdown options: locked to user's careers; open for pure docente with no TeacherCareer entries
   const effectiveCareerOptions = userCareers.length > 0 ? userCareers : careerOptions
+  // Roles available to the logged-in user IN THE CURRENTLY ACTIVE career
+  const rolesForCurrentCareer = (() => {
+    if (!currentUser) return ['docente']
+    if (currentUser.is_admin) return ['admin']
+    if (!activeCareer) {
+      // No career selected yet – return all roles across all assignments
+      const all = [...new Set((currentUser.career_assignments || []).map(a => a.role))]
+      return all.length > 0 ? all : ['docente']
+    }
+    const roles = [...new Set(
+      (currentUser.career_assignments || [])
+        .filter(a => a.careerName === activeCareer)
+        .map(a => a.role)
+    )]
+    return roles.length > 0 ? roles : ['docente']
+  })()
   // When viewRole changes to docente, re-bind the teacher identity
   // (handled via the effect below)
   const normalizeText = (value) => {
@@ -10459,12 +10492,12 @@ const App = () => {
                 </div>
               )}
 
-              {/* Role switcher – only shown when user has more than one role */}
-              {userRoles.length > 1 && (
+              {/* Role switcher – only shown when user has more than one role in the current career */}
+              {rolesForCurrentCareer.length > 1 && (
                 <div style={{ marginTop: '14px' }}>
                   <label style={{ ...styles.label, marginTop: 0, marginBottom: '6px' }}>Vista</label>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {userRoles.map(role => {
+                    {rolesForCurrentCareer.map(role => {
                       const labels = { director: 'Director', secretario: 'Secretario', docente: 'Docente', admin: 'Admin' }
                       const colors = { director: '#1565c0', secretario: '#e65100', docente: '#2e7d32', admin: '#7c3aed' }
                       const active = viewRole === role
