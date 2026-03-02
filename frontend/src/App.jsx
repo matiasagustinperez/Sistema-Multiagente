@@ -10499,6 +10499,34 @@ const App = () => {
           }}>
             {isAdminView ? 'Administrador' : isSecretarioView ? 'Secretario' : isDocenteView ? 'Docente' : 'Director'}
           </div>
+          {/* Role switcher – inline, directly under active badge */}
+          {!isAdminView && rolesForCurrentCareer.length > 1 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'center', marginTop: '8px' }}>
+              {rolesForCurrentCareer.map(role => {
+                const labels = { director: 'Director', secretario: 'Secretario', docente: 'Docente', admin: 'Admin' }
+                const colors = { director: '#1565c0', secretario: '#e65100', docente: '#2e7d32', admin: '#7c3aed' }
+                const active = viewRole === role
+                return (
+                  <button
+                    key={role}
+                    onClick={() => {
+                      setViewRole(role)
+                      if (role === 'director' || role === 'secretario') setActiveMenu('home')
+                      else if (role === 'docente') setActiveMenu('propuestas')
+                    }}
+                    style={{
+                      padding: '3px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: 700, cursor: 'pointer',
+                      border: `2px solid ${colors[role] || '#888'}`,
+                      background: active ? (colors[role] || '#888') : 'transparent',
+                      color: active ? '#fff' : (colors[role] || '#888'),
+                    }}
+                  >
+                    {labels[role] || role}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           {currentUser && (
             <div style={{ marginTop: '6px', fontSize: '11px', color: '#555', wordBreak: 'break-word' }}>
               {currentUser.name}
@@ -10639,37 +10667,7 @@ const App = () => {
                 </div>
               )}
 
-              {/* Role switcher – only shown when user has more than one role in the current career */}
-              {rolesForCurrentCareer.length > 1 && (
-                <div style={{ marginTop: '14px' }}>
-                  <label style={{ ...styles.label, marginTop: 0, marginBottom: '6px' }}>Vista</label>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {rolesForCurrentCareer.map(role => {
-                      const labels = { director: 'Director', secretario: 'Secretario', docente: 'Docente', admin: 'Admin' }
-                      const colors = { director: '#1565c0', secretario: '#e65100', docente: '#2e7d32', admin: '#7c3aed' }
-                      const active = viewRole === role
-                      return (
-                        <button
-                          key={role}
-                          onClick={() => {
-                            setViewRole(role)
-                            if (role === 'director' || role === 'secretario') setActiveMenu('home')
-                            else if (role === 'docente') setActiveMenu('propuestas')
-                          }}
-                          style={{
-                            padding: '4px 12px', borderRadius: '999px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
-                            border: `2px solid ${colors[role] || '#888'}`,
-                            background: active ? (colors[role] || '#888') : 'transparent',
-                            color: active ? '#fff' : (colors[role] || '#888'),
-                          }}
-                        >
-                          {labels[role] || role}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
+
             </>
           )}
         </div>
