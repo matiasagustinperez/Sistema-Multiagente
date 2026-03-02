@@ -5582,9 +5582,12 @@ def _build_user_payload(teacher: "models.Teacher", db) -> dict:
         if not tc.career:
             continue
         career_name = canonical_map.get(tc.career.lower().strip(), tc.career)
-        if career_name not in assigned_career_names:
+        # Always add docente assignment even if the person is also director/secretario
+        # in the same career — they should be able to switch to the docente view.
+        # Only skip if this exact role+career combo already exists.
+        already = any(a["role"] == "docente" and a["careerName"] == career_name for a in career_assignments)
+        if not already:
             career_assignments.append({"role": "docente", "careerId": None, "careerName": career_name})
-            assigned_career_names.add(career_name)
 
     if teacher.is_admin:
         top_role = "admin"
