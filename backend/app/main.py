@@ -5375,15 +5375,29 @@ def upsert_teacher(db: Session, teacher_data: dict) -> models.Teacher:
     return teacher
 
 
+def _canonical_career_name(db: Session, career: str) -> str:
+    """Return the canonical (proper-case) career name from the Career table, falling back to the raw value."""
+    if not career:
+        return career
+    raw_lower = career.lower().strip()
+    match = db.query(models.Career).all()
+    for c in match:
+        if c.name.lower().strip() == raw_lower:
+            return c.name
+    return career.strip()
+
+
 def ensure_teacher_career(db: Session, teacher_id: int, career: str | None) -> None:
     if not career:
         return
+    # Normalize to canonical Career.name to avoid uppercase/case duplicates
+    canonical = _canonical_career_name(db, career)
     existing = db.query(models.TeacherCareer).filter(
         models.TeacherCareer.teacher_id == teacher_id,
-        models.TeacherCareer.career == career,
+        models.TeacherCareer.career == canonical,
     ).first()
     if not existing:
-        db.add(models.TeacherCareer(teacher_id=teacher_id, career=career))
+        db.add(models.TeacherCareer(teacher_id=teacher_id, career=canonical))
 
 
 def replace_proposal_teachers(db: Session, proposal_id: int, teacher_ids: list[int]) -> None:
@@ -5558,12 +5572,18 @@ def _build_user_payload(teacher: "models.Teacher", db) -> dict:
             assigned_career_names.add(c.name)
 
     # 2) docente career assignments (from TeacherCareer junction table)
+    # Canonicalize career name against Career table to avoid case mismatches
+    canonical_map = {c.name.lower().strip(): c.name for c in db.query(models.Career).all()}
     teacher_careers = db.query(models.TeacherCareer).filter(
         models.TeacherCareer.teacher_id == teacher.id
     ).all()
     for tc in teacher_careers:
-        if tc.career and tc.career not in assigned_career_names:
-            career_assignments.append({"role": "docente", "careerId": None, "careerName": tc.career})
+        if not tc.career:
+            continue
+        career_name = canonical_map.get(tc.career.lower().strip(), tc.career)
+        if career_name not in assigned_career_names:
+            career_assignments.append({"role": "docente", "careerId": None, "careerName": career_name})
+            assigned_career_names.add(career_name)
 
     if teacher.is_admin:
         top_role = "admin"

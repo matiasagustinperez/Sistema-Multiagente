@@ -1246,6 +1246,11 @@ const App = () => {
     }
   }, [activeCareer])
 
+  // Reset plan filter when career changes to avoid stale plan IDs from a different career
+  useEffect(() => {
+    setSelectedPlanFilterId(null)
+  }, [activeCareer])
+
   // Reload matriz when competencies change and modal is open
   useEffect(() => {
     if (showMatrizModal && editingPlanId && activeCareer) {
