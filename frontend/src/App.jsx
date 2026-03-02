@@ -776,6 +776,7 @@ const App = () => {
   const [adminUserFormSaving, setAdminUserFormSaving] = useState(false)
   const [selectedUserIds, setSelectedUserIds] = useState(new Set())
   const [resetPasswordModal, setResetPasswordModal] = useState(null) // null | { userIds: Set, newPw: '', confirmPw: '', saving: false, error: '' }
+  const [selfChangePwModal, setSelfChangePwModal] = useState(null)   // null | { currentPw: '', newPw: '', confirmPw: '', saving: false, error: '' }
   // Careers (DB-backed, fallback to CAREER_FALLBACK)
   const [careerOptions, setCareerOptions] = useState(CAREER_FALLBACK)
   const [careerOptionsFromDB, setCareerOptionsFromDB] = useState(false)  // true once a successful DB fetch completes
@@ -10382,12 +10383,18 @@ const App = () => {
               {currentUser.name}
             </div>
           )}
-          <div style={{ marginTop: '8px' }}>
+          <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <button
+              onClick={() => setSelfChangePwModal({ currentPw: '', newPw: '', confirmPw: '', saving: false, error: '' })}
+              style={{ fontSize: '11px', background: '#e8f0fe', border: '1px solid #90b4f5', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', color: '#1a56db', fontWeight: 600 }}
+            >
+              🔑 Cambiar contraseña
+            </button>
             <button
               onClick={handleLogout}
-              style={{ fontSize: '11px', background: 'none', border: '1px solid #bbb', borderRadius: '6px', padding: '3px 10px', cursor: 'pointer', color: '#666' }}
+              style={{ fontSize: '11px', background: '#fdecea', border: '1px solid #f5b8b8', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', color: '#b00020', fontWeight: 600 }}
             >
-              Cerrar sesión
+              ⦻ Cerrar sesión
             </button>
           </div>
         </div>
@@ -15373,6 +15380,86 @@ const App = () => {
 
         {/* PLAN DE ESTUDIOS */}
         {/* Reset password modal */}
+        {selfChangePwModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+            <div style={{ background: '#fff', borderRadius: '12px', padding: '28px 32px', maxWidth: '420px', width: '100%', boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: '16px', color: '#1a3d5c' }}>Cambiar contraseña</h3>
+              <p style={{ margin: '0 0 18px', fontSize: '13px', color: '#555' }}>Ingresá tu contraseña actual y la nueva contraseña.</p>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Contraseña actual</label>
+                <input
+                  type="password"
+                  value={selfChangePwModal.currentPw}
+                  onChange={e => setSelfChangePwModal(p => ({ ...p, currentPw: e.target.value, error: '' }))}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                  placeholder="Tu contraseña actual"
+                  autoFocus
+                />
+              </div>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Nueva contraseña</label>
+                <input
+                  type="password"
+                  value={selfChangePwModal.newPw}
+                  onChange={e => setSelfChangePwModal(p => ({ ...p, newPw: e.target.value, error: '' }))}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                  placeholder="Mínimo 4 caracteres"
+                />
+              </div>
+              <div style={{ marginBottom: '18px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1a3d5c', marginBottom: '6px' }}>Confirmar nueva contraseña</label>
+                <input
+                  type="password"
+                  value={selfChangePwModal.confirmPw}
+                  onChange={e => setSelfChangePwModal(p => ({ ...p, confirmPw: e.target.value, error: '' }))}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                  placeholder="Repetir nueva contraseña"
+                />
+              </div>
+              {selfChangePwModal.error && (
+                <div style={{ background: '#fdecea', border: '1px solid #f5c6cb', color: '#b00020', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', marginBottom: '14px' }}>
+                  {selfChangePwModal.error}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  style={{ ...styles.button, background: '#e0e0e0', color: '#333' }}
+                  onClick={() => setSelfChangePwModal(null)}
+                  disabled={selfChangePwModal.saving}
+                >
+                  Cancelar
+                </button>
+                <button
+                  style={{ ...styles.button, background: selfChangePwModal.saving ? '#90a4ae' : '#1565c0' }}
+                  disabled={selfChangePwModal.saving}
+                  onClick={async () => {
+                    const { currentPw, newPw, confirmPw } = selfChangePwModal
+                    if (!currentPw) { setSelfChangePwModal(p => ({ ...p, error: 'Ingresá tu contraseña actual.' })); return }
+                    if (!newPw || newPw.length < 4) { setSelfChangePwModal(p => ({ ...p, error: 'La nueva contraseña debe tener al menos 4 caracteres.' })); return }
+                    if (newPw !== confirmPw) { setSelfChangePwModal(p => ({ ...p, error: 'Las contraseñas no coinciden.' })); return }
+                    setSelfChangePwModal(p => ({ ...p, saving: true, error: '' }))
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/auth/change-my-password`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+                        body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
+                      })
+                      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || `Error ${res.status}`) }
+                      setSelfChangePwModal(null)
+                      setStatusMsg('Contraseña actualizada correctamente.')
+                      setStatusType('success')
+                    } catch (err) {
+                      setSelfChangePwModal(p => ({ ...p, saving: false, error: err.message }))
+                    }
+                  }}
+                >
+                  {selfChangePwModal.saving ? 'Guardando…' : 'Guardar cambio'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {resetPasswordModal && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
             <div style={{ background: '#fff', borderRadius: '12px', padding: '28px 32px', maxWidth: '420px', width: '100%', boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}>

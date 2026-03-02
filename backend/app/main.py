@@ -5719,6 +5719,32 @@ def reset_passwords(request: Request, payload: ResetPasswordsRequest, db: Sessio
     return {"updated": updated, "count": len(updated)}
 
 
+class ChangeMyPasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@app.post("/auth/change-my-password", tags=["Auth"])
+def change_my_password(request: Request, payload: ChangeMyPasswordRequest, db: Session = Depends(get_db)):
+    """Any authenticated user can change their own password (requires current password)."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=403, detail="No autenticado.")
+    token_data = decode_access_token(auth_header[7:])
+    if not token_data:
+        raise HTTPException(status_code=403, detail="Token inválido o expirado.")
+    teacher = db.query(models.Teacher).filter(models.Teacher.id == token_data["id"]).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if not verify_password(payload.current_password, teacher.password_hash):
+        raise HTTPException(status_code=400, detail="La contraseña actual es incorrecta.")
+    if len(payload.new_password) < 4:
+        raise HTTPException(status_code=422, detail="La nueva contraseña debe tener al menos 4 caracteres.")
+    teacher.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"ok": True}
+
+
 # ── Careers helper & CRUD ───────────────────────────────────────────────────
 
 _DEFAULT_CAREERS = [
