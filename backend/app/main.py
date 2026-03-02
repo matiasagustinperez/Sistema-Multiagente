@@ -6693,7 +6693,33 @@ def list_teachers(career: str = "", db: Session = Depends(get_db)):
         if not teacher_ids:
             return []
         query = query.filter(models.Teacher.id.in_(teacher_ids))
-    return query.order_by(models.Teacher.name.asc()).distinct().all()
+    teachers = query.order_by(models.Teacher.name.asc()).distinct().all()
+    if not teachers:
+        return []
+    teacher_ids_list = [t.id for t in teachers]
+    from sqlalchemy import func as sqlfunc
+    proposal_counts = {
+        row[0]: row[1]
+        for row in db.query(models.ProposalTeacher.teacher_id, sqlfunc.count())
+        .filter(models.ProposalTeacher.teacher_id.in_(teacher_ids_list))
+        .group_by(models.ProposalTeacher.teacher_id)
+        .all()
+    }
+    career_counts = {
+        row[0]: row[1]
+        for row in db.query(models.TeacherCareer.teacher_id, sqlfunc.count())
+        .filter(models.TeacherCareer.teacher_id.in_(teacher_ids_list))
+        .group_by(models.TeacherCareer.teacher_id)
+        .all()
+    }
+    result = []
+    for t in teachers:
+        data = schemas.TeacherOut.model_validate(t)
+        data.has_password = bool(t.password_hash)
+        data.has_proposals = proposal_counts.get(t.id, 0) > 0
+        data.has_career_links = career_counts.get(t.id, 0) > 0
+        result.append(data)
+    return result
 
 
 @app.post("/teachers", response_model=schemas.TeacherOut)

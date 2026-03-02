@@ -175,9 +175,22 @@ const LoginScreen = ({ onLogin }) => {
               <button
                 type="button"
                 onClick={() => setShowPassword(v => !v)}
-                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#888', fontSize: '13px', padding: 0 }}
+                title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#888', padding: 0, lineHeight: 0 }}
               >
-                {showPassword ? 'Ocultar' : 'Ver'}
+                {showPassword ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                    <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                )}
               </button>
             </div>
           </div>
@@ -362,6 +375,21 @@ const App = () => {
     setCurrentUser(null)
     setViewRole('director')
     setActiveMenu('home')
+  }
+
+  const handleDeleteTeacher = async (user) => {
+    if (!window.confirm(`¿Eliminar al docente "${user.name}"?\n\nEsta acción no se puede deshacer.`)) return
+    try {
+      const res = await fetch(`${API_BASE_URL}/teachers/${user.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert(`Error al eliminar: ${err.detail || res.status}`)
+        return
+      }
+      fetchAdminUsers()
+    } catch (e) {
+      alert('Error de red al intentar eliminar el docente.')
+    }
   }
 
   // Lock / bulk selection
@@ -10383,18 +10411,33 @@ const App = () => {
               {currentUser.name}
             </div>
           )}
-          <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <button
               onClick={() => setSelfChangePwModal({ currentPw: '', newPw: '', confirmPw: '', saving: false, error: '' })}
-              style={{ fontSize: '11px', background: '#e8f0fe', border: '1px solid #90b4f5', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', color: '#1a56db', fontWeight: 600 }}
+              title="Cambiar contraseña"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', background: 'transparent', border: '1px solid #c5d8f0', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', color: '#2c5f8a', fontWeight: 500, transition: 'background 0.15s' }}
+              onMouseEnter={e => e.currentTarget.style.background='#e8f0fe'}
+              onMouseLeave={e => e.currentTarget.style.background='transparent'}
             >
-              🔑 Cambiar contraseña
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              Cambiar contraseña
             </button>
             <button
               onClick={handleLogout}
-              style={{ fontSize: '11px', background: '#fdecea', border: '1px solid #f5b8b8', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', color: '#b00020', fontWeight: 600 }}
+              title="Cerrar sesión"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', background: 'transparent', border: '1px solid #e0b8b8', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', color: '#8a2c2c', fontWeight: 500, transition: 'background 0.15s' }}
+              onMouseEnter={e => e.currentTarget.style.background='#fdecea'}
+              onMouseLeave={e => e.currentTarget.style.background='transparent'}
             >
-              ⦻ Cerrar sesión
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+              Cerrar sesión
             </button>
           </div>
         </div>
@@ -15328,6 +15371,7 @@ const App = () => {
                         <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Email</th>
                         <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Roles</th>
                         <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700 }}>Último ingreso</th>
+                        <th style={{ padding: '10px 8px', textAlign: 'center', fontWeight: 700, width: '50px' }}>Acc.</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -15357,8 +15401,29 @@ const App = () => {
                               {user.roleAssignments && user.roleAssignments.map(a => roleBadge(a.role, a.careerName))}
                             </div>
                           </td>
-                          <td style={{ padding: '10px 14px', fontSize: '12px', color: user.last_login ? '#555' : '#e65100', fontWeight: user.last_login ? 400 : 600 }}>
-                            {user.last_login ? formatDateTime(user.last_login) : 'Nunca ingresó'}
+                          <td style={{ padding: '10px 14px', fontSize: '12px', color: !user.has_password ? '#c0392b' : user.last_login ? '#555' : '#e65100', fontWeight: !user.has_password || !user.last_login ? 600 : 400 }}>
+                            {!user.has_password ? 'Sin contraseña' : user.last_login ? formatDateTime(user.last_login) : 'Nunca ingresó'}
+                          </td>
+                          <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                            {(() => {
+                              const canDelete = !user.is_admin && !user.has_proposals && !user.has_career_links
+                              const reason = user.is_admin ? 'Es administrador' : user.has_proposals ? 'Tiene propuestas asignadas' : user.has_career_links ? 'Está vinculado a una carrera' : ''
+                              return (
+                                <button
+                                  onClick={() => canDelete && handleDeleteTeacher(user)}
+                                  disabled={!canDelete}
+                                  title={canDelete ? 'Eliminar docente' : reason}
+                                  style={{ background: 'none', border: 'none', cursor: canDelete ? 'pointer' : 'not-allowed', padding: '4px', borderRadius: '4px', color: canDelete ? '#c0392b' : '#ccc', lineHeight: 0 }}
+                                >
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                                    <path d="M10 11v6"/><path d="M14 11v6"/>
+                                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                                  </svg>
+                                </button>
+                              )
+                            })()}
                           </td>
                         </tr>
                       ))}

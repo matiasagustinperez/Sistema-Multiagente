@@ -54,6 +54,9 @@ class TeacherOut(TeacherBase):
     id: int
     last_login: Optional[datetime] = None
     is_admin: Optional[bool] = False
+    has_password: Optional[bool] = False
+    has_proposals: Optional[bool] = False
+    has_career_links: Optional[bool] = False
 
     class Config:
         from_attributes = True
