@@ -5776,7 +5776,10 @@ def change_my_password(request: Request, payload: ChangeMyPasswordRequest, db: S
 
 # ── Gmail Notifications ───────────────────────────────────────────────────────
 
-_GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+_GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.settings.basic",
+]
 _GMAIL_REDIRECT_URI = "http://127.0.0.1:8011/notifications/gmail/callback"
 
 
@@ -6006,6 +6009,21 @@ async def gmail_send(
         _gmail_address = _profile.get("emailAddress") or sender.email or "me"
     except Exception:
         _gmail_address = sender.email or "me"
+
+    print(f"[GMAIL] real_address={_gmail_address!r}  sender_name param={sender_name!r}  _from_name will be={((sender_name or '').strip())!r}", flush=True)
+
+    # Update the Gmail account's sendAs display name so Gmail actually shows it
+    # (Gmail API ignores the From header in raw messages — only sendAs controls the display name)
+    _display_for_send = (sender_name or "").strip()
+    if _display_for_send and _gmail_address and _gmail_address != "me":
+        try:
+            service.users().settings().sendAs().patch(
+                userId="me",
+                sendAsEmail=_gmail_address,
+                body={"displayName": _display_for_send},
+            ).execute()
+        except Exception as _se:
+            print(f"[GMAIL] sendAs.patch failed (non-fatal): {_se}", flush=True)
 
     # Parse recipient list
     try:
