@@ -4933,6 +4933,7 @@ const App = () => {
       fd.append('body', bodyHtml)
       fd.append('use_template', useSystemTemplate ? 'true' : 'false')
       fd.append('sender_name', emailSenderName)
+      console.log('[gmail_send] emailSenderName=', JSON.stringify(emailSenderName), '| viewRole=', viewRole, '| activeCareer=', activeCareer)
       fd.append('personal_name', currentUser?.name || '')
       fd.append('include_personal_name', includePersonalName ? 'true' : 'false')
       for (const f of emailAttachments) fd.append('attachments', f)

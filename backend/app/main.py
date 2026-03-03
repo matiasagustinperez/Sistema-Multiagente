@@ -5937,15 +5937,16 @@ async def gmail_send(
     from email import encoders as _encoders
 
     def _make_from(display: str, address: str) -> str:
-        """Build a From header that handles non-ASCII display names (RFC 2047)."""
+        """Build a From header that handles non-ASCII display names (RFC 2047 base64)."""
         if not display:
-            return address
+            return address or "me"
         try:
             display.encode("ascii")
             return _formataddr((display, address))
         except UnicodeEncodeError:
-            encoded = _Header(display, "utf-8").encode()
-            return f"{encoded} <{address}>"
+            # RFC 2047 base64 encoding — most widely supported
+            b64 = _b64.b64encode(display.encode("utf-8")).decode("ascii")
+            return f"=?utf-8?b?{b64}?= <{address}>"
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -5995,6 +5996,9 @@ async def gmail_send(
         service = _gbuild("gmail", "v1", credentials=creds)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"No se pudo conectar con Gmail: {exc}")
+
+    # DEBUG — remove after confirming
+    print(f"[gmail_send] sender_name='{sender_name}' | sender.email='{sender.email}' | from_header='{_make_from(sender_name.strip(), sender.email) if sender_name.strip() else sender.email}'", flush=True)
 
     # Parse recipient list
     try:
