@@ -649,6 +649,11 @@ const App = () => {
   const [emailSending, setEmailSending] = useState(false)
   const [emailSendResult, setEmailSendResult] = useState(null)
   const [recipientsExpanded, setRecipientsExpanded] = useState(false)
+  const [extraEmailRecipients, setExtraEmailRecipients] = useState([])   // string[]
+  const [useSystemTemplate, setUseSystemTemplate] = useState(true)
+  const [showRecipientPicker, setShowRecipientPicker] = useState(false)
+  const [recipientPickerQuery, setRecipientPickerQuery] = useState('')
+  const [customEmailInput, setCustomEmailInput] = useState('')
   const [emailSuccessToast, setEmailSuccessToast] = useState(null)
   const bodyEditorRef = useRef(null)
   const [teacherFocusTargetId, setTeacherFocusTargetId] = useState(null)
@@ -1276,7 +1281,9 @@ const App = () => {
   // Clear teacher selection whenever context changes (logout, role switch, career switch)
   useEffect(() => {
     setSelectedTeacherIds(new Set())
+    setExtraEmailRecipients([])
     setShowEmailModal(false)
+    setShowRecipientPicker(false)
   }, [currentUser?.id, viewRole, activeCareer])
 
   useEffect(() => {
@@ -4901,9 +4908,11 @@ const App = () => {
       const token = localStorage.getItem('auth_token')
       const fd = new FormData()
       fd.append('teacher_ids', JSON.stringify([...selectedTeacherIds]))
+      fd.append('extra_recipients', JSON.stringify(extraEmailRecipients))
       fd.append('subject', emailForm.subject)
       const bodyHtml = bodyEditorRef.current?.innerHTML || ''
       fd.append('body', bodyHtml)
+      fd.append('use_template', useSystemTemplate ? 'true' : 'false')
       const senderName = viewRole === 'director'
         ? `Dirección - ${activeCareer}`
         : viewRole === 'secretario'
@@ -4921,6 +4930,7 @@ const App = () => {
       setEmailSendResult(data)
       if (!data.errors || data.errors.length === 0) {
         setSelectedTeacherIds(new Set())
+        setExtraEmailRecipients([])
         setTimeout(() => {
           setShowEmailModal(false)
           setEmailSendResult(null)
@@ -13682,6 +13692,16 @@ const App = () => {
         {activeMenu === 'docentes' && (
           <div style={styles.section}>
             <h2>Gestión de Docentes</h2>
+            {canNotify && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+                <button
+                  style={{ background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 20px', fontWeight: 700, cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 8px rgba(26,35,126,.18)' }}
+                  onClick={checkGmailAndOpenModal}
+                >
+                  ✉️ Enviar notificación
+                </button>
+              </div>
+            )}
             {!activeCareer ? (
               <div style={{ color: '#777', fontStyle: 'italic' }}>Selecciona una carrera para ver el catálogo.</div>
             ) : (
@@ -20405,7 +20425,7 @@ const App = () => {
       <div style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
-      }} onClick={(e) => { if (e.target === e.currentTarget && !emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()) } }}>
+      }} onClick={(e) => { if (e.target === e.currentTarget && !emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()); setExtraEmailRecipients([]); setShowRecipientPicker(false) } }}>
         <div style={{
           background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '820px',
           padding: '28px 32px', boxShadow: '0 12px 48px rgba(0,0,0,0.25)', position: 'relative',
@@ -20418,7 +20438,7 @@ const App = () => {
             #emailBodyEditor ul ul,#emailBodyEditor ol ol,#emailBodyEditor ul ol,#emailBodyEditor ol ul{padding-left:22px;margin:2px 0;}
           `}</style>
           <button
-            onClick={() => { if (!emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()) } }}
+            onClick={() => { if (!emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()); setExtraEmailRecipients([]); setShowRecipientPicker(false) } }}
             style={{ position: 'absolute', top: '14px', right: '16px', background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#666' }}
           >✕</button>
 
@@ -20456,16 +20476,19 @@ const App = () => {
             </div>
           )}
 
-          {/* Recipients – collapsible, removable */}
+          {/* Recipients – collapsible, removable, with add */}
           <div style={{ marginBottom: '14px' }}>
             <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '5px' }}>
-              Para: <span style={{ fontWeight: 400, color: '#888' }}>({selectedTeacherIds.size} destinatario{selectedTeacherIds.size !== 1 ? 's' : ''})</span>
+              Para:
+              <span style={{ fontWeight: 400, color: '#888', marginLeft: '4px' }}>
+                ({selectedTeacherIds.size + extraEmailRecipients.length} destinatario{(selectedTeacherIds.size + extraEmailRecipients.length) !== 1 ? 's' : ''})
+              </span>
             </label>
-            <div style={{ background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '6px', padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            <div style={{ background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '6px', padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
               {(() => {
                 const ids = [...selectedTeacherIds]
                 const shown = recipientsExpanded ? ids : ids.slice(0, 3)
-                const hidden = ids.length - shown.length
+                const hiddenCount = ids.length - shown.length
                 return (
                   <>
                     {shown.map(id => {
@@ -20476,12 +20499,7 @@ const App = () => {
                           {t.name}{t.email ? ` ‹${t.email}›` : ' (sin email)'}
                           {!emailSending && (
                             <button
-                              onClick={() => {
-                                const next = new Set(selectedTeacherIds)
-                                next.delete(id)
-                                setSelectedTeacherIds(next)
-                                if (next.size === 0) setShowEmailModal(false)
-                              }}
+                              onClick={() => { const next = new Set(selectedTeacherIds); next.delete(id); setSelectedTeacherIds(next) }}
                               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1565c0', fontWeight: 700, padding: '0 2px', lineHeight: 1, fontSize: '14px' }}
                               title="Quitar destinatario"
                             >×</button>
@@ -20489,22 +20507,115 @@ const App = () => {
                         </span>
                       )
                     })}
-                    {hidden > 0 && (
-                      <button
-                        onClick={() => setRecipientsExpanded(true)}
+                    {hiddenCount > 0 && (
+                      <button onClick={() => setRecipientsExpanded(true)}
                         style={{ background: '#e8eaf6', color: '#3949ab', border: 'none', borderRadius: '999px', padding: '2px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                      >y {hidden} más ▾</button>
+                      >y {hiddenCount} más ▾</button>
                     )}
                     {recipientsExpanded && ids.length > 3 && (
-                      <button
-                        onClick={() => setRecipientsExpanded(false)}
+                      <button onClick={() => setRecipientsExpanded(false)}
                         style={{ background: 'none', border: 'none', color: '#888', fontSize: '11px', cursor: 'pointer', padding: '2px 4px' }}
                       >Colapsar ▴</button>
                     )}
                   </>
                 )
               })()}
+              {/* Extra email chips */}
+              {extraEmailRecipients.map((em, i) => (
+                <span key={'ex-'+i} style={{ background: '#fce4ec', color: '#880e4f', borderRadius: '999px', padding: '2px 6px 2px 10px', fontSize: '12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  {em}
+                  {!emailSending && (
+                    <button
+                      onClick={() => setExtraEmailRecipients(prev => prev.filter((_, j) => j !== i))}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#880e4f', fontWeight: 700, padding: '0 2px', lineHeight: 1, fontSize: '14px' }}
+                      title="Quitar"
+                    >×</button>
+                  )}
+                </span>
+              ))}
+              {/* Add-recipient toggle button */}
+              {!emailSending && (
+                <button
+                  onClick={() => { setShowRecipientPicker(p => !p); setRecipientPickerQuery(''); setCustomEmailInput('') }}
+                  style={{ background: '#fff', border: '1px dashed #90a4ae', borderRadius: '999px', padding: '2px 12px', fontSize: '12px', color: '#546e7a', cursor: 'pointer', lineHeight: 1.7 }}
+                >＋ Agregar</button>
+              )}
             </div>
+            {/* Add-recipient panel */}
+            {showRecipientPicker && !emailSending && (
+              <div style={{ background: '#fff', border: '1px solid #cfd8dc', borderRadius: '8px', padding: '12px 14px', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* Teacher search */}
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#777', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '.4px' }}>Agregar de la lista de docentes</div>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      style={{ ...styles.input, marginBottom: 0, fontSize: '12px' }}
+                      placeholder="Buscar por nombre o correo..."
+                      value={recipientPickerQuery}
+                      onChange={e => setRecipientPickerQuery(e.target.value)}
+                      autoFocus
+                    />
+                    {recipientPickerQuery.length > 0 && (() => {
+                      const q = recipientPickerQuery.toLowerCase()
+                      const matches = teacherCatalogItems.filter(t =>
+                        !selectedTeacherIds.has(t.id) &&
+                        (t.name?.toLowerCase().includes(q) || t.email?.toLowerCase().includes(q))
+                      ).slice(0, 8)
+                      return (
+                        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cfd8dc', borderRadius: '6px', zIndex: 200, boxShadow: '0 4px 14px rgba(0,0,0,.12)', maxHeight: '180px', overflowY: 'auto' }}>
+                          {matches.length === 0
+                            ? <div style={{ padding: '8px 12px', fontSize: '12px', color: '#999' }}>Sin resultados</div>
+                            : matches.map(t => (
+                              <div
+                                key={t.id}
+                                onClick={() => { setSelectedTeacherIds(prev => new Set([...prev, t.id])); setRecipientPickerQuery('') }}
+                                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', borderBottom: '1px solid #f0f0f0' }}
+                                onMouseEnter={e => e.currentTarget.style.background = '#e8f5e9'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                              >
+                                <strong>{t.name}</strong>{t.email ? ` · ${t.email}` : <span style={{ color: '#bbb' }}> · sin email</span>}
+                              </div>
+                            ))
+                          }
+                        </div>
+                      )
+                    })()}
+                  </div>
+                </div>
+                {/* Custom email */}
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#777', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '.4px' }}>O ingresá un correo manualmente</div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      style={{ ...styles.input, marginBottom: 0, fontSize: '12px', flex: 1 }}
+                      placeholder="correo@ejemplo.com"
+                      value={customEmailInput}
+                      onChange={e => setCustomEmailInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          const em = customEmailInput.trim().toLowerCase()
+                          if (em.includes('@') && !extraEmailRecipients.includes(em)) {
+                            setExtraEmailRecipients(prev => [...prev, em])
+                            setCustomEmailInput('')
+                          }
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const em = customEmailInput.trim().toLowerCase()
+                        if (em.includes('@') && !extraEmailRecipients.includes(em)) {
+                          setExtraEmailRecipients(prev => [...prev, em])
+                          setCustomEmailInput('')
+                        }
+                      }}
+                      style={{ background: '#1a237e', color: '#fff', border: 'none', borderRadius: '6px', padding: '0 16px', fontWeight: 700, cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' }}
+                    >Agregar</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Subject */}
@@ -20640,11 +20751,28 @@ const App = () => {
             </div>
           )}
 
+          {/* Template toggle */}
+          <div style={{ marginBottom: '16px', background: '#f8f9fa', borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: emailSending ? 'default' : 'pointer', fontSize: '13px', color: '#444', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={useSystemTemplate}
+                onChange={e => setUseSystemTemplate(e.target.checked)}
+                disabled={emailSending}
+                style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#1a237e' }}
+              />
+              <span style={{ fontWeight: 600 }}>Enviar con diseño del sistema MACAU</span>
+            </label>
+            <span style={{ fontSize: '11px', color: '#999' }}>
+              {useSystemTemplate ? '(encabezado, fondo y firma institucional)' : '(mensaje tal cual, sin diseño adicional)'}
+            </span>
+          </div>
+
           {/* Actions */}
           <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
             <button
               style={{ ...styles.button, background: '#78909c' }}
-              onClick={() => { if (!emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()) } }}
+              onClick={() => { if (!emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()); setExtraEmailRecipients([]); setShowRecipientPicker(false) } }}
               disabled={emailSending}
             >
               Cancelar

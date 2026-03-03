@@ -5919,6 +5919,8 @@ async def gmail_send(
     subject: str = Form(...),
     body: str = Form(...),
     sender_name: str = Form(""),
+    extra_recipients: str = Form(default="[]"),
+    use_template: str = Form(default="true"),
     attachments: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
@@ -5984,11 +5986,21 @@ async def gmail_send(
     except Exception:
         ids = [int(x) for x in teacher_ids.split(",") if x.strip()]
 
+    # Parse extra email recipients
+    try:
+        extra_emails: list[str] = _json.loads(extra_recipients)
+        if not isinstance(extra_emails, list):
+            extra_emails = []
+    except Exception:
+        extra_emails = []
+
+    _do_template = (use_template.strip().lower() not in ("false", "0", "no"))
+
     recipients = db.query(models.Teacher).filter(
         models.Teacher.id.in_(ids),
         models.Teacher.email != None,
     ).all()
-    if not recipients:
+    if not recipients and not extra_emails:
         raise HTTPException(status_code=422, detail="Ningún destinatario tiene email registrado.")
 
     # Read attachment bytes
@@ -6052,10 +6064,10 @@ async def gmail_send(
             _from_name = (sender_name or "").strip()
             outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
             outer["subject"] = subject
-            # HTML with optional inline logo
+            html_body = _wrap_html(body) if _do_template else body
             related = MIMEMultipart("related")
-            related.attach(MIMEText(_wrap_html(body), "html", "utf-8"))
-            if _logo_bytes:
+            related.attach(MIMEText(html_body, "html", "utf-8"))
+            if _do_template and _logo_bytes:
                 logo_part = MIMEImage(_logo_bytes, _subtype="png")
                 logo_part.add_header("Content-ID", "<macau_logo>")
                 logo_part.add_header("Content-Disposition", "inline", filename="macau_logo.png")
@@ -6072,6 +6084,36 @@ async def gmail_send(
             sent.append(recipient.email)
         except Exception as exc:
             errors.append({"email": recipient.email, "error": str(exc)})
+
+    # Send to extra (manual) email recipients
+    for em in extra_emails:
+        try:
+            from email.mime.image import MIMEImage
+            outer = MIMEMultipart("mixed")
+            outer["to"] = em
+            _from_name = (sender_name or "").strip()
+            outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
+            outer["subject"] = subject
+            html_body = _wrap_html(body) if _do_template else body
+            related = MIMEMultipart("related")
+            related.attach(MIMEText(html_body, "html", "utf-8"))
+            if _do_template and _logo_bytes:
+                logo_part = MIMEImage(_logo_bytes, _subtype="png")
+                logo_part.add_header("Content-ID", "<macau_logo>")
+                logo_part.add_header("Content-Disposition", "inline", filename="macau_logo.png")
+                related.attach(logo_part)
+            outer.attach(related)
+            for fname, ftype, fcontent in attachment_data:
+                part = MIMEBase(*ftype.split("/", 1) if "/" in ftype else ("application", "octet-stream"))
+                part.set_payload(fcontent)
+                _encoders.encode_base64(part)
+                part.add_header("Content-Disposition", "attachment", filename=fname)
+                outer.attach(part)
+            raw = _b64.urlsafe_b64encode(outer.as_bytes()).decode()
+            service.users().messages().send(userId="me", body={"raw": raw}).execute()
+            sent.append(em)
+        except Exception as exc:
+            errors.append({"email": em, "error": str(exc)})
 
     return {"sent": sent, "errors": errors, "count": len(sent)}
 
