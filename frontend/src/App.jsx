@@ -669,6 +669,7 @@ const App = () => {
     const saved = window.localStorage.getItem('teacherViewMode')
     return saved === 'cards' ? 'cards' : 'table'
   })
+  const [showNewTeacherForm, setShowNewTeacherForm] = useState(false)
   const [docenteAutocompleteId, setDocenteAutocompleteId] = useState(null)
   const [completeProposalFilters, setCompleteProposalFilters] = useState({
     id: '',
@@ -4832,6 +4833,7 @@ const App = () => {
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
       setTeacherForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+      setShowNewTeacherForm(false)
       await fetchTeachers(activeCareer)
       await fetchTeacherTotals()
       setStatusMsg('Docente agregado')
@@ -13709,22 +13711,19 @@ const App = () => {
         {activeMenu === 'docentes' && (
           <div style={styles.section}>
             <h2>Gestión de Docentes</h2>
-            {canNotify && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
-                <button
-                  style={{ background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 20px', fontWeight: 700, cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 8px rgba(26,35,126,.18)' }}
-                  onClick={checkGmailAndOpenModal}
-                >
-                  ➤ Enviar notificación
-                </button>
-              </div>
-            )}
             {!activeCareer ? (
               <div style={{ color: '#777', fontStyle: 'italic' }}>Selecciona una carrera para ver el catálogo.</div>
             ) : (
               <>
-                <div style={{ background: '#f8f8f8', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '16px' }}>
-                  <h3>Nuevo docente</h3>
+                <div style={{ marginBottom: '16px' }}>
+                  <button
+                    onClick={() => setShowNewTeacherForm(v => !v)}
+                    style={{ background: showNewTeacherForm ? '#e8eaf6' : '#1a237e', color: showNewTeacherForm ? '#1a237e' : '#fff', border: '1px solid #1a237e', borderRadius: '8px', padding: '7px 18px', fontWeight: 700, cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '7px' }}
+                  >
+                    {showNewTeacherForm ? '✕ Cancelar' : '+ Nuevo docente'}
+                  </button>
+                  {showNewTeacherForm && (
+                  <div style={{ background: '#f8f8f8', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginTop: '10px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.5fr 2fr', gap: '12px' }}>
                     <input
                       style={styles.input}
@@ -13767,11 +13766,13 @@ const App = () => {
                   <button style={styles.button} onClick={addTeacher}>
                     Agregar docente
                   </button>
+                  </div>
+                  )}
                 </div>
                 <div style={{ marginTop: '12px', marginBottom: '12px', color: '#555' }}>
                   Docentes de la carrera {activeCareer}. Los que dicen "Sin Informar" deben completar dedicación.
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
                   <label style={{ fontSize: '13px', color: '#4d4d4d', fontWeight: 600 }}>Vista:</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                     <span style={{ fontSize: '12px', color: teacherViewMode === 'table' ? '#1f2d3d' : '#7a8793', fontWeight: teacherViewMode === 'table' ? 700 : 500 }}>
@@ -13811,6 +13812,14 @@ const App = () => {
                       Tarjetas
                     </span>
                   </label>
+                  {canNotify && (
+                    <button
+                      style={{ marginLeft: 'auto', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 16px', fontWeight: 700, cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '7px', boxShadow: '0 2px 8px rgba(26,35,126,.18)' }}
+                      onClick={checkGmailAndOpenModal}
+                    >
+                      ➤ Enviar notificación
+                    </button>
+                  )}
                 </div>
                 {teacherCatalogLoading ? (
                   <div style={{ color: '#555' }}>Cargando docentes...</div>
