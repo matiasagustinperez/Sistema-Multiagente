@@ -4838,7 +4838,7 @@ const App = () => {
   // ── Gmail notification helpers ──────────────────────────────────────────
   const checkGmailAndOpenModal = async () => {
     try {
-      const token = localStorage.getItem('authToken')
+      const token = localStorage.getItem('auth_token')
       const res = await fetch('http://127.0.0.1:8011/notifications/gmail/status', {
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -4857,7 +4857,7 @@ const App = () => {
 
   const connectGmail = async () => {
     try {
-      const token = localStorage.getItem('authToken')
+      const token = localStorage.getItem('auth_token')
       const res = await fetch('http://127.0.0.1:8011/notifications/gmail/authorize', {
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -4869,7 +4869,7 @@ const App = () => {
           clearInterval(timer)
           try {
             const r2 = await fetch('http://127.0.0.1:8011/notifications/gmail/status', {
-              headers: { Authorization: `Bearer ${token}` }
+              headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
             })
             if (r2.ok) {
               const d2 = await r2.json()
@@ -4887,7 +4887,7 @@ const App = () => {
     setEmailSending(true)
     setEmailSendResult(null)
     try {
-      const token = localStorage.getItem('authToken')
+      const token = localStorage.getItem('auth_token')
       const fd = new FormData()
       fd.append('teacher_ids', JSON.stringify([...selectedTeacherIds]))
       fd.append('subject', emailForm.subject)
@@ -20405,7 +20405,7 @@ const App = () => {
               <span style={{ fontSize: '13px', color: '#2e7d32', fontWeight: 600 }}>Gmail conectado ✓</span>
               <button
                 onClick={async () => {
-                  const token = localStorage.getItem('token')
+                  const token = localStorage.getItem('auth_token')
                   if (!token) return
                   await fetch(`${API_BASE_URL}/notifications/gmail/disconnect`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
                   setGmailConnected(false)
