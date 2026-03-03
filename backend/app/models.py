@@ -113,8 +113,6 @@ class Teacher(Base):
     email = Column(String(255), nullable=True, index=True)
     category = Column(String(50), nullable=True)
     dedication = Column(String(50), nullable=True)
-    # DNI – used as default username and initial password
-    dni = Column(String(30), nullable=True)
     # Auth fields
     password_hash = Column(String(255), nullable=True)
     last_login = Column(DateTime(timezone=True), nullable=True)

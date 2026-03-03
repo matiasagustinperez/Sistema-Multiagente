@@ -621,7 +621,7 @@ const App = () => {
   const [teacherCatalogLoading, setTeacherCatalogLoading] = useState(false)
   const [teacherCatalogError, setTeacherCatalogError] = useState('')
   const [teacherTotalCount, setTeacherTotalCount] = useState(0)
-  const [teacherForm, setTeacherForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '', dni: '' })
+  const [teacherForm, setTeacherForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
   const [teacherUsageInfo, setTeacherUsageInfo] = useState({
     teacherId: null,
     name: '',
@@ -639,7 +639,7 @@ const App = () => {
     error: ''
   })
   const [teacherEditId, setTeacherEditId] = useState(null)
-  const [teacherEditForm, setTeacherEditForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '', dni: '' })
+  const [teacherEditForm, setTeacherEditForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
   const [teacherFocusTargetId, setTeacherFocusTargetId] = useState(null)
   const [teacherHighlightId, setTeacherHighlightId] = useState(null)
   const teacherAnchorRefs = useRef({})
@@ -874,7 +874,7 @@ const App = () => {
   const [adminUsersLoading, setAdminUsersLoading] = useState(false)
   const [adminUsersSearch, setAdminUsersSearch] = useState('')
   const [adminUserFormOpen, setAdminUserFormOpen] = useState(false)
-  const [adminUserForm, setAdminUserForm] = useState({ name: '', email: '', dni: '' })
+  const [adminUserForm, setAdminUserForm] = useState({ name: '', email: '' })
   const [adminUserFormError, setAdminUserFormError] = useState('')
   const [adminUserFormSaving, setAdminUserFormSaving] = useState(false)
   const [selectedUserIds, setSelectedUserIds] = useState(new Set())
@@ -1229,9 +1229,9 @@ const App = () => {
     setCatalogEditId(null)
     setCatalogEditForm({ code: '', description: '' })
     // Reset Docentes state
-    setTeacherForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '', dni: '' })
+    setTeacherForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
     setTeacherEditId(null)
-    setTeacherEditForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '', dni: '' })
+    setTeacherEditForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
     setMatrixColumnFilters({})
     // Reset Instrumentos state
     setInstrumentsSubject(null)
@@ -4788,7 +4788,6 @@ const App = () => {
           category: teacherForm.category,
           dedication: teacherForm.dedication,
           email: teacherForm.email,
-          dni: teacherForm.dni.trim() || null,
           career: activeCareer
         })
       })
@@ -4796,7 +4795,7 @@ const App = () => {
         const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }))
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
-      setTeacherForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '', dni: '' })
+      setTeacherForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
       setStatusType('error')
     }
   }
@@ -4810,14 +4809,13 @@ const App = () => {
       name: teacher.name || '',
       category: teacher.category || 'AYUDANTE 1º',
       dedication: teacher.dedication || 'Sin Informar',
-      email: teacher.email || '',
-      dni: teacher.dni || ''
+      email: teacher.email || ''
     })
   }
 
   const cancelTeacherEdit = () => {
     setTeacherEditId(null)
-    setTeacherEditForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '', dni: '' })
+    setTeacherEditForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
   }
 
   const saveTeacherEdit = async (teacher) => {
@@ -4842,8 +4840,7 @@ const App = () => {
           name: teacherEditForm.name.trim().toUpperCase(),
           category: teacherEditForm.category,
           dedication: teacherEditForm.dedication,
-          email: teacherEditForm.email,
-          dni: teacherEditForm.dni.trim() || null
+          email: teacherEditForm.email
         })
       })
       if (!res.ok) {
@@ -13569,7 +13566,7 @@ const App = () => {
               <>
                 <div style={{ background: '#f8f8f8', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '16px' }}>
                   <h3>Nuevo docente</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.5fr 2fr 1.2fr', gap: '12px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.5fr 2fr', gap: '12px' }}>
                     <input
                       style={styles.input}
                       placeholder="Apellido y Nombre"
@@ -13606,12 +13603,6 @@ const App = () => {
                       placeholder="Correo"
                       value={teacherForm.email}
                       onChange={(e) => setTeacherForm(prev => ({ ...prev, email: e.target.value }))}
-                    />
-                    <input
-                      style={styles.input}
-                      placeholder="DNI"
-                      value={teacherForm.dni}
-                      onChange={(e) => setTeacherForm(prev => ({ ...prev, dni: e.target.value }))}
                     />
                   </div>
                   <button style={styles.button} onClick={addTeacher}>
@@ -13812,14 +13803,6 @@ const App = () => {
                                   onChange={(e) => setTeacherEditForm(prev => ({ ...prev, email: e.target.value }))}
                                 />
                               </td>
-                              <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
-                                <input
-                                  style={styles.input}
-                                  placeholder="DNI"
-                                  value={teacherEditForm.dni}
-                                  onChange={(e) => setTeacherEditForm(prev => ({ ...prev, dni: e.target.value }))}
-                                />
-                              </td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{getTeacherSubjectCount(teacher)}</td>
                               <td style={{ padding: '8px' }}>
                                 <div style={{ display: 'inline-flex', gap: '6px' }}>
@@ -13915,12 +13898,6 @@ const App = () => {
                               placeholder="Correo"
                               value={teacherEditForm.email}
                               onChange={(e) => setTeacherEditForm(prev => ({ ...prev, email: e.target.value }))}
-                            />
-                            <input
-                              style={{ ...styles.input, marginBottom: '8px' }}
-                              placeholder="DNI"
-                              value={teacherEditForm.dni}
-                              onChange={(e) => setTeacherEditForm(prev => ({ ...prev, dni: e.target.value }))}
                             />
                             <select
                               style={{ ...styles.input, marginBottom: '8px' }}
@@ -15353,7 +15330,7 @@ const App = () => {
               />
               <button
                 style={{ ...styles.button, background: '#4caf50', whiteSpace: 'nowrap' }}
-                onClick={() => { setAdminUserFormOpen(true); setAdminUserForm({ name: '', email: '', dni: '' }); setAdminUserFormError('') }}
+                onClick={() => { setAdminUserFormOpen(true); setAdminUserForm({ name: '', email: '' }); setAdminUserFormError('') }}
               >
                 + Nuevo usuario
               </button>
@@ -15370,7 +15347,7 @@ const App = () => {
             {adminUserFormOpen && (
               <div style={{ background: '#f8fafc', border: '1px solid #d0e4f7', borderRadius: '10px', padding: '20px 24px', marginBottom: '20px' }}>
                 <h3 style={{ margin: '0 0 14px', fontSize: '15px' }}>Nuevo usuario</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
                   <div>
                     <label style={styles.label}>Apellido y Nombre *</label>
                     <input
@@ -15390,15 +15367,6 @@ const App = () => {
                       onChange={e => setAdminUserForm(p => ({ ...p, email: e.target.value }))}
                     />
                   </div>
-                  <div>
-                    <label style={styles.label}>DNI</label>
-                    <input
-                      style={styles.input}
-                      placeholder="Ej: 28312345"
-                      value={adminUserForm.dni}
-                      onChange={e => setAdminUserForm(p => ({ ...p, dni: e.target.value }))}
-                    />
-                  </div>
                 </div>
                 {adminUserFormError && (
                   <div style={{ color: '#b00020', fontSize: '13px', marginBottom: '10px' }}>{adminUserFormError}</div>
@@ -15416,7 +15384,7 @@ const App = () => {
                         const res = await fetch(`${API_BASE_URL}/teachers`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ name, email: adminUserForm.email.trim() || null, dni: adminUserForm.dni.trim() || null, category: 'Sin Informar', dedication: 'Sin Informar' })
+                          body: JSON.stringify({ name, email: adminUserForm.email.trim() || null, category: 'Sin Informar', dedication: 'Sin Informar' })
                         })
                         if (!res.ok) {
                           const err = await res.json().catch(() => ({}))

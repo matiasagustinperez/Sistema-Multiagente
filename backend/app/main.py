@@ -137,7 +137,7 @@ class ResetPasswordsRequest(BaseModel):
     user_ids: list[int]
     new_password: str = ""
     use_email_as_password: bool = False
-    use_dni_as_password: bool = False
+
 
 
 class GdocStatusRequest(BaseModel):
@@ -5336,7 +5336,6 @@ def upsert_teacher(db: Session, teacher_data: dict) -> models.Teacher:
     category = normalize_teacher_category(teacher_data.get("category"))
     dedication = normalize_teacher_dedication(teacher_data.get("dedication"))
     normalized_key = normalize_teacher_key(name) if name else None
-    dni = (teacher_data.get("dni") or "").strip() or None
 
     # If no valid data, return None (don't create empty teacher)
     if not name and not email:
@@ -5345,8 +5344,6 @@ def upsert_teacher(db: Session, teacher_data: dict) -> models.Teacher:
     teacher = None
     if email:
         teacher = db.query(models.Teacher).filter(models.Teacher.email == email).first()
-    if not teacher and dni:
-        teacher = db.query(models.Teacher).filter(models.Teacher.dni == dni).first()
     if not teacher and normalized_key:
         teacher = db.query(models.Teacher).filter(models.Teacher.normalized_key == normalized_key).first()
     if not teacher and name:
@@ -5357,8 +5354,6 @@ def upsert_teacher(db: Session, teacher_data: dict) -> models.Teacher:
             teacher.name = name
         if email and not teacher.email:
             teacher.email = email
-        if dni and not teacher.dni:
-            teacher.dni = dni
         # If no password set yet and we have email, seed it
         if not teacher.password_hash and (email or teacher.email):
             pw = email or teacher.email
@@ -5382,7 +5377,6 @@ def upsert_teacher(db: Session, teacher_data: dict) -> models.Teacher:
         email=email,
         category=category,
         dedication=dedication,
-        dni=dni,
     )
     if email:
         teacher.password_hash = hash_password(email)
@@ -5677,17 +5671,11 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if username.lower() == ADMIN_EMAIL:
         teacher = db.query(models.Teacher).filter(models.Teacher.is_admin == True).first()
     else:
-        # Regular user: look up by email or DNI
+        # Regular user: look up by email
         teacher = db.query(models.Teacher).filter(
             func.lower(models.Teacher.email) == func.lower(username),
             models.Teacher.is_admin == False,
         ).first()
-        if not teacher:
-            # Try lookup by DNI
-            teacher = db.query(models.Teacher).filter(
-                models.Teacher.dni == username,
-                models.Teacher.is_admin == False,
-            ).first()
 
     if not teacher:
         raise HTTPException(status_code=401, detail="Usuario no encontrado.")
@@ -5733,19 +5721,14 @@ def reset_passwords(request: Request, payload: ResetPasswordsRequest, db: Sessio
         raise HTTPException(status_code=403, detail="Solo el administrador puede resetear contraseñas.")
     if not payload.user_ids:
         raise HTTPException(status_code=422, detail="Debe especificar al menos un usuario.")
-    if not payload.use_email_as_password and not payload.use_dni_as_password and len(payload.new_password) < 4:
+    if not payload.use_email_as_password and len(payload.new_password) < 4:
         raise HTTPException(status_code=422, detail="La contraseña debe tener al menos 4 caracteres.")
     updated = []
     for uid in payload.user_ids:
         t = db.query(models.Teacher).filter(models.Teacher.id == uid).first()
         if not t:
             continue
-        if payload.use_dni_as_password:
-            if t.dni:
-                t.password_hash = hash_password(t.dni)
-                t.password_reset_at = datetime.now(timezone.utc)
-                updated.append(uid)
-        elif payload.use_email_as_password:
+        if payload.use_email_as_password:
             if t.email:
                 t.password_hash = hash_password(t.email)
                 t.password_reset_at = datetime.now(timezone.utc)
@@ -6840,9 +6823,6 @@ def update_teacher(teacher_id: int, payload: schemas.TeacherUpdate, db: Session 
     teacher.category = category
     teacher.dedication = dedication or "Sin Informar"
     teacher.normalized_key = normalized_key or teacher.normalized_key
-    if "dni" in data:
-        new_dni = (data.get("dni") or "").strip() or None
-        teacher.dni = new_dni
     # If no password set yet and email exists, seed initial password from email
     if not teacher.password_hash and (email or teacher.email):
         teacher.password_hash = hash_password(email or teacher.email)

@@ -37,7 +37,6 @@ class TeacherBase(BaseModel):
     category: Optional[str] = None
     email: Optional[str] = None
     dedication: Optional[str] = None
-    dni: Optional[str] = None
 
 
 class TeacherCreate(TeacherBase):
@@ -49,7 +48,6 @@ class TeacherUpdate(BaseModel):
     category: Optional[str] = None
     email: Optional[str] = None
     dedication: Optional[str] = None
-    dni: Optional[str] = None
 
 
 class TeacherOut(TeacherBase):
