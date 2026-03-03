@@ -4951,7 +4951,7 @@ const App = () => {
           setShowEmailModal(false)
           setEmailSendResult(null)
           const n = data.count || data.sent?.length || 0
-          setEmailSuccessToast(`✉️ ${n} correo${n !== 1 ? 's' : ''} enviado${n !== 1 ? 's' : ''} con éxito`)
+          setEmailSuccessToast(`➤ ${n} correo${n !== 1 ? 's' : ''} enviado${n !== 1 ? 's' : ''} con éxito`)
           setTimeout(() => setEmailSuccessToast(null), 4000)
         }, 600)
       }
@@ -13714,7 +13714,7 @@ const App = () => {
                   style={{ background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 20px', fontWeight: 700, cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 8px rgba(26,35,126,.18)' }}
                   onClick={checkGmailAndOpenModal}
                 >
-                  ✉️ Enviar notificación
+                  ➤ Enviar notificación
                 </button>
               </div>
             )}
@@ -14049,7 +14049,7 @@ const App = () => {
                                       onClick={() => { setSelectedTeacherIds(new Set([teacher.id])); checkGmailAndOpenModal() }}
                                       title="Enviar notificación"
                                     >
-                                      ✉️
+                                      ➤
                                     </button>
                                   )}
                                 </div>
@@ -14172,7 +14172,7 @@ const App = () => {
                                   style={{ ...styles.button, background: '#1a237e', color: '#fff', marginRight: 0 }}
                                   onClick={() => { setSelectedTeacherIds(new Set([teacher.id])); checkGmailAndOpenModal() }}
                                   title="Enviar notificación"
-                                >✉️</button>
+                                >➤</button>
                               )}
                             </div>
                           </>
@@ -20425,7 +20425,7 @@ const App = () => {
           style={{ background: '#4caf50', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '999px', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}
           onClick={checkGmailAndOpenModal}
         >
-          ✉️ Enviar notificación
+          ➤ Enviar notificación
         </button>
         <button
           style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '999px', cursor: 'pointer', fontSize: '14px' }}
@@ -20461,7 +20461,7 @@ const App = () => {
           >✕</button>
 
           <h3 style={{ margin: '0 0 18px', fontSize: '16px', color: '#1a237e' }}>
-            ✉️ Enviar notificación por Gmail
+            ➤ Enviar notificación por Gmail
           </h3>
 
           {/* Gmail connection status */}
@@ -20910,7 +20910,7 @@ const App = () => {
               onClick={sendGmailNotification}
               disabled={!gmailConnected || emailSending}
             >
-              {emailSending ? 'Enviando...' : '✉️ Enviar'}
+              {emailSending ? 'Enviando...' : '➤ Enviar'}
             </button>
           </div>
         </div>
