@@ -656,6 +656,9 @@ const App = () => {
   const [customEmailInput, setCustomEmailInput] = useState('')
   const [emailSuccessToast, setEmailSuccessToast] = useState(null)
   const bodyEditorRef = useRef(null)
+  const selectedImgRef = useRef(null)
+  const [imgToolbar, setImgToolbar] = useState(null)  // { x, y } | null
+  const [imgCustomW, setImgCustomW] = useState('')
   const [teacherFocusTargetId, setTeacherFocusTargetId] = useState(null)
   const [teacherHighlightId, setTeacherHighlightId] = useState(null)
   const teacherAnchorRefs = useRef({})
@@ -20436,6 +20439,8 @@ const App = () => {
             #emailBodyEditor ul,#emailBodyEditor ol{padding-left:28px;margin:4px 0;}
             #emailBodyEditor li{margin:2px 0;}
             #emailBodyEditor ul ul,#emailBodyEditor ol ol,#emailBodyEditor ul ol,#emailBodyEditor ol ul{padding-left:22px;margin:2px 0;}
+            #emailBodyEditor img{cursor:pointer;max-width:100%;}
+            #emailBodyEditor img.macau-img-selected{outline:2px solid #1a237e;outline-offset:2px;}
           `}</style>
           <button
             onClick={() => { if (!emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()); setExtraEmailRecipients([]); setShowRecipientPicker(false) } }}
@@ -20693,7 +20698,73 @@ const App = () => {
                 style={{ background: '#fff', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px', color: '#666' }}
               >⊘</button>
             </div>
-            {/* Editor area */}
+            {/* Image resize floating toolbar */}
+            {imgToolbar && selectedImgRef.current && (
+              <div
+                style={{
+                  position: 'fixed', zIndex: 10100,
+                  left: imgToolbar.x, top: imgToolbar.y,
+                  transform: 'translateY(-100%)',
+                  background: '#1a237e', borderRadius: '8px',
+                  padding: '5px 8px', display: 'flex', alignItems: 'center',
+                  gap: '4px', boxShadow: '0 4px 16px rgba(0,0,0,.35)',
+                  flexWrap: 'wrap', maxWidth: '340px'
+                }}
+                onMouseDown={e => e.preventDefault()}
+              >
+                <span style={{ color: '#c5cae9', fontSize: '11px', fontWeight: 700, marginRight: '2px' }}>Ancho:</span>
+                {[['Auto', ''], ['25%', '25%'], ['33%', '33%'], ['50%', '50%'], ['75%', '75%'], ['100%', '100%']].map(([label, val]) => (
+                  <button key={label}
+                    style={{ background: (selectedImgRef.current?.style.width || '') === val ? '#fff' : 'rgba(255,255,255,.15)', color: (selectedImgRef.current?.style.width || '') === val ? '#1a237e' : '#fff', border: 'none', borderRadius: '5px', padding: '2px 7px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    onClick={() => {
+                      if (selectedImgRef.current) {
+                        selectedImgRef.current.style.width = val
+                        selectedImgRef.current.style.height = 'auto'
+                        setImgCustomW(val)
+                        setImgToolbar({ ...imgToolbar }) // force re-render
+                      }
+                    }}
+                  >{label}</button>
+                ))}
+                <input
+                  value={imgCustomW}
+                  onChange={e => setImgCustomW(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && selectedImgRef.current) {
+                      let v = imgCustomW.trim()
+                      if (v && !/[%a-z]/i.test(v)) v += 'px'
+                      selectedImgRef.current.style.width = v
+                      selectedImgRef.current.style.height = 'auto'
+                      setImgToolbar({ ...imgToolbar })
+                    }
+                  }}
+                  placeholder="px o %"
+                  style={{ width: '56px', fontSize: '11px', borderRadius: '5px', border: 'none', padding: '2px 5px', background: 'rgba(255,255,255,.9)', color: '#222' }}
+                />
+                <button
+                  style={{ background: 'rgba(255,255,255,.15)', color: '#fff', border: 'none', borderRadius: '5px', padding: '2px 7px', fontSize: '11px', cursor: 'pointer' }}
+                  onClick={() => {
+                    if (selectedImgRef.current) {
+                      let v = imgCustomW.trim()
+                      if (v && !/[%a-z]/i.test(v)) v += 'px'
+                      selectedImgRef.current.style.width = v
+                      selectedImgRef.current.style.height = 'auto'
+                      setImgToolbar({ ...imgToolbar })
+                    }
+                  }}
+                >OK</button>
+                <div style={{ width: '1px', background: 'rgba(255,255,255,.3)', height: '16px', margin: '0 2px' }} />
+                <button
+                  style={{ background: 'rgba(239,83,80,.8)', color: '#fff', border: 'none', borderRadius: '5px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
+                  onClick={() => {
+                    selectedImgRef.current?.remove()
+                    selectedImgRef.current = null
+                    setImgToolbar(null)
+                  }}
+                >🗑</button>
+              </div>
+            )}
+
             <div
               ref={bodyEditorRef}
               id="emailBodyEditor"
@@ -20708,6 +20779,22 @@ const App = () => {
                   } else {
                     document.execCommand('indent', false, null)
                   }
+                }
+                // Dismiss image toolbar on any key
+                if (imgToolbar) { setImgToolbar(null); selectedImgRef.current?.classList.remove('macau-img-selected'); selectedImgRef.current = null }
+              }}
+              onClick={e => {
+                const target = e.target
+                if (target.tagName === 'IMG') {
+                  // Deselect previous
+                  selectedImgRef.current?.classList.remove('macau-img-selected')
+                  target.classList.add('macau-img-selected')
+                  selectedImgRef.current = target
+                  setImgCustomW(target.style.width || '')
+                  const rect = target.getBoundingClientRect()
+                  setImgToolbar({ x: rect.left, y: rect.top - 4 })
+                } else {
+                  if (imgToolbar) { setImgToolbar(null); selectedImgRef.current?.classList.remove('macau-img-selected'); selectedImgRef.current = null }
                 }
               }}
               style={{
