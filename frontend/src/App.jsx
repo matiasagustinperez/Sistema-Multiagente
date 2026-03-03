@@ -4941,7 +4941,6 @@ const App = () => {
         (currentUser?.name || '')
       )
       fd.append('sender_name', _senderName)
-      console.log('[gmail_send] _senderName=', JSON.stringify(_senderName), '| emailSenderName state=', JSON.stringify(emailSenderName), '| viewRole=', viewRole, '| activeCareer=', activeCareer)
       fd.append('personal_name', currentUser?.name || '')
       fd.append('include_personal_name', includePersonalName ? 'true' : 'false')
       for (const f of emailAttachments) fd.append('attachments', f)

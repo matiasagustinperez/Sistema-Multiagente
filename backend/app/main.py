@@ -5937,16 +5937,18 @@ async def gmail_send(
     from email import encoders as _encoders
 
     def _make_from(display: str, address: str) -> str:
-        """Build a From header that handles non-ASCII display names (RFC 2047 base64)."""
+        """Build a From header that handles non-ASCII display names (RFC 2047 base64).
+        Uses maxlinelen=998 to avoid folding that can break Gmail parsing."""
         if not display:
             return address or "me"
         try:
             display.encode("ascii")
             return _formataddr((display, address))
         except UnicodeEncodeError:
-            # RFC 2047 base64 encoding — most widely supported
-            b64 = _b64.b64encode(display.encode("utf-8")).decode("ascii")
-            return f"=?utf-8?b?{b64}?= <{address}>"
+            # Force no line-folding (maxlinelen=998) so the encoded word stays on one line
+            h = _Header(charset="utf-8", maxlinelen=998)
+            h.append(display, charset="utf-8")
+            return f"{h.encode()} <{address}>"
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -5997,8 +5999,13 @@ async def gmail_send(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"No se pudo conectar con Gmail: {exc}")
 
-    # DEBUG — remove after confirming
-    print(f"[gmail_send] sender_name='{sender_name}' | sender.email='{sender.email}' | from_header='{_make_from(sender_name.strip(), sender.email) if sender_name.strip() else sender.email}'", flush=True)
+    # Get the REAL email address of the authenticated Gmail account
+    # (may differ from sender.email if they OAuth'd with macau@gmail.com etc.)
+    try:
+        _profile = service.users().getProfile(userId="me").execute()
+        _gmail_address = _profile.get("emailAddress") or sender.email or "me"
+    except Exception:
+        _gmail_address = sender.email or "me"
 
     # Parse recipient list
     try:
@@ -6085,7 +6092,7 @@ async def gmail_send(
             outer = MIMEMultipart("mixed")
             outer["to"] = recipient.email
             _from_name = (sender_name or "").strip()
-            outer["from"] = _make_from(_from_name, sender.email) if _from_name else (sender.email or "me")
+            outer["from"] = _make_from(_from_name, _gmail_address) if _from_name else _gmail_address
             outer["subject"] = subject
             html_body = _wrap_html(body, subject, personal_name if _do_personal else "") if _do_template else body
             related = MIMEMultipart("related")
@@ -6114,7 +6121,7 @@ async def gmail_send(
             outer = MIMEMultipart("mixed")
             outer["to"] = em
             _from_name = (sender_name or "").strip()
-            outer["from"] = _make_from(_from_name, sender.email) if _from_name else (sender.email or "me")
+            outer["from"] = _make_from(_from_name, _gmail_address) if _from_name else _gmail_address
             outer["subject"] = subject
             html_body = _wrap_html(body, subject, personal_name if _do_personal else "") if _do_template else body
             related = MIMEMultipart("related")
