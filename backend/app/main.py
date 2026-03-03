@@ -6015,8 +6015,7 @@ async def gmail_send(
     errors = []
 
     # Logo for inline CID attachment
-    import os as _ospath
-    _logo_path = _ospath.join(backend_dir, "..", "frontend", "Logo MACAU.png")
+    _logo_path = os.path.join(backend_dir, "..", "frontend", "Logo MACAU.png")
     _logo_bytes = None
     try:
         with open(_logo_path, "rb") as _lf:
