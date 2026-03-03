@@ -4885,9 +4885,9 @@ const App = () => {
     setRecipientsExpanded(false)
     // Initialize sender display name from role
     const autoName = viewRole === 'director'
-      ? `Dirección - ${activeCareer}`
+      ? `Dirección - ${activeCareer || ''}`
       : viewRole === 'secretario'
-      ? `Secretaría - ${activeCareer}`
+      ? `Secretaría - ${activeCareer || ''}`
       : (currentUser?.name || '')
     setEmailSenderName(autoName)
     setShowEmailModal(true)
@@ -4934,8 +4934,14 @@ const App = () => {
       const bodyHtml = bodyEditorRef.current?.innerHTML || ''
       fd.append('body', bodyHtml)
       fd.append('use_template', useSystemTemplate ? 'true' : 'false')
-      fd.append('sender_name', emailSenderName)
-      console.log('[gmail_send] emailSenderName=', JSON.stringify(emailSenderName), '| viewRole=', viewRole, '| activeCareer=', activeCareer)
+      // Guarantee sender name is never empty — recompute from role if the state was empty
+      const _senderName = emailSenderName.trim() || (
+        viewRole === 'director' ? `Dirección - ${activeCareer || ''}` :
+        viewRole === 'secretario' ? `Secretaría - ${activeCareer || ''}` :
+        (currentUser?.name || '')
+      )
+      fd.append('sender_name', _senderName)
+      console.log('[gmail_send] _senderName=', JSON.stringify(_senderName), '| emailSenderName state=', JSON.stringify(emailSenderName), '| viewRole=', viewRole, '| activeCareer=', activeCareer)
       fd.append('personal_name', currentUser?.name || '')
       fd.append('include_personal_name', includePersonalName ? 'true' : 'false')
       for (const f of emailAttachments) fd.append('attachments', f)
