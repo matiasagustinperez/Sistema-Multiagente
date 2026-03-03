@@ -1289,6 +1289,13 @@ const App = () => {
     setExtraEmailRecipients([])
     setShowEmailModal(false)
     setShowRecipientPicker(false)
+    // Keep sender name in sync with current role/career
+    const autoName = viewRole === 'director'
+      ? `Dirección - ${activeCareer || ''}`
+      : viewRole === 'secretario'
+      ? `Secretaría - ${activeCareer || ''}`
+      : (currentUser?.name || '')
+    setEmailSenderName(autoName)
   }, [currentUser?.id, viewRole, activeCareer])
 
   useEffect(() => {
