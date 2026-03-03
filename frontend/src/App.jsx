@@ -659,6 +659,8 @@ const App = () => {
   const selectedImgRef = useRef(null)
   const [imgToolbar, setImgToolbar] = useState(null)  // { x, y } | null
   const [imgCustomW, setImgCustomW] = useState('')
+  const [emailSenderName, setEmailSenderName] = useState('')
+  const [includePersonalName, setIncludePersonalName] = useState(true)
   const [teacherFocusTargetId, setTeacherFocusTargetId] = useState(null)
   const [teacherHighlightId, setTeacherHighlightId] = useState(null)
   const teacherAnchorRefs = useRef({})
@@ -4872,6 +4874,13 @@ const App = () => {
     setEmailForm({ subject: '', body: '' })
     setEmailAttachments([])
     setRecipientsExpanded(false)
+    // Initialize sender display name from role
+    const autoName = viewRole === 'director'
+      ? `Dirección - ${activeCareer}`
+      : viewRole === 'secretario'
+      ? `Secretaría - ${activeCareer}`
+      : (currentUser?.name || '')
+    setEmailSenderName(autoName)
     setShowEmailModal(true)
     setTimeout(() => { if (bodyEditorRef.current) bodyEditorRef.current.innerHTML = '' }, 50)
   }
@@ -4916,12 +4925,9 @@ const App = () => {
       const bodyHtml = bodyEditorRef.current?.innerHTML || ''
       fd.append('body', bodyHtml)
       fd.append('use_template', useSystemTemplate ? 'true' : 'false')
-      const senderName = viewRole === 'director'
-        ? `Dirección - ${activeCareer}`
-        : viewRole === 'secretario'
-        ? `Secretaría - ${activeCareer}`
-        : (currentUser?.name || '')
-      fd.append('sender_name', senderName)
+      fd.append('sender_name', emailSenderName)
+      fd.append('personal_name', currentUser?.name || '')
+      fd.append('include_personal_name', includePersonalName ? 'true' : 'false')
       for (const f of emailAttachments) fd.append('attachments', f)
       const res = await fetch(`${API_BASE_URL}/notifications/gmail/send`, {
         method: 'POST',
@@ -20838,21 +20844,49 @@ const App = () => {
             </div>
           )}
 
-          {/* Template toggle */}
-          <div style={{ marginBottom: '16px', background: '#f8f9fa', borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: emailSending ? 'default' : 'pointer', fontSize: '13px', color: '#444', userSelect: 'none' }}>
+          {/* Template toggle + sender options */}
+          <div style={{ marginBottom: '16px', background: '#f8f9fa', borderRadius: '8px', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {/* Row 1: template toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: emailSending ? 'default' : 'pointer', fontSize: '13px', color: '#444', userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={useSystemTemplate}
+                  onChange={e => setUseSystemTemplate(e.target.checked)}
+                  disabled={emailSending}
+                  style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#1a237e' }}
+                />
+                <span style={{ fontWeight: 600 }}>Enviar con diseño del sistema MACAU</span>
+              </label>
+              <span style={{ fontSize: '11px', color: '#999' }}>
+                {useSystemTemplate ? '(encabezado, fondo y firma institucional)' : '(mensaje tal cual, sin diseño adicional)'}
+              </span>
+            </div>
+            {/* Row 2: editable sender name */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#555', whiteSpace: 'nowrap' }}>Remitente:</span>
               <input
-                type="checkbox"
-                checked={useSystemTemplate}
-                onChange={e => setUseSystemTemplate(e.target.checked)}
+                style={{ ...styles.input, marginBottom: 0, fontSize: '12px', flex: 1, minWidth: '180px' }}
+                value={emailSenderName}
+                onChange={e => setEmailSenderName(e.target.value)}
                 disabled={emailSending}
-                style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#1a237e' }}
+                placeholder="Nombre que verán los destinatarios"
               />
-              <span style={{ fontWeight: 600 }}>Enviar con diseño del sistema MACAU</span>
-            </label>
-            <span style={{ fontSize: '11px', color: '#999' }}>
-              {useSystemTemplate ? '(encabezado, fondo y firma institucional)' : '(mensaje tal cual, sin diseño adicional)'}
-            </span>
+            </div>
+            {/* Row 3: include personal name toggle */}
+            {useSystemTemplate && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: emailSending ? 'default' : 'pointer', fontSize: '13px', color: '#444', userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={includePersonalName}
+                  onChange={e => setIncludePersonalName(e.target.checked)}
+                  disabled={emailSending}
+                  style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#1a237e' }}
+                />
+                <span>Incluir nombre personal al pie del correo</span>
+                {currentUser?.name && <span style={{ fontSize: '11px', color: '#999' }}>(&ldquo;Enviado por: {currentUser.name}&rdquo;)</span>}
+              </label>
+            )}
           </div>
 
           {/* Actions */}

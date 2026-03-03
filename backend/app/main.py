@@ -5921,6 +5921,8 @@ async def gmail_send(
     sender_name: str = Form(""),
     extra_recipients: str = Form(default="[]"),
     use_template: str = Form(default="true"),
+    personal_name: str = Form(default=""),
+    include_personal_name: str = Form(default="true"),
     attachments: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
@@ -5997,6 +5999,7 @@ async def gmail_send(
         extra_emails = []
 
     _do_template = (use_template.strip().lower() not in ("false", "0", "no"))
+    _do_personal = (include_personal_name.strip().lower() not in ("false", "0", "no")) and bool((personal_name or "").strip())
 
     recipients = db.query(models.Teacher).filter(
         models.Teacher.id.in_(ids),
@@ -6023,11 +6026,14 @@ async def gmail_send(
     except Exception:
         pass
 
-    def _wrap_html(raw_body: str, _subject: str = "") -> str:
+    def _wrap_html(raw_body: str, _subject: str = "", _personal: str = "") -> str:
         _img_tag = (
             '<img src="cid:macau_logo" alt="MACAU"'
             ' style="height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;"/>'
         ) if _logo_bytes else ''
+        _personal_line = (
+            f'<div style="color:#555;font-size:12px;margin-top:8px;">Enviado por: <strong>{_personal}</strong></div>'
+        ) if _personal else ''
         return (
             '<!DOCTYPE html>'
             '<html lang="es"><head><meta charset="utf-8">'
@@ -6052,6 +6058,7 @@ async def gmail_send(
             + _img_tag +
             '<div style="color:#555;font-size:13px;margin-top:4px;">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>'
             '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+            + _personal_line +
             '</td></tr>'
             '</table></td></tr></table>'
             '</body></html>'
@@ -6064,7 +6071,7 @@ async def gmail_send(
             _from_name = (sender_name or "").strip()
             outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
             outer["subject"] = subject
-            html_body = _wrap_html(body, subject) if _do_template else body
+            html_body = _wrap_html(body, subject, personal_name if _do_personal else "") if _do_template else body
             related = MIMEMultipart("related")
             related.attach(MIMEText(html_body, "html", "utf-8"))
             if _do_template and _logo_bytes:
@@ -6093,7 +6100,7 @@ async def gmail_send(
             _from_name = (sender_name or "").strip()
             outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
             outer["subject"] = subject
-            html_body = _wrap_html(body, subject) if _do_template else body
+            html_body = _wrap_html(body, subject, personal_name if _do_personal else "") if _do_template else body
             related = MIMEMultipart("related")
             related.attach(MIMEText(html_body, "html", "utf-8"))
             if _do_template and _logo_bytes:
