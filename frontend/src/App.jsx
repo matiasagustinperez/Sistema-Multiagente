@@ -20375,7 +20375,7 @@ const App = () => {
     </div>
 
     {/* ── Floating notification bar ── */}
-    {canNotify && selectedTeacherIds.size > 0 && (
+    {canNotify && selectedTeacherIds.size > 0 && activeMenu === 'docentes' && (
       <div style={{
         position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
         background: '#1a237e', color: '#fff', padding: '12px 24px', borderRadius: '999px',
@@ -20405,7 +20405,7 @@ const App = () => {
       <div style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
-      }} onClick={(e) => { if (e.target === e.currentTarget && !emailSending) setShowEmailModal(false) }}>
+      }} onClick={(e) => { if (e.target === e.currentTarget && !emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()) } }}>
         <div style={{
           background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '820px',
           padding: '28px 32px', boxShadow: '0 12px 48px rgba(0,0,0,0.25)', position: 'relative',
@@ -20418,7 +20418,7 @@ const App = () => {
             #emailBodyEditor ul ul,#emailBodyEditor ol ol,#emailBodyEditor ul ol,#emailBodyEditor ol ul{padding-left:22px;margin:2px 0;}
           `}</style>
           <button
-            onClick={() => { if (!emailSending) setShowEmailModal(false) }}
+            onClick={() => { if (!emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()) } }}
             style={{ position: 'absolute', top: '14px', right: '16px', background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#666' }}
           >✕</button>
 
@@ -20644,7 +20644,7 @@ const App = () => {
           <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
             <button
               style={{ ...styles.button, background: '#78909c' }}
-              onClick={() => { if (!emailSending) setShowEmailModal(false) }}
+              onClick={() => { if (!emailSending) { setShowEmailModal(false); setSelectedTeacherIds(new Set()) } }}
               disabled={emailSending}
             >
               Cancelar
