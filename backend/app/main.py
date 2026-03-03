@@ -6023,7 +6023,7 @@ async def gmail_send(
     except Exception:
         pass
 
-    def _wrap_html(raw_body: str) -> str:
+    def _wrap_html(raw_body: str, _subject: str = "") -> str:
         _img_tag = (
             '<img src="cid:macau_logo" alt="MACAU"'
             ' style="height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;"/>'
@@ -6041,8 +6041,9 @@ async def gmail_send(
             '<tr><td align="center">'
             '<table width="83%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10);">'
             '<tr><td style="background:#1a237e;padding:22px 36px;">'
-            '<div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:1px;">MACAU</div>'
-            '<div style="color:#c5cae9;font-size:12px;margin-top:3px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+            '<div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:0.5px;">'
+            + (_subject or 'Notificaci&oacute;n') +
+            '</div>'
             '</td></tr>'
             '<tr><td style="padding:32px 36px;color:#222;font-size:14px;line-height:1.75;">'
             + raw_body +
@@ -6063,7 +6064,7 @@ async def gmail_send(
             _from_name = (sender_name or "").strip()
             outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
             outer["subject"] = subject
-            html_body = _wrap_html(body) if _do_template else body
+            html_body = _wrap_html(body, subject) if _do_template else body
             related = MIMEMultipart("related")
             related.attach(MIMEText(html_body, "html", "utf-8"))
             if _do_template and _logo_bytes:
@@ -6092,7 +6093,7 @@ async def gmail_send(
             _from_name = (sender_name or "").strip()
             outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
             outer["subject"] = subject
-            html_body = _wrap_html(body) if _do_template else body
+            html_body = _wrap_html(body, subject) if _do_template else body
             related = MIMEMultipart("related")
             related.attach(MIMEText(html_body, "html", "utf-8"))
             if _do_template and _logo_bytes:
