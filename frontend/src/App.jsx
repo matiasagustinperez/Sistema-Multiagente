@@ -901,6 +901,7 @@ const App = () => {
   const [adminUserFormSaving, setAdminUserFormSaving] = useState(false)
   const [selectedUserIds, setSelectedUserIds] = useState(new Set())
   const [resetPasswordModal, setResetPasswordModal] = useState(null) // null | { userIds: Set, newPw: '', confirmPw: '', saving: false, error: '' }
+  const [notifyOnReset, setNotifyOnReset] = useState(true)
   const [selfChangePwModal, setSelfChangePwModal] = useState(null)   // null | { currentPw: '', newPw: '', confirmPw: '', saving: false, error: '' }
   // Careers (DB-backed, fallback to CAREER_FALLBACK)
   const [careerOptions, setCareerOptions] = useState(CAREER_FALLBACK)
@@ -15928,6 +15929,25 @@ const App = () => {
                 </div>
               </div>
             )}
+            {/* Notify toggle */}
+            {resetPasswordModal?.mode && (
+              <div style={{ padding: '0 18px 12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={notifyOnReset}
+                    onChange={e => setNotifyOnReset(e.target.checked)}
+                    style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#1565c0' }}
+                  />
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#1a3d5c' }}>Notificar al usuario por correo</span>
+                </label>
+                {notifyOnReset && (
+                  <div style={{ marginTop: '6px', background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: '6px', padding: '7px 10px', fontSize: '11px', color: '#2e7d32', lineHeight: 1.5 }}>
+                    Se enviará un correo con la nueva clave usando el Gmail del administrador.
+                  </div>
+                )}
+              </div>
+            )}
             {/* Error */}
             {resetPasswordModal?.error && (
               <div style={{ padding: '0 18px 10px' }}>
@@ -15955,8 +15975,8 @@ const App = () => {
                   setResetPasswordModal(p => ({ ...p, saving: true, error: '' }))
                   try {
                     const body = mode === 'email'
-                      ? { user_ids: Array.from(selectedUserIds), use_email_as_password: true, new_password: '' }
-                      : { user_ids: Array.from(selectedUserIds), new_password: newPw, use_email_as_password: false }
+                      ? { user_ids: Array.from(selectedUserIds), use_email_as_password: true, new_password: '', notify: notifyOnReset, system_url: window.location.origin }
+                      : { user_ids: Array.from(selectedUserIds), new_password: newPw, use_email_as_password: false, notify: notifyOnReset, system_url: window.location.origin }
                     const res = await fetch(`${API_BASE_URL}/auth/reset-passwords`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
@@ -15967,7 +15987,10 @@ const App = () => {
                     setResetPasswordModal(null)
                     setSelectedUserIds(new Set())
                     fetchAdminUsers()
-                    setStatusMsg(`Contraseña reseteada para ${data.count} usuario${data.count !== 1 ? 's' : ''}.`)
+                    const notifMsg = notifyOnReset
+                      ? (data.notified?.length ? ` Notificados por correo: ${data.notified.length}.` : data.notify_error ? ` (Sin notificar: ${data.notify_error})` : '')
+                      : ''
+                    setStatusMsg(`Contraseña reseteada para ${data.count} usuario${data.count !== 1 ? 's' : ''}.${notifMsg}`)
                     setStatusType('success')
                   } catch (err) {
                     setResetPasswordModal(p => ({ ...p, saving: false, error: err.message }))

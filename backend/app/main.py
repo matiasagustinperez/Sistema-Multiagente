@@ -144,6 +144,8 @@ class ResetPasswordsRequest(BaseModel):
     user_ids: list[int]
     new_password: str = ""
     use_email_as_password: bool = False
+    notify: bool = False
+    system_url: str = ""
 
 
 
@@ -5745,7 +5747,142 @@ def reset_passwords(request: Request, payload: ResetPasswordsRequest, db: Sessio
             t.password_reset_at = datetime.now(timezone.utc)
             updated.append(uid)
     db.commit()
-    return {"updated": updated, "count": len(updated)}
+
+    base_result = {"updated": updated, "count": len(updated)}
+
+    # ── Optional email notification ──────────────────────────────────────
+    if not payload.notify or not updated:
+        return base_result
+
+    import json as _rj, base64 as _rb64
+    from email.mime.multipart import MIMEMultipart as _RMMP
+    from email.mime.text import MIMEText as _RMT
+    from email.mime.image import MIMEImage as _RMIMG
+    from email.utils import formataddr as _rfa
+    from email.header import Header as _RH
+
+    admin = db.query(models.Teacher).filter(
+        models.Teacher.is_admin == True,
+        models.Teacher.gmail_refresh_token != None,
+    ).first()
+    if not admin:
+        return {**base_result, "notify_error": "El administrador no tiene Gmail vinculado."}
+
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build as _gbuild2
+        _cid = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+        _csec = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+        _cspath = os.path.join(backend_dir, "secrets", "oauth-client.json")
+        if os.path.exists(_cspath):
+            try:
+                with open(_cspath) as _f2:
+                    _sec2 = _rj.load(_f2)
+                _e2 = _sec2.get("installed") or _sec2.get("web") or {}
+                _cid = _e2.get("client_id", _cid)
+                _csec = _e2.get("client_secret", _csec)
+            except Exception:
+                pass
+        _creds2 = Credentials(
+            token=None, refresh_token=admin.gmail_refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=_cid, client_secret=_csec, scopes=_GMAIL_SCOPES,
+        )
+        _svc2 = _gbuild2("gmail", "v1", credentials=_creds2)
+    except Exception as _exc2:
+        return {**base_result, "notify_error": f"No se pudo conectar con Gmail: {_exc2}"}
+
+    # Real Gmail address
+    try:
+        _gaddr2 = _svc2.users().getProfile(userId="me").execute().get("emailAddress") or admin.email or "me"
+    except Exception:
+        _gaddr2 = admin.email or "me"
+
+    # Patch sendAs display name to "Administración MACAU"
+    _admin_dn = "Administraci\u00f3n MACAU"
+    try:
+        _svc2.users().settings().sendAs().patch(
+            userId="me", sendAsEmail=_gaddr2,
+            body={"displayName": _admin_dn},
+        ).execute()
+    except Exception:
+        pass
+
+    # Logo
+    _logo_path2 = os.path.join(backend_dir, "..", "frontend", "Logo MACAU.png")
+    _logo_bytes2 = None
+    try:
+        with open(_logo_path2, "rb") as _lf2:
+            _logo_bytes2 = _lf2.read()
+    except Exception:
+        pass
+
+    _sys_url = (payload.system_url or "http://localhost:5173").rstrip("/")
+    _notify_sent = []
+    _notify_errors = []
+
+    def _make_from_admin(display, address):
+        try:
+            display.encode("ascii")
+            return _rfa((display, address))
+        except UnicodeEncodeError:
+            _h = _RH(charset="utf-8", maxlinelen=998)
+            _h.append(display, charset="utf-8")
+            return f"{_h.encode()} <{address}>"
+
+    for uid in updated:
+        _t = db.query(models.Teacher).filter(models.Teacher.id == uid).first()
+        if not _t or not _t.email:
+            continue
+        _new_pw = _t.email if payload.use_email_as_password else payload.new_password
+        _img_tag = '<img src="cid:macau_logo" alt="MACAU" style="height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;"/>' if _logo_bytes2 else ""
+        _html = (
+            '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'
+            '<style>body{margin:0;padding:0;background:#f0f4f8;font-family:Arial,Helvetica,sans-serif;}</style>'
+            '</head><body style="margin:0;padding:0;background:#f0f4f8;">'
+            '<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:32px 0;">'
+            '<tr><td align="center">'
+            '<table width="83%" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10);">'
+            '<tr><td style="background:#1a237e;padding:22px 36px;">'
+            '<div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:0.5px;">Reinicio de Clave</div>'
+            '</td></tr>'
+            '<tr><td style="padding:32px 36px;color:#222;font-size:14px;line-height:1.75;">'
+            f'<p>Hola <strong>{_t.name}</strong>,</p>'
+            f'<p>Te informamos que tu clave para el usuario <strong>{_t.email}</strong> ha sido reseteada.</p>'
+            f'<p>Tu nueva contrase&ntilde;a es: <strong style="font-size:16px;letter-spacing:2px;color:#1a237e;background:#e8eaf6;padding:4px 12px;border-radius:6px;">{_new_pw}</strong></p>'
+            f'<p>Para ingresar al sistema hac&eacute; clic en el siguiente enlace:</p>'
+            f'<p><a href="{_sys_url}" style="display:inline-block;background:#1a237e;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Ingresar al Sistema MACAU</a></p>'
+            '<p style="color:#888;font-size:12px;margin-top:16px;">Si no solicitaste este cambio, contact&aacute; al administrador del sistema.</p>'
+            '</td></tr>'
+            '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
+            + _img_tag +
+            '<div style="color:#555;font-size:13px;margin-top:4px;">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>'
+            '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+            '<div style="color:#555;font-size:12px;margin-top:8px;">Enviado por: <strong>ADMINISTRADOR</strong></div>'
+            '</td></tr>'
+            '</table></td></tr></table>'
+            '</body></html>'
+        )
+        try:
+            _outer = _RMMP("mixed")
+            _outer["to"] = _t.email
+            _outer["from"] = _make_from_admin(_admin_dn, _gaddr2)
+            _outer["subject"] = "Reinicio de Clave \u2014 Sistema MACAU"
+            _related = _RMMP("related")
+            _related.attach(_RMT(_html, "html", "utf-8"))
+            if _logo_bytes2:
+                _lp = _RMIMG(_logo_bytes2, _subtype="png")
+                _lp.add_header("Content-ID", "<macau_logo>")
+                _lp.add_header("Content-Disposition", "inline", filename="macau_logo.png")
+                _related.attach(_lp)
+            _outer.attach(_related)
+            _raw = _rb64.urlsafe_b64encode(_outer.as_bytes()).decode()
+            _svc2.users().messages().send(userId="me", body={"raw": _raw}).execute()
+            _notify_sent.append(_t.email)
+        except Exception as _ne:
+            _notify_errors.append({"email": _t.email, "error": str(_ne)})
+
+    return {**base_result, "notified": _notify_sent, "notify_errors": _notify_errors}
 
 
 class ChangeMyPasswordRequest(BaseModel):
