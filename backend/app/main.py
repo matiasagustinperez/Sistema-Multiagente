@@ -5779,6 +5779,7 @@ def change_my_password(request: Request, payload: ChangeMyPasswordRequest, db: S
 _GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.settings.basic",
+    "https://www.googleapis.com/auth/gmail.metadata",
 ]
 _GMAIL_REDIRECT_URI = "http://127.0.0.1:8011/notifications/gmail/callback"
 
@@ -6007,8 +6008,10 @@ async def gmail_send(
     try:
         _profile = service.users().getProfile(userId="me").execute()
         _gmail_address = _profile.get("emailAddress") or sender.email or "me"
-    except Exception:
+        print(f"[GMAIL] getProfile OK -> {_gmail_address!r}", flush=True)
+    except Exception as _gpe:
         _gmail_address = sender.email or "me"
+        print(f"[GMAIL] getProfile FAILED ({_gpe}) -> falling back to sender.email={_gmail_address!r}", flush=True)
 
     print(f"[GMAIL] real_address={_gmail_address!r}  sender_name param={sender_name!r}  _from_name will be={((sender_name or '').strip())!r}", flush=True)
 
