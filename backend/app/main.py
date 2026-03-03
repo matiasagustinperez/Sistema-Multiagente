@@ -5933,7 +5933,19 @@ async def gmail_send(
     from email.mime.base import MIMEBase
     from email.mime.image import MIMEImage
     from email.utils import formataddr as _formataddr
+    from email.header import Header as _Header
     from email import encoders as _encoders
+
+    def _make_from(display: str, address: str) -> str:
+        """Build a From header that handles non-ASCII display names (RFC 2047)."""
+        if not display:
+            return address
+        try:
+            display.encode("ascii")
+            return _formataddr((display, address))
+        except UnicodeEncodeError:
+            encoded = _Header(display, "utf-8").encode()
+            return f"{encoded} <{address}>"
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -6069,7 +6081,7 @@ async def gmail_send(
             outer = MIMEMultipart("mixed")
             outer["to"] = recipient.email
             _from_name = (sender_name or "").strip()
-            outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
+            outer["from"] = _make_from(_from_name, sender.email) if _from_name else (sender.email or "me")
             outer["subject"] = subject
             html_body = _wrap_html(body, subject, personal_name if _do_personal else "") if _do_template else body
             related = MIMEMultipart("related")
@@ -6098,7 +6110,7 @@ async def gmail_send(
             outer = MIMEMultipart("mixed")
             outer["to"] = em
             _from_name = (sender_name or "").strip()
-            outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
+            outer["from"] = _make_from(_from_name, sender.email) if _from_name else (sender.email or "me")
             outer["subject"] = subject
             html_body = _wrap_html(body, subject, personal_name if _do_personal else "") if _do_template else body
             related = MIMEMultipart("related")
