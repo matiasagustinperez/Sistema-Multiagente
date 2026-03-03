@@ -1273,6 +1273,12 @@ const App = () => {
     localStorage.setItem('teacherViewMode', teacherViewMode)
   }, [teacherViewMode])
 
+  // Clear teacher selection whenever context changes (logout, role switch, career switch)
+  useEffect(() => {
+    setSelectedTeacherIds(new Set())
+    setShowEmailModal(false)
+  }, [currentUser?.id, viewRole, activeCareer])
+
   useEffect(() => {
     if (!teacherFocusTargetId) {
       return
@@ -20524,6 +20530,27 @@ const App = () => {
                   style={{ background: '#fff', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '13px', minWidth: '28px' }}
                 >{label}</button>
               ))}
+              <div style={{ width: '1px', background: '#ddd', height: '20px', margin: '0 2px' }} />
+              {/* Alignment */}
+              {[{cmd:'justifyLeft',label:'⬤≡',title:'Izquierda'},{cmd:'justifyCenter',label:'≡≡',title:'Centrar'},{cmd:'justifyRight',label:'≡⬤',title:'Derecha'},{cmd:'justifyFull',label:'⬛',title:'Justificar'}].map(({cmd,label,title}) => (
+                <button key={cmd} type="button" title={title}
+                  onMouseDown={e => { e.preventDefault(); document.execCommand(cmd, false, null) }}
+                  disabled={emailSending}
+                  style={{ background: '#fff', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px' }}
+                >{label}</button>
+              ))}
+              <div style={{ width: '1px', background: '#ddd', height: '20px', margin: '0 2px' }} />
+              {/* Lists */}
+              <button type="button" title="Lista con viñetas"
+                onMouseDown={e => { e.preventDefault(); document.execCommand('insertUnorderedList', false, null) }}
+                disabled={emailSending}
+                style={{ background: '#fff', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 7px', cursor: 'pointer', fontSize: '13px' }}
+              >• —</button>
+              <button type="button" title="Lista numerada"
+                onMouseDown={e => { e.preventDefault(); document.execCommand('insertOrderedList', false, null) }}
+                disabled={emailSending}
+                style={{ background: '#fff', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 7px', cursor: 'pointer', fontSize: '13px' }}
+              >1.</button>
               <div style={{ width: '1px', background: '#ddd', height: '20px', margin: '0 2px' }} />
               <select title="Tamaño de fuente" disabled={emailSending} defaultValue=""
                 onChange={e => { if (e.target.value) { document.execCommand('fontSize', false, e.target.value); e.target.value = ''; bodyEditorRef.current?.focus() } }}

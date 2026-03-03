@@ -5992,22 +5992,65 @@ async def gmail_send(
 
     sent = []
     errors = []
+
+    # Logo for inline CID attachment
+    import os as _ospath
+    _logo_path = _ospath.join(backend_dir, "..", "frontend", "Logo MACAU.png")
+    _logo_bytes = None
+    try:
+        with open(_logo_path, "rb") as _lf:
+            _logo_bytes = _lf.read()
+    except Exception:
+        pass
+
+    def _wrap_html(raw_body: str) -> str:
+        return f"""<!DOCTYPE html>
+<html lang=\"es\"><head><meta charset=\"utf-8\"></head>
+<body style=\"margin:0;padding:0;background:#f0f4f8;font-family:Arial,Helvetica,sans-serif;\">
+<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f0f4f8;padding:32px 0;\"><tr><td align=\"center\">
+<table width=\"600\" cellpadding=\"0\" cellspacing=\"0\"
+  style=\"background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);\">
+  <tr><td style=\"background:#1a237e;padding:22px 36px;\">
+    <div style=\"color:#ffffff;font-size:20px;font-weight:700;letter-spacing:1px;\">MACAU</div>
+    <div style=\"color:#c5cae9;font-size:12px;margin-top:3px;\">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>
+  </td></tr>
+  <tr><td style=\"padding:32px 36px;color:#222222;font-size:14px;line-height:1.75;\">
+    {raw_body}
+  </td></tr>
+  <tr><td style=\"background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;\">
+    {'<img src=\"cid:macau_logo\" alt=\"MACAU\" style=\"height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;\"/>' if _logo_bytes else ''}
+    <div style=\"color:#555;font-size:13px;margin-top:4px;\">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>
+    <div style=\"color:#aaa;font-size:11px;margin-top:4px;\">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
+
     for recipient in recipients:
         try:
-            msg = MIMEMultipart()
-            msg["to"] = recipient.email
+            from email.mime.image import MIMEImage
+            outer = MIMEMultipart("mixed")
+            outer["to"] = recipient.email
             from email.utils import formataddr as _formataddr
             _from_name = (sender_name or "").strip()
-            msg["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
-            msg["subject"] = subject
-            msg.attach(MIMEText(body, "html", "utf-8"))
+            outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
+            outer["subject"] = subject
+            # HTML with optional inline logo
+            related = MIMEMultipart("related")
+            related.attach(MIMEText(_wrap_html(body), "html", "utf-8"))
+            if _logo_bytes:
+                logo_part = MIMEImage(_logo_bytes, _subtype="png")
+                logo_part.add_header("Content-ID", "<macau_logo>")
+                logo_part.add_header("Content-Disposition", "inline", filename="macau_logo.png")
+                related.attach(logo_part)
+            outer.attach(related)
             for fname, ftype, fcontent in attachment_data:
                 part = MIMEBase(*ftype.split("/", 1) if "/" in ftype else ("application", "octet-stream"))
                 part.set_payload(fcontent)
                 _encoders.encode_base64(part)
                 part.add_header("Content-Disposition", "attachment", filename=fname)
-                msg.attach(part)
-            raw = _b64.urlsafe_b64encode(msg.as_bytes()).decode()
+                outer.attach(part)
+            raw = _b64.urlsafe_b64encode(outer.as_bytes()).decode()
             service.users().messages().send(userId="me", body={"raw": raw}).execute()
             sent.append(recipient.email)
         except Exception as exc:
