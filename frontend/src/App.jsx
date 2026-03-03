@@ -4848,7 +4848,7 @@ const App = () => {
   const checkGmailAndOpenModal = async () => {
     try {
       const token = localStorage.getItem('auth_token')
-      const res = await fetch('http://127.0.0.1:8011/notifications/gmail/status', {
+      const res = await fetch(`${API_BASE_URL}/notifications/gmail/status`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       if (res.ok) {
@@ -4869,7 +4869,7 @@ const App = () => {
   const connectGmail = async () => {
     try {
       const token = localStorage.getItem('auth_token')
-      const res = await fetch('http://127.0.0.1:8011/notifications/gmail/authorize', {
+      const res = await fetch(`${API_BASE_URL}/notifications/gmail/authorize`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       if (!res.ok) throw new Error('No se pudo obtener URL de autorización')
@@ -4879,7 +4879,7 @@ const App = () => {
         if (popup?.closed) {
           clearInterval(timer)
           try {
-            const r2 = await fetch('http://127.0.0.1:8011/notifications/gmail/status', {
+            const r2 = await fetch(`${API_BASE_URL}/notifications/gmail/status`, {
               headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
             })
             if (r2.ok) {
@@ -4911,7 +4911,7 @@ const App = () => {
         : (currentUser?.name || '')
       fd.append('sender_name', senderName)
       for (const f of emailAttachments) fd.append('attachments', f)
-      const res = await fetch('http://127.0.0.1:8011/notifications/gmail/send', {
+      const res = await fetch(`${API_BASE_URL}/notifications/gmail/send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: fd
@@ -20411,7 +20411,12 @@ const App = () => {
           padding: '28px 32px', boxShadow: '0 12px 48px rgba(0,0,0,0.25)', position: 'relative',
           maxHeight: '92vh', overflowY: 'auto'
         }}>
-          <style>{`#emailBodyEditor:empty::before{content:attr(data-placeholder);color:#bbb;pointer-events:none;display:block;}`}</style>
+          <style>{`
+            #emailBodyEditor:empty::before{content:attr(data-placeholder);color:#bbb;pointer-events:none;display:block;}
+            #emailBodyEditor ul,#emailBodyEditor ol{padding-left:28px;margin:4px 0;}
+            #emailBodyEditor li{margin:2px 0;}
+            #emailBodyEditor ul ul,#emailBodyEditor ol ol,#emailBodyEditor ul ol,#emailBodyEditor ol ul{padding-left:22px;margin:2px 0;}
+          `}</style>
           <button
             onClick={() => { if (!emailSending) setShowEmailModal(false) }}
             style={{ position: 'absolute', top: '14px', right: '16px', background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#666' }}
@@ -20584,6 +20589,16 @@ const App = () => {
               contentEditable={!emailSending}
               suppressContentEditableWarning
               data-placeholder="Escribí tu mensaje aquí..."
+              onKeyDown={e => {
+                if (e.key === 'Tab') {
+                  e.preventDefault()
+                  if (e.shiftKey) {
+                    document.execCommand('outdent', false, null)
+                  } else {
+                    document.execCommand('indent', false, null)
+                  }
+                }
+              }}
               style={{
                 minHeight: '160px', border: '1px solid #dee2e6', borderRadius: '0 0 6px 6px',
                 padding: '10px 14px', fontSize: '14px', lineHeight: 1.7,

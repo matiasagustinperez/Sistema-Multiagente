@@ -6004,27 +6004,37 @@ async def gmail_send(
         pass
 
     def _wrap_html(raw_body: str) -> str:
-        return f"""<!DOCTYPE html>
-<html lang=\"es\"><head><meta charset=\"utf-8\"></head>
-<body style=\"margin:0;padding:0;background:#f0f4f8;font-family:Arial,Helvetica,sans-serif;\">
-<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f0f4f8;padding:32px 0;\"><tr><td align=\"center\">
-<table width=\"600\" cellpadding=\"0\" cellspacing=\"0\"
-  style=\"background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);\">
-  <tr><td style=\"background:#1a237e;padding:22px 36px;\">
-    <div style=\"color:#ffffff;font-size:20px;font-weight:700;letter-spacing:1px;\">MACAU</div>
-    <div style=\"color:#c5cae9;font-size:12px;margin-top:3px;\">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>
-  </td></tr>
-  <tr><td style=\"padding:32px 36px;color:#222222;font-size:14px;line-height:1.75;\">
-    {raw_body}
-  </td></tr>
-  <tr><td style=\"background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;\">
-    {'<img src=\"cid:macau_logo\" alt=\"MACAU\" style=\"height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;\"/>' if _logo_bytes else ''}
-    <div style=\"color:#555;font-size:13px;margin-top:4px;\">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>
-    <div style=\"color:#aaa;font-size:11px;margin-top:4px;\">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>
-  </td></tr>
-</table>
-</td></tr></table>
-</body></html>"""
+        _img_tag = (
+            '<img src="cid:macau_logo" alt="MACAU"'
+            ' style="height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;"/>'
+        ) if _logo_bytes else ''
+        return (
+            '<!DOCTYPE html>'
+            '<html lang="es"><head><meta charset="utf-8">'
+            '<style>'
+            'body{margin:0;padding:0;background:#f0f4f8;font-family:Arial,Helvetica,sans-serif;}'
+            'ul,ol{padding-left:24px;margin:8px 0;}'
+            'li{margin:2px 0;}'
+            '</style></head>'
+            '<body style="margin:0;padding:0;background:#f0f4f8;">'
+            '<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:32px 0;">'
+            '<tr><td align="center">'
+            '<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10);">'
+            '<tr><td style="background:#1a237e;padding:22px 36px;">'
+            '<div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:1px;">MACAU</div>'
+            '<div style="color:#c5cae9;font-size:12px;margin-top:3px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+            '</td></tr>'
+            '<tr><td style="padding:32px 36px;color:#222;font-size:14px;line-height:1.75;">'
+            + raw_body +
+            '</td></tr>'
+            '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
+            + _img_tag +
+            '<div style="color:#555;font-size:13px;margin-top:4px;">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>'
+            '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+            '</td></tr>'
+            '</table></td></tr></table>'
+            '</body></html>'
+        )
 
     for recipient in recipients:
         try:
