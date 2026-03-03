@@ -5929,6 +5929,8 @@ async def gmail_send(
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
     from email.mime.base import MIMEBase
+    from email.mime.image import MIMEImage
+    from email.utils import formataddr as _formataddr
     from email import encoders as _encoders
 
     auth_header = request.headers.get("Authorization", "")
@@ -6057,10 +6059,8 @@ async def gmail_send(
 
     for recipient in recipients:
         try:
-            from email.mime.image import MIMEImage
             outer = MIMEMultipart("mixed")
             outer["to"] = recipient.email
-            from email.utils import formataddr as _formataddr
             _from_name = (sender_name or "").strip()
             outer["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
             outer["subject"] = subject
@@ -6088,7 +6088,6 @@ async def gmail_send(
     # Send to extra (manual) email recipients
     for em in extra_emails:
         try:
-            from email.mime.image import MIMEImage
             outer = MIMEMultipart("mixed")
             outer["to"] = em
             _from_name = (sender_name or "").strip()
