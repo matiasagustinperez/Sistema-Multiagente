@@ -5911,6 +5911,7 @@ async def gmail_send(
     teacher_ids: str = Form(...),
     subject: str = Form(...),
     body: str = Form(...),
+    sender_name: str = Form(""),
     attachments: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
@@ -5995,9 +5996,11 @@ async def gmail_send(
         try:
             msg = MIMEMultipart()
             msg["to"] = recipient.email
-            msg["from"] = sender.email or "me"
+            from email.utils import formataddr as _formataddr
+            _from_name = (sender_name or "").strip()
+            msg["from"] = _formataddr((_from_name, sender.email)) if _from_name else (sender.email or "me")
             msg["subject"] = subject
-            msg.attach(MIMEText(body, "plain", "utf-8"))
+            msg.attach(MIMEText(body, "html", "utf-8"))
             for fname, ftype, fcontent in attachment_data:
                 part = MIMEBase(*ftype.split("/", 1) if "/" in ftype else ("application", "octet-stream"))
                 part.set_payload(fcontent)

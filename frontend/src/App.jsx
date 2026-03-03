@@ -648,6 +648,9 @@ const App = () => {
   const [emailAttachments, setEmailAttachments] = useState([])
   const [emailSending, setEmailSending] = useState(false)
   const [emailSendResult, setEmailSendResult] = useState(null)
+  const [recipientsExpanded, setRecipientsExpanded] = useState(false)
+  const [emailSuccessToast, setEmailSuccessToast] = useState(null)
+  const bodyEditorRef = useRef(null)
   const [teacherFocusTargetId, setTeacherFocusTargetId] = useState(null)
   const [teacherHighlightId, setTeacherHighlightId] = useState(null)
   const teacherAnchorRefs = useRef({})
@@ -4852,7 +4855,9 @@ const App = () => {
     setEmailSendResult(null)
     setEmailForm({ subject: '', body: '' })
     setEmailAttachments([])
+    setRecipientsExpanded(false)
     setShowEmailModal(true)
+    setTimeout(() => { if (bodyEditorRef.current) bodyEditorRef.current.innerHTML = '' }, 50)
   }
 
   const connectGmail = async () => {
@@ -4891,7 +4896,14 @@ const App = () => {
       const fd = new FormData()
       fd.append('teacher_ids', JSON.stringify([...selectedTeacherIds]))
       fd.append('subject', emailForm.subject)
-      fd.append('body', emailForm.body)
+      const bodyHtml = bodyEditorRef.current?.innerHTML || ''
+      fd.append('body', bodyHtml)
+      const senderName = viewRole === 'director'
+        ? `Dirección - ${activeCareer}`
+        : viewRole === 'secretario'
+        ? `Secretaría - ${activeCareer}`
+        : (currentUser?.name || '')
+      fd.append('sender_name', senderName)
       for (const f of emailAttachments) fd.append('attachments', f)
       const res = await fetch('http://127.0.0.1:8011/notifications/gmail/send', {
         method: 'POST',
@@ -4901,8 +4913,15 @@ const App = () => {
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || `Error ${res.status}`)
       setEmailSendResult(data)
-      if (data.errors && data.errors.length === 0) {
+      if (!data.errors || data.errors.length === 0) {
         setSelectedTeacherIds(new Set())
+        setTimeout(() => {
+          setShowEmailModal(false)
+          setEmailSendResult(null)
+          const n = data.count || data.sent?.length || 0
+          setEmailSuccessToast(`✉️ ${n} correo${n !== 1 ? 's' : ''} enviado${n !== 1 ? 's' : ''} con éxito`)
+          setTimeout(() => setEmailSuccessToast(null), 4000)
+        }, 600)
       }
     } catch (err) {
       setEmailSendResult({ error: err.message })
@@ -14106,6 +14125,13 @@ const App = () => {
                                   Eliminar
                                 </button>
                               )}
+                              {canNotify && teacher.email && (
+                                <button
+                                  style={{ ...styles.button, background: '#1a237e', color: '#fff', marginRight: 0 }}
+                                  onClick={() => { setSelectedTeacherIds(new Set([teacher.id])); checkGmailAndOpenModal() }}
+                                  title="Enviar notificación"
+                                >✉️</button>
+                              )}
                             </div>
                           </>
                         )}
@@ -20372,12 +20398,14 @@ const App = () => {
     {showEmailModal && (
       <div style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999,
-        display: 'flex', alignItems: 'center', justifyContent: 'center'
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
       }} onClick={(e) => { if (e.target === e.currentTarget && !emailSending) setShowEmailModal(false) }}>
         <div style={{
-          background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '560px',
-          padding: '28px', boxShadow: '0 12px 48px rgba(0,0,0,0.25)', position: 'relative'
+          background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '820px',
+          padding: '28px 32px', boxShadow: '0 12px 48px rgba(0,0,0,0.25)', position: 'relative',
+          maxHeight: '92vh', overflowY: 'auto'
         }}>
+          <style>{`#emailBodyEditor:empty::before{content:attr(data-placeholder);color:#bbb;pointer-events:none;display:block;}`}</style>
           <button
             onClick={() => { if (!emailSending) setShowEmailModal(false) }}
             style={{ position: 'absolute', top: '14px', right: '16px', background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#666' }}
@@ -20417,18 +20445,54 @@ const App = () => {
             </div>
           )}
 
-          {/* Recipients */}
+          {/* Recipients – collapsible, removable */}
           <div style={{ marginBottom: '14px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '5px' }}>Para:</label>
-            <div style={{ background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', color: '#333', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-              {[...selectedTeacherIds].map(id => {
-                const t = teacherCatalogItems.find(x => x.id === id)
-                return t ? (
-                  <span key={id} style={{ background: '#e3f2fd', color: '#0d47a1', borderRadius: '999px', padding: '2px 10px', fontSize: '12px', fontWeight: 600 }}>
-                    {t.name}{t.email ? ` ‹${t.email}›` : ' (sin email)'}
-                  </span>
-                ) : null
-              })}
+            <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '5px' }}>
+              Para: <span style={{ fontWeight: 400, color: '#888' }}>({selectedTeacherIds.size} destinatario{selectedTeacherIds.size !== 1 ? 's' : ''})</span>
+            </label>
+            <div style={{ background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '6px', padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {(() => {
+                const ids = [...selectedTeacherIds]
+                const shown = recipientsExpanded ? ids : ids.slice(0, 3)
+                const hidden = ids.length - shown.length
+                return (
+                  <>
+                    {shown.map(id => {
+                      const t = teacherCatalogItems.find(x => x.id === id)
+                      if (!t) return null
+                      return (
+                        <span key={id} style={{ background: '#e3f2fd', color: '#0d47a1', borderRadius: '999px', padding: '2px 6px 2px 10px', fontSize: '12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          {t.name}{t.email ? ` ‹${t.email}›` : ' (sin email)'}
+                          {!emailSending && (
+                            <button
+                              onClick={() => {
+                                const next = new Set(selectedTeacherIds)
+                                next.delete(id)
+                                setSelectedTeacherIds(next)
+                                if (next.size === 0) setShowEmailModal(false)
+                              }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1565c0', fontWeight: 700, padding: '0 2px', lineHeight: 1, fontSize: '14px' }}
+                              title="Quitar destinatario"
+                            >×</button>
+                          )}
+                        </span>
+                      )
+                    })}
+                    {hidden > 0 && (
+                      <button
+                        onClick={() => setRecipientsExpanded(true)}
+                        style={{ background: '#e8eaf6', color: '#3949ab', border: 'none', borderRadius: '999px', padding: '2px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                      >y {hidden} más ▾</button>
+                    )}
+                    {recipientsExpanded && ids.length > 3 && (
+                      <button
+                        onClick={() => setRecipientsExpanded(false)}
+                        style={{ background: 'none', border: 'none', color: '#888', fontSize: '11px', cursor: 'pointer', padding: '2px 4px' }}
+                      >Colapsar ▴</button>
+                    )}
+                  </>
+                )
+              })()}
             </div>
           </div>
 
@@ -20444,16 +20508,61 @@ const App = () => {
             />
           </div>
 
-          {/* Body */}
+          {/* Body – rich text editor */}
           <div style={{ marginBottom: '14px' }}>
             <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '5px' }}>Mensaje *</label>
-            <textarea
-              rows={6}
-              style={{ ...styles.input, marginBottom: 0, resize: 'vertical', fontFamily: 'inherit' }}
-              placeholder="Escribí tu mensaje aquí..."
-              value={emailForm.body}
-              onChange={e => setEmailForm(p => ({ ...p, body: e.target.value }))}
-              disabled={emailSending}
+            {/* Toolbar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', background: '#f8f9fa', border: '1px solid #dee2e6', borderBottom: 'none', borderRadius: '6px 6px 0 0', padding: '6px 10px' }}>
+              {[
+                { cmd: 'bold',      label: <strong>B</strong>, title: 'Negrita' },
+                { cmd: 'italic',    label: <em>I</em>,          title: 'Cursiva' },
+                { cmd: 'underline', label: <u>U</u>,            title: 'Subrayado' },
+              ].map(({ cmd, label, title }) => (
+                <button key={cmd} type="button" title={title}
+                  onMouseDown={e => { e.preventDefault(); document.execCommand(cmd, false, null) }}
+                  disabled={emailSending}
+                  style={{ background: '#fff', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '13px', minWidth: '28px' }}
+                >{label}</button>
+              ))}
+              <div style={{ width: '1px', background: '#ddd', height: '20px', margin: '0 2px' }} />
+              <select title="Tamaño de fuente" disabled={emailSending} defaultValue=""
+                onChange={e => { if (e.target.value) { document.execCommand('fontSize', false, e.target.value); e.target.value = ''; bodyEditorRef.current?.focus() } }}
+                style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2px 4px', fontSize: '12px', background: '#fff', cursor: 'pointer' }}
+              >
+                <option value="" disabled>Tamaño</option>
+                <option value="2">Pequeño</option>
+                <option value="3">Normal</option>
+                <option value="5">Grande</option>
+                <option value="6">XL</option>
+              </select>
+              <div style={{ width: '1px', background: '#ddd', height: '20px', margin: '0 2px' }} />
+              {['#000000','#555555','#1565c0','#b71c1c','#1b5e20','#e65100','#6a1b9a'].map(color => (
+                <button key={color} type="button" title={color}
+                  onMouseDown={e => { e.preventDefault(); document.execCommand('foreColor', false, color) }}
+                  disabled={emailSending}
+                  style={{ background: color, border: '1px solid rgba(0,0,0,0.2)', borderRadius: '3px', width: '18px', height: '18px', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+                />
+              ))}
+              <div style={{ width: '1px', background: '#ddd', height: '20px', margin: '0 2px' }} />
+              <button type="button" title="Quitar formato"
+                onMouseDown={e => { e.preventDefault(); document.execCommand('removeFormat', false, null) }}
+                disabled={emailSending}
+                style={{ background: '#fff', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px', color: '#666' }}
+              >⊘</button>
+            </div>
+            {/* Editor area */}
+            <div
+              ref={bodyEditorRef}
+              id="emailBodyEditor"
+              contentEditable={!emailSending}
+              suppressContentEditableWarning
+              data-placeholder="Escribí tu mensaje aquí..."
+              style={{
+                minHeight: '160px', border: '1px solid #dee2e6', borderRadius: '0 0 6px 6px',
+                padding: '10px 14px', fontSize: '14px', lineHeight: 1.7,
+                outline: 'none', background: emailSending ? '#f9f9f9' : '#fff',
+                color: '#222', overflowY: 'auto', maxHeight: '320px', fontFamily: 'inherit'
+              }}
             />
           </div>
 
@@ -20473,14 +20582,18 @@ const App = () => {
             )}
           </div>
 
-          {/* Send result */}
-          {emailSendResult && (
-            <div style={{ marginBottom: '14px', fontSize: '13px' }}>
-              {emailSendResult.sent?.length > 0 && (
-                <div style={{ color: '#2e7d32', marginBottom: '4px' }}>Enviado a: {emailSendResult.sent.join(', ')}</div>
+          {/* Send result (errors only — success auto-closes) */}
+          {emailSendResult && (emailSendResult.error || emailSendResult.errors?.length > 0) && (
+            <div style={{ marginBottom: '14px' }}>
+              {emailSendResult.error && (
+                <div style={{ background: '#ffebee', border: '1px solid #ef9a9a', borderRadius: '6px', padding: '10px 14px', color: '#c62828', fontSize: '13px' }}>
+                  ❌ {emailSendResult.error}
+                </div>
               )}
               {emailSendResult.errors?.length > 0 && (
-                <div style={{ color: '#c62828' }}>Errores: {emailSendResult.errors.map(e => `${e.email}: ${e.error}`).join('; ')}</div>
+                <div style={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '6px', padding: '10px 14px', color: '#e65100', fontSize: '13px' }}>
+                  ⚠️ Errores: {emailSendResult.errors.map(e => `${e.email}: ${e.error}`).join('; ')}
+                </div>
               )}
             </div>
           )}
@@ -20503,6 +20616,18 @@ const App = () => {
             </button>
           </div>
         </div>
+      </div>
+    )}
+
+    {/* ── Success toast ── */}
+    {emailSuccessToast && (
+      <div style={{
+        position: 'fixed', bottom: 28, right: 28,
+        background: '#1b5e20', color: '#fff', padding: '14px 22px', borderRadius: '10px',
+        fontWeight: 600, fontSize: '14px', zIndex: 10000,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+      }}>
+        {emailSuccessToast}
       </div>
     )}
     </>
