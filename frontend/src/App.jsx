@@ -4796,6 +4796,15 @@ const App = () => {
         throw new Error(errorData.detail || `Error ${res.status}`)
       }
       setTeacherForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+      await fetchTeachers(activeCareer)
+      await fetchTeacherTotals()
+      setStatusMsg('Docente agregado')
+      setStatusType('success')
+    } catch (err) {
+      const message = err.message === 'Teacher already exists'
+        ? 'Ese docente ya existe en el catálogo'
+        : err.message
+      setStatusMsg('Error al agregar docente: ' + message)
       setStatusType('error')
     }
   }
