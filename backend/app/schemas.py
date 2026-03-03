@@ -37,6 +37,7 @@ class TeacherBase(BaseModel):
     category: Optional[str] = None
     email: Optional[str] = None
     dedication: Optional[str] = None
+    dni: Optional[str] = None
 
 
 class TeacherCreate(TeacherBase):
@@ -48,11 +49,13 @@ class TeacherUpdate(BaseModel):
     category: Optional[str] = None
     email: Optional[str] = None
     dedication: Optional[str] = None
+    dni: Optional[str] = None
 
 
 class TeacherOut(TeacherBase):
     id: int
     last_login: Optional[datetime] = None
+    password_reset_at: Optional[datetime] = None
     is_admin: Optional[bool] = False
     has_password: Optional[bool] = False
     has_proposals: Optional[bool] = False
