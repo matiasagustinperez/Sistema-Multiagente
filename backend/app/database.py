@@ -101,6 +101,9 @@ def ensure_teachers_columns():
         if "dedication" not in columns:
             conn.execute(text("ALTER TABLE teachers ADD COLUMN dedication VARCHAR(50)"))
             conn.commit()
+        if "password_reset_at" not in columns:
+            conn.execute(text("ALTER TABLE teachers ADD COLUMN password_reset_at DATETIME"))
+            conn.commit()
 
 
 def ensure_study_plans_columns():
