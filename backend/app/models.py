@@ -117,6 +117,7 @@ class Teacher(Base):
     password_hash = Column(String(255), nullable=True)
     last_login = Column(DateTime(timezone=True), nullable=True)
     password_reset_at = Column(DateTime(timezone=True), nullable=True)
+    gmail_refresh_token = Column(Text, nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

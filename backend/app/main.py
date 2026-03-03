@@ -5767,6 +5767,252 @@ def change_my_password(request: Request, payload: ChangeMyPasswordRequest, db: S
     return {"ok": True}
 
 
+# ── Gmail Notifications ───────────────────────────────────────────────────────
+
+_GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+_GMAIL_REDIRECT_URI = "http://127.0.0.1:8011/notifications/gmail/callback"
+
+
+def _build_gmail_flow(redirect_uri: str = _GMAIL_REDIRECT_URI):
+    """Build an OAuth2 flow for Gmail send scope."""
+    from google_auth_oauthlib.flow import Flow
+    client_secrets_path = os.path.join(backend_dir, "secrets", "oauth-client.json")
+    if os.path.exists(client_secrets_path):
+        return Flow.from_client_secrets_file(client_secrets_path, scopes=_GMAIL_SCOPES, redirect_uri=redirect_uri)
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="No se encontraron credenciales OAuth de Google.")
+    client_config = {
+        "installed": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [redirect_uri],
+        }
+    }
+    return Flow.from_client_config(client_config, scopes=_GMAIL_SCOPES, redirect_uri=redirect_uri)
+
+
+@app.get("/notifications/gmail/status", tags=["Notifications"])
+def gmail_status(request: Request, db: Session = Depends(get_db)):
+    """Returns whether the current user has Gmail connected."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No autorizado.")
+    token_data = decode_access_token(auth_header[7:])
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Token inválido.")
+    teacher = db.query(models.Teacher).filter(models.Teacher.id == token_data["id"]).first()
+    if not teacher:
+        raise HTTPException(status_code=404)
+    return {"connected": bool(teacher.gmail_refresh_token), "email": teacher.email}
+
+
+@app.get("/notifications/gmail/authorize", tags=["Notifications"])
+def gmail_authorize(request: Request, db: Session = Depends(get_db)):
+    """Generate a Gmail OAuth2 URL for the current user."""
+    import base64 as _b64, json as _json
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No autorizado.")
+    token_data = decode_access_token(auth_header[7:])
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Token inválido.")
+    state = _b64.urlsafe_b64encode(_json.dumps({"tid": token_data["id"]}).encode()).decode()
+    flow = _build_gmail_flow()
+    auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent", state=state)
+    return {"auth_url": auth_url}
+
+
+@app.get("/notifications/gmail/callback", response_class=HTMLResponse, tags=["Notifications"])
+def gmail_callback(code: str = None, state: str = None, error: str = None, db: Session = Depends(get_db)):
+    """OAuth callback: exchange code for tokens and persist the refresh token."""
+    _OK_HTML = """<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<title>Gmail conectado</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;
+min-height:100vh;margin:0;background:#f0fdf4;}
+.card{background:#fff;border-radius:12px;padding:40px;text-align:center;
+box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:400px;}
+h1{color:#15803d;margin-top:0;}p{color:#555;line-height:1.6;}.icon{font-size:48px;}</style>
+</head><body><div class="card"><div class="icon">✅</div>
+<h1>Gmail conectado</h1>
+<p>Tu cuenta de Gmail quedó vinculada.<br>Podés cerrar esta ventana.</p>
+<script>setTimeout(()=>window.close(),2500);</script>
+</div></body></html>"""
+
+    _ERR = lambda msg: HTMLResponse(
+        f"""<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Error</title>
+<style>body{{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;
+min-height:100vh;margin:0;background:#fff5f5;}}
+.card{{background:#fff;border-radius:12px;padding:40px;text-align:center;
+box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:400px;}}
+h1{{color:#c62828;margin-top:0;}}p{{color:#555;}}</style></head>
+<body><div class="card"><div style="font-size:48px">❌</div>
+<h1>Error</h1><p>{msg}</p></div></body></html>""", status_code=400)
+
+    if error:
+        return _ERR(f"Google reportó: {error}")
+    if not code or not state:
+        return _ERR("Parámetros inválidos.")
+
+    import base64 as _b64, json as _json, os as _os
+    try:
+        payload = _json.loads(_b64.urlsafe_b64decode(state + "==").decode())
+        teacher_id = int(payload["tid"])
+    except Exception:
+        return _ERR("Estado de sesión inválido.")
+
+    teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
+    if not teacher:
+        return _ERR("Usuario no encontrado.")
+
+    _os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+    try:
+        flow = _build_gmail_flow()
+        flow.fetch_token(code=code)
+    except Exception as exc:
+        return _ERR(f"No se pudo obtener el token: {exc}")
+
+    credentials = flow.credentials
+    if credentials.refresh_token:
+        teacher.gmail_refresh_token = credentials.refresh_token
+        db.commit()
+
+    return HTMLResponse(_OK_HTML)
+
+
+@app.post("/notifications/gmail/disconnect", tags=["Notifications"])
+def gmail_disconnect(request: Request, db: Session = Depends(get_db)):
+    """Remove stored Gmail token for the current user."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No autorizado.")
+    token_data = decode_access_token(auth_header[7:])
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Token inválido.")
+    teacher = db.query(models.Teacher).filter(models.Teacher.id == token_data["id"]).first()
+    if teacher:
+        teacher.gmail_refresh_token = None
+        db.commit()
+    return {"ok": True}
+
+
+class GmailSendRequest(BaseModel):
+    teacher_ids: list[int]
+    subject: str
+    body: str
+
+
+@app.post("/notifications/gmail/send", tags=["Notifications"])
+async def gmail_send(
+    request: Request,
+    teacher_ids: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    attachments: list[UploadFile] = File(default=[]),
+    db: Session = Depends(get_db),
+):
+    """Send a Gmail notification to one or more teachers."""
+    import json as _json, base64 as _b64, os as _os
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders as _encoders
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No autorizado.")
+    token_data = decode_access_token(auth_header[7:])
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Token inválido.")
+
+    # Only director or secretario can send notifications
+    role = token_data.get("active_role") or token_data.get("role") or ""
+    if role not in ("director", "secretario", "admin"):
+        raise HTTPException(status_code=403, detail="Solo el Director o Secretario pueden enviar notificaciones.")
+
+    sender = db.query(models.Teacher).filter(models.Teacher.id == token_data["id"]).first()
+    if not sender:
+        raise HTTPException(status_code=404, detail="Remitente no encontrado.")
+    if not sender.gmail_refresh_token:
+        raise HTTPException(status_code=400, detail="Primero conectá tu cuenta de Gmail.")
+
+    # Build Gmail credentials
+    _os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    client_secrets_path = os.path.join(backend_dir, "secrets", "oauth-client.json")
+    if os.path.exists(client_secrets_path):
+        try:
+            import json as _j
+            with open(client_secrets_path) as f:
+                sec = _j.load(f)
+            entry = sec.get("installed") or sec.get("web") or {}
+            client_id = entry.get("client_id", client_id)
+            client_secret = entry.get("client_secret", client_secret)
+        except Exception:
+            pass
+
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build as _gbuild
+        creds = Credentials(
+            token=None,
+            refresh_token=sender.gmail_refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=_GMAIL_SCOPES,
+        )
+        service = _gbuild("gmail", "v1", credentials=creds)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"No se pudo conectar con Gmail: {exc}")
+
+    # Parse recipient list
+    try:
+        ids = _json.loads(teacher_ids)
+    except Exception:
+        ids = [int(x) for x in teacher_ids.split(",") if x.strip()]
+
+    recipients = db.query(models.Teacher).filter(
+        models.Teacher.id.in_(ids),
+        models.Teacher.email != None,
+    ).all()
+    if not recipients:
+        raise HTTPException(status_code=422, detail="Ningún destinatario tiene email registrado.")
+
+    # Read attachment bytes
+    attachment_data = []
+    for f in attachments:
+        content = await f.read()
+        attachment_data.append((f.filename, f.content_type or "application/octet-stream", content))
+
+    sent = []
+    errors = []
+    for recipient in recipients:
+        try:
+            msg = MIMEMultipart()
+            msg["to"] = recipient.email
+            msg["from"] = sender.email or "me"
+            msg["subject"] = subject
+            msg.attach(MIMEText(body, "plain", "utf-8"))
+            for fname, ftype, fcontent in attachment_data:
+                part = MIMEBase(*ftype.split("/", 1) if "/" in ftype else ("application", "octet-stream"))
+                part.set_payload(fcontent)
+                _encoders.encode_base64(part)
+                part.add_header("Content-Disposition", "attachment", filename=fname)
+                msg.attach(part)
+            raw = _b64.urlsafe_b64encode(msg.as_bytes()).decode()
+            service.users().messages().send(userId="me", body={"raw": raw}).execute()
+            sent.append(recipient.email)
+        except Exception as exc:
+            errors.append({"email": recipient.email, "error": str(exc)})
+
+    return {"sent": sent, "errors": errors, "count": len(sent)}
+
+
 # ── Careers helper & CRUD ───────────────────────────────────────────────────
 
 _DEFAULT_CAREERS = [

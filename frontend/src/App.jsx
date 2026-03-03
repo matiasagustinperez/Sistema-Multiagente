@@ -640,6 +640,14 @@ const App = () => {
   })
   const [teacherEditId, setTeacherEditId] = useState(null)
   const [teacherEditForm, setTeacherEditForm] = useState({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
+  // ── Notifications / email ──
+  const [selectedTeacherIds, setSelectedTeacherIds] = useState(new Set())
+  const [gmailConnected, setGmailConnected] = useState(false)
+  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [emailForm, setEmailForm] = useState({ subject: '', body: '' })
+  const [emailAttachments, setEmailAttachments] = useState([])
+  const [emailSending, setEmailSending] = useState(false)
+  const [emailSendResult, setEmailSendResult] = useState(null)
   const [teacherFocusTargetId, setTeacherFocusTargetId] = useState(null)
   const [teacherHighlightId, setTeacherHighlightId] = useState(null)
   const teacherAnchorRefs = useRef({})
@@ -4827,6 +4835,83 @@ const App = () => {
     setTeacherEditForm({ name: '', category: 'AYUDANTE 1º', dedication: 'Sin Informar', email: '' })
   }
 
+  // ── Gmail notification helpers ──────────────────────────────────────────
+  const checkGmailAndOpenModal = async () => {
+    try {
+      const token = localStorage.getItem('authToken')
+      const res = await fetch('http://127.0.0.1:8011/notifications/gmail/status', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setGmailConnected(data.connected)
+      }
+    } catch (_) {
+      setGmailConnected(false)
+    }
+    setEmailSendResult(null)
+    setEmailForm({ subject: '', body: '' })
+    setEmailAttachments([])
+    setShowEmailModal(true)
+  }
+
+  const connectGmail = async () => {
+    try {
+      const token = localStorage.getItem('authToken')
+      const res = await fetch('http://127.0.0.1:8011/notifications/gmail/authorize', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('No se pudo obtener URL de autorización')
+      const data = await res.json()
+      const popup = window.open(data.auth_url, 'gmailAuth', 'width=500,height=650')
+      const timer = setInterval(async () => {
+        if (popup?.closed) {
+          clearInterval(timer)
+          try {
+            const r2 = await fetch('http://127.0.0.1:8011/notifications/gmail/status', {
+              headers: { Authorization: `Bearer ${token}` }
+            })
+            if (r2.ok) {
+              const d2 = await r2.json()
+              setGmailConnected(d2.connected)
+            }
+          } catch (_) {}
+        }
+      }, 1000)
+    } catch (err) {
+      alert('Error al conectar Gmail: ' + err.message)
+    }
+  }
+
+  const sendGmailNotification = async () => {
+    setEmailSending(true)
+    setEmailSendResult(null)
+    try {
+      const token = localStorage.getItem('authToken')
+      const fd = new FormData()
+      fd.append('teacher_ids', JSON.stringify([...selectedTeacherIds]))
+      fd.append('subject', emailForm.subject)
+      fd.append('body', emailForm.body)
+      for (const f of emailAttachments) fd.append('attachments', f)
+      const res = await fetch('http://127.0.0.1:8011/notifications/gmail/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || `Error ${res.status}`)
+      setEmailSendResult(data)
+      if (data.errors && data.errors.length === 0) {
+        setSelectedTeacherIds(new Set())
+      }
+    } catch (err) {
+      setEmailSendResult({ error: err.message })
+    } finally {
+      setEmailSending(false)
+    }
+  }
+  // ── End Gmail helpers ────────────────────────────────────────────────────
+
   const saveTeacherEdit = async (teacher) => {
     if (!teacher?.id) {
       return
@@ -8722,6 +8807,8 @@ const App = () => {
   const isDirectorView = viewRole === 'director'
   // Solo el Director puede eliminar entidades
   const canDelete = viewRole === 'director'
+  // Director y Secretario pueden enviar notificaciones
+  const canNotify = viewRole === 'director' || viewRole === 'secretario'
 
   // ── Per-user career + role access (derived from currentUser.career_assignments) ──
   const userCareers = currentUser
@@ -10483,6 +10570,7 @@ const App = () => {
   )
 
   return (
+    <>
     <div style={styles.container}>
       {/* Sidebar */}
       <div style={styles.sidebar}>
@@ -13672,6 +13760,18 @@ const App = () => {
                   <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #ddd' }}>
                     <thead>
                       <tr style={{ background: '#0066cc', color: '#fff', borderBottom: '2px solid #ddd' }}>
+                        {canNotify && (
+                          <th style={{ padding: '8px', textAlign: 'center', width: '36px', borderRight: '1px solid #ddd' }}>
+                            <input type="checkbox"
+                              style={{ cursor: 'pointer' }}
+                              checked={teacherCatalogFiltered.length > 0 && teacherCatalogFiltered.every(t => selectedTeacherIds.has(t.id))}
+                              onChange={(e) => {
+                                if (e.target.checked) setSelectedTeacherIds(new Set(teacherCatalogFiltered.map(t => t.id)))
+                                else setSelectedTeacherIds(new Set())
+                              }}
+                            />
+                          </th>
+                        )}
                         <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd' }}>ID</th>
                         <th
                           style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }}
@@ -13706,6 +13806,7 @@ const App = () => {
                         <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold' }}>Acciones</th>
                       </tr>
                       <tr style={{ background: '#eaf3ff' }}>
+                        {canNotify && <th style={{ padding: '6px', borderRight: '1px solid #eee' }} />}
                         <th style={{ padding: '6px', borderRight: '1px solid #eee' }} />
                         <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
                           <input
@@ -13768,6 +13869,7 @@ const App = () => {
                         >
                           {teacherEditId === teacher.id ? (
                             <>
+                              {canNotify && <td style={{ padding: '8px', borderRight: '1px solid #ddd' }} />}
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.id ?? idx + 1}</td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>
                                 <input
@@ -13834,6 +13936,19 @@ const App = () => {
                             </>
                           ) : (
                             <>
+                              {canNotify && (
+                                <td style={{ padding: '8px', textAlign: 'center', borderRight: '1px solid #ddd' }}>
+                                  <input type="checkbox"
+                                    style={{ cursor: 'pointer' }}
+                                    checked={selectedTeacherIds.has(teacher.id)}
+                                    onChange={(e) => {
+                                      const next = new Set(selectedTeacherIds)
+                                      e.target.checked ? next.add(teacher.id) : next.delete(teacher.id)
+                                      setSelectedTeacherIds(next)
+                                    }}
+                                  />
+                                </td>
+                              )}
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.id ?? idx + 1}</td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{teacher.name || '-'}</td>
                               <td style={{ padding: '8px', borderRight: '1px solid #ddd' }}>{renderCapsule(teacher.category || '-', 'category')}</td>
@@ -13865,6 +13980,15 @@ const App = () => {
                                       title="Eliminar docente"
                                     >
                                       🗑️
+                                    </button>
+                                  )}
+                                  {canNotify && teacher.email && (
+                                    <button
+                                      style={{ ...styles.button, background: 'rgba(13, 71, 161, 0.85)', color: '#fff', padding: '6px 10px', marginRight: 0 }}
+                                      onClick={() => { setSelectedTeacherIds(new Set([teacher.id])); checkGmailAndOpenModal() }}
+                                      title="Enviar notificación"
+                                    >
+                                      ✉️
                                     </button>
                                   )}
                                 </div>
@@ -20217,6 +20341,171 @@ const App = () => {
         )}
       </div>
     </div>
+
+    {/* ── Floating notification bar ── */}
+    {canNotify && selectedTeacherIds.size > 0 && (
+      <div style={{
+        position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+        background: '#1a237e', color: '#fff', padding: '12px 24px', borderRadius: '999px',
+        display: 'flex', alignItems: 'center', gap: '16px',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.35)', zIndex: 9998, whiteSpace: 'nowrap'
+      }}>
+        <span style={{ fontSize: '14px', fontWeight: 600 }}>
+          {selectedTeacherIds.size} docente{selectedTeacherIds.size !== 1 ? 's' : ''} seleccionado{selectedTeacherIds.size !== 1 ? 's' : ''}
+        </span>
+        <button
+          style={{ background: '#4caf50', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '999px', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}
+          onClick={checkGmailAndOpenModal}
+        >
+          ✉️ Enviar notificación
+        </button>
+        <button
+          style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '999px', cursor: 'pointer', fontSize: '14px' }}
+          onClick={() => setSelectedTeacherIds(new Set())}
+        >
+          ✖ Cancelar
+        </button>
+      </div>
+    )}
+
+    {/* ── Email composition modal ── */}
+    {showEmailModal && (
+      <div style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999,
+        display: 'flex', alignItems: 'center', justifyContent: 'center'
+      }} onClick={(e) => { if (e.target === e.currentTarget && !emailSending) setShowEmailModal(false) }}>
+        <div style={{
+          background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '560px',
+          padding: '28px', boxShadow: '0 12px 48px rgba(0,0,0,0.25)', position: 'relative'
+        }}>
+          <button
+            onClick={() => { if (!emailSending) setShowEmailModal(false) }}
+            style={{ position: 'absolute', top: '14px', right: '16px', background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#666' }}
+          >✕</button>
+
+          <h3 style={{ margin: '0 0 18px', fontSize: '16px', color: '#1a237e' }}>
+            ✉️ Enviar notificación por Gmail
+          </h3>
+
+          {/* Gmail connection status */}
+          {!gmailConnected ? (
+            <div style={{ background: '#fff3e0', border: '1px solid #ffcc80', borderRadius: '8px', padding: '14px 16px', marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '13px', color: '#e65100', flex: 1 }}>
+                Primero tenés que conectar tu cuenta de Gmail para poder enviar correos.
+              </span>
+              <button
+                onClick={connectGmail}
+                style={{ background: '#e65100', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '13px' }}
+              >
+                Conectar Gmail
+              </button>
+            </div>
+          ) : (
+            <div style={{ background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: '8px', padding: '8px 14px', marginBottom: '18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <span style={{ fontSize: '13px', color: '#2e7d32', fontWeight: 600 }}>Gmail conectado ✓</span>
+              <button
+                onClick={async () => {
+                  const token = localStorage.getItem('token')
+                  if (!token) return
+                  await fetch(`${API_BASE_URL}/notifications/gmail/disconnect`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+                  setGmailConnected(false)
+                }}
+                style={{ background: 'none', border: 'none', fontSize: '11px', color: '#888', cursor: 'pointer', textDecoration: 'underline' }}
+              >
+                Desconectar
+              </button>
+            </div>
+          )}
+
+          {/* Recipients */}
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '5px' }}>Para:</label>
+            <div style={{ background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', color: '#333', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {[...selectedTeacherIds].map(id => {
+                const t = teacherCatalogItems.find(x => x.id === id)
+                return t ? (
+                  <span key={id} style={{ background: '#e3f2fd', color: '#0d47a1', borderRadius: '999px', padding: '2px 10px', fontSize: '12px', fontWeight: 600 }}>
+                    {t.name}{t.email ? ` ‹${t.email}›` : ' (sin email)'}
+                  </span>
+                ) : null
+              })}
+            </div>
+          </div>
+
+          {/* Subject */}
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '5px' }}>Asunto *</label>
+            <input
+              style={{ ...styles.input, marginBottom: 0 }}
+              placeholder="Asunto del correo"
+              value={emailForm.subject}
+              onChange={e => setEmailForm(p => ({ ...p, subject: e.target.value }))}
+              disabled={emailSending}
+            />
+          </div>
+
+          {/* Body */}
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '5px' }}>Mensaje *</label>
+            <textarea
+              rows={6}
+              style={{ ...styles.input, marginBottom: 0, resize: 'vertical', fontFamily: 'inherit' }}
+              placeholder="Escribí tu mensaje aquí..."
+              value={emailForm.body}
+              onChange={e => setEmailForm(p => ({ ...p, body: e.target.value }))}
+              disabled={emailSending}
+            />
+          </div>
+
+          {/* Attachments */}
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '5px' }}>Adjuntos (opcional)</label>
+            <input
+              type="file" multiple
+              style={{ fontSize: '13px' }}
+              onChange={e => setEmailAttachments([...e.target.files])}
+              disabled={emailSending}
+            />
+            {emailAttachments.length > 0 && (
+              <div style={{ marginTop: '6px', fontSize: '12px', color: '#555' }}>
+                {emailAttachments.map((f, i) => <span key={i} style={{ marginRight: '8px' }}>📎 {f.name}</span>)}
+              </div>
+            )}
+          </div>
+
+          {/* Send result */}
+          {emailSendResult && (
+            <div style={{ marginBottom: '14px', fontSize: '13px' }}>
+              {emailSendResult.sent?.length > 0 && (
+                <div style={{ color: '#2e7d32', marginBottom: '4px' }}>Enviado a: {emailSendResult.sent.join(', ')}</div>
+              )}
+              {emailSendResult.errors?.length > 0 && (
+                <div style={{ color: '#c62828' }}>Errores: {emailSendResult.errors.map(e => `${e.email}: ${e.error}`).join('; ')}</div>
+              )}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <button
+              style={{ ...styles.button, background: '#78909c' }}
+              onClick={() => { if (!emailSending) setShowEmailModal(false) }}
+              disabled={emailSending}
+            >
+              Cancelar
+            </button>
+            <button
+              style={{ ...styles.button, background: gmailConnected ? '#1a237e' : '#bbb', cursor: gmailConnected ? 'pointer' : 'not-allowed' }}
+              onClick={sendGmailNotification}
+              disabled={!gmailConnected || emailSending}
+            >
+              {emailSending ? 'Enviando...' : '✉️ Enviar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }
 

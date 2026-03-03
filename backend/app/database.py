@@ -104,6 +104,9 @@ def ensure_teachers_columns():
         if "password_reset_at" not in columns:
             conn.execute(text("ALTER TABLE teachers ADD COLUMN password_reset_at DATETIME"))
             conn.commit()
+        if "gmail_refresh_token" not in columns:
+            conn.execute(text("ALTER TABLE teachers ADD COLUMN gmail_refresh_token TEXT"))
+            conn.commit()
 
 
 def ensure_study_plans_columns():
