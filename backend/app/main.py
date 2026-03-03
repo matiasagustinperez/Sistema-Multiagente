@@ -6039,7 +6039,7 @@ async def gmail_send(
             '<body style="margin:0;padding:0;background:#f0f4f8;">'
             '<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:32px 0;">'
             '<tr><td align="center">'
-            '<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10);">'
+            '<table width="83%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10);">'
             '<tr><td style="background:#1a237e;padding:22px 36px;">'
             '<div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:1px;">MACAU</div>'
             '<div style="color:#c5cae9;font-size:12px;margin-top:3px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
