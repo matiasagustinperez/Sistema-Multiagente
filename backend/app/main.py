@@ -8396,8 +8396,7 @@ async def instruments_notify(request: Request, payload: dict = Body(...), db: Se
             '</td></tr>'
             '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
             + _img_tag +
-            f'<div style="color:#555;font-size:13px;margin-top:4px;">Enviado por: <strong>{sender_name or sender.name}</strong></div>'
-            f'<div style="color:#aaa;font-size:11px;margin-top:2px;">{sender.email}</div>'
+            f'<div style="color:#aaa;font-size:12px;margin-top:6px;">Esta notificación fue generada por <strong style="color:#555;">{sender_name or sender.name}</strong></div>'
             '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditación ante CONEAU</div>'
             '</td></tr>'
             '</table></td></tr></table>'
