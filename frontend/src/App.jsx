@@ -154,6 +154,10 @@ const LoginScreen = ({ onLogin }) => {
   const [showPassword, setShowPassword] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState('')
+  const [forgotMode, setForgotMode] = React.useState(false)
+  const [forgotEmail, setForgotEmail] = React.useState('')
+  const [forgotLoading, setForgotLoading] = React.useState(false)
+  const [forgotResult, setForgotResult] = React.useState(null) // null | 'ok' | 'error'
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -247,6 +251,74 @@ const LoginScreen = ({ onLogin }) => {
             {loading ? 'Ingresando…' : 'Ingresar'}
           </button>
         </form>
+
+        {/* Forgot password */}
+        {!forgotMode ? (
+          <div style={{ textAlign: 'center', marginTop: '14px' }}>
+            <button
+              type="button"
+              onClick={() => { setForgotMode(true); setForgotResult(null); setError('') }}
+              style={{ background: 'none', border: 'none', color: '#1565c0', fontSize: '12px', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+            >
+              ¿Olvidaste tu contraseña?
+            </button>
+          </div>
+        ) : (
+          <div style={{ marginTop: '16px', background: '#f0f4ff', border: '1px solid #c5d5f7', borderRadius: '8px', padding: '16px' }}>
+            <div style={{ fontWeight: 700, fontSize: '13px', color: '#1a3d5c', marginBottom: '8px' }}>🔑 Recuperar acceso
+              <button
+                type="button"
+                onClick={() => { setForgotMode(false); setForgotResult(null); setForgotEmail('') }}
+                style={{ float: 'right', background: 'none', border: 'none', fontSize: '14px', cursor: 'pointer', color: '#888', lineHeight: 1 }}
+              >×</button>
+            </div>
+            {forgotResult === 'ok' ? (
+              <div style={{ background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', color: '#2e7d32' }}>
+                ✓ Si ese email existe en el sistema, recibirás un correo con tu contraseña.
+              </div>
+            ) : (
+              <>
+                <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#555' }}>
+                  Ingresá tu email y te enviaremos tu contraseña (será restablecida a tu email).
+                </p>
+                <input
+                  type="email"
+                  value={forgotEmail}
+                  onChange={e => { setForgotEmail(e.target.value); setForgotResult(null) }}
+                  placeholder="tu@email.com"
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #c5d5f7', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '10px' }}
+                  autoFocus
+                />
+                {forgotResult === 'error' && (
+                  <div style={{ color: '#b00020', fontSize: '12px', marginBottom: '8px' }}>Ocurrió un error. Intentá de nuevo.</div>
+                )}
+                <button
+                  type="button"
+                  disabled={forgotLoading || !forgotEmail.trim()}
+                  onClick={async () => {
+                    setForgotLoading(true)
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: forgotEmail.trim() }),
+                      })
+                      if (!res.ok) throw new Error()
+                      setForgotResult('ok')
+                    } catch {
+                      setForgotResult('error')
+                    } finally {
+                      setForgotLoading(false)
+                    }
+                  }}
+                  style={{ width: '100%', padding: '8px', background: forgotLoading || !forgotEmail.trim() ? '#90a4ae' : '#1565c0', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 700, fontSize: '13px', cursor: forgotLoading || !forgotEmail.trim() ? 'not-allowed' : 'pointer' }}
+                >
+                  {forgotLoading ? 'Enviando…' : 'Enviar contraseña'}
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         <div style={{ marginTop: '20px', fontSize: '11px', color: '#999', textAlign: 'center', lineHeight: 1.6 }}>
           Para el administrador, usuario: <strong>admin</strong><br />

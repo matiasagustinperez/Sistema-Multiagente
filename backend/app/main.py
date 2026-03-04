@@ -5671,6 +5671,146 @@ def seed_default_passwords():
         db.close()
 
 
+@app.post("/auth/forgot-password", tags=["Auth"])
+async def forgot_password(payload: dict, db: Session = Depends(get_db)):
+    """Public endpoint: reset password to email and send it via admin Gmail."""
+    import json as _fpj, base64 as _fpb64
+    from email.mime.multipart import MIMEMultipart as _FPMMP
+    from email.mime.text import MIMEText as _FPMT
+    from email.mime.image import MIMEImage as _FPMI
+    from email.utils import formataddr as _fpfa
+    from email.header import Header as _FPH
+
+    email_input = (payload.get("email") or "").strip().lower()
+    if not email_input:
+        raise HTTPException(status_code=422, detail="Ingresá tu email.")
+
+    teacher = db.query(models.Teacher).filter(
+        func.lower(models.Teacher.email) == email_input,
+        models.Teacher.is_admin == False,
+    ).first()
+    # Always return success to avoid user enumeration
+    if not teacher or not teacher.email:
+        return {"ok": True}
+
+    # Reset password to their email
+    new_pw = teacher.email
+    teacher.password_hash = hash_password(new_pw)
+    teacher.password_reset_at = datetime.now(timezone.utc)
+    db.commit()
+
+    # Send via admin Gmail
+    admin = db.query(models.Teacher).filter(
+        models.Teacher.is_admin == True,
+        models.Teacher.gmail_refresh_token != None,
+    ).first()
+    if not admin:
+        return {"ok": True, "warn": "no_gmail"}
+
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build as _fpbuild
+        _cid = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+        _csec = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+        _csp = os.path.join(backend_dir, "secrets", "oauth-client.json")
+        if os.path.exists(_csp):
+            try:
+                with open(_csp) as _f3:
+                    _s3 = _fpj.load(_f3)
+                _e3 = _s3.get("installed") or _s3.get("web") or {}
+                _cid = _e3.get("client_id", _cid)
+                _csec = _e3.get("client_secret", _csec)
+            except Exception:
+                pass
+        _creds3 = Credentials(
+            token=None, refresh_token=admin.gmail_refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=_cid, client_secret=_csec, scopes=_GMAIL_SCOPES,
+        )
+        _svc3 = _fpbuild("gmail", "v1", credentials=_creds3)
+    except Exception:
+        return {"ok": True, "warn": "no_gmail"}
+
+    try:
+        _gaddr3 = _svc3.users().getProfile(userId="me").execute().get("emailAddress") or admin.email or "me"
+    except Exception:
+        _gaddr3 = admin.email or "me"
+
+    _dn3 = "Administraci\u00f3n MACAU"
+    try:
+        _svc3.users().settings().sendAs().patch(
+            userId="me", sendAsEmail=_gaddr3, body={"displayName": _dn3}
+        ).execute()
+    except Exception:
+        pass
+
+    _logo_p3 = os.path.join(backend_dir, "..", "frontend", "Logo MACAU.png")
+    _logo_b3 = None
+    try:
+        with open(_logo_p3, "rb") as _lf3:
+            _logo_b3 = _lf3.read()
+    except Exception:
+        pass
+
+    _img3 = '<img src="cid:macau_logo" alt="MACAU" style="height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;"/>' if _logo_b3 else ""
+    _sys_url3 = os.getenv("SYSTEM_URL", "http://localhost:5173")
+    _html3 = (
+        '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'
+        '<style>body{margin:0;padding:0;background:#f0f4f8;font-family:Arial,Helvetica,sans-serif;}</style>'
+        '</head><body style="margin:0;padding:0;background:#f0f4f8;">'
+        '<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:32px 0;">'
+        '<tr><td align="center">'
+        '<table width="83%" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10);">'
+        '<tr><td style="background:#1a237e;padding:22px 36px;">'
+        '<div style="color:#fff;font-size:20px;font-weight:700;">Recuperación de Acceso</div>'
+        '</td></tr>'
+        '<tr><td style="padding:32px 36px;color:#222;font-size:14px;line-height:1.75;">'
+        f'<p>Hola <strong>{teacher.name}</strong>,</p>'
+        f'<p>Recibimos una solicitud de recuperación de acceso para tu cuenta.</p>'
+        f'<p>Tu usuario es: <strong>{teacher.email}</strong></p>'
+        f'<p>Tu contrase&ntilde;a ha sido restablecida a tu email:</p>'
+        f'<p><strong style="font-size:16px;letter-spacing:2px;color:#1a237e;background:#e8eaf6;padding:4px 12px;border-radius:6px;">{new_pw}</strong></p>'
+        f'<p>Para ingresar al sistema hacé clic acá:</p>'
+        f'<p><a href="{_sys_url3}" style="display:inline-block;background:#1a237e;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Ingresar al Sistema MACAU</a></p>'
+        '<p style="color:#888;font-size:12px;margin-top:16px;">Si no solicitaste este cambio, podés ignorar este correo.</p>'
+        '</td></tr>'
+        '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
+        + _img3 +
+        '<div style="color:#555;font-size:13px;margin-top:4px;">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>'
+        '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+        '</td></tr>'
+        '</table></td></tr></table>'
+        '</body></html>'
+    )
+    try:
+        def _fp_make_from(display, address):
+            try:
+                display.encode("ascii")
+                return _fpfa((display, address))
+            except UnicodeEncodeError:
+                _h3 = _FPH(charset="utf-8", maxlinelen=998)
+                _h3.append(display, charset="utf-8")
+                return f"{_h3.encode()} <{address}>"
+        _outer3 = _FPMMP("mixed")
+        _outer3["to"] = teacher.email
+        _outer3["from"] = _fp_make_from(_dn3, _gaddr3)
+        _outer3["subject"] = "Recuperaci\u00f3n de Acceso \u2014 Sistema MACAU"
+        _rel3 = _FPMMP("related")
+        _rel3.attach(_FPMT(_html3, "html", "utf-8"))
+        if _logo_b3:
+            _lp3 = _FPMI(_logo_b3, _subtype="png")
+            _lp3.add_header("Content-ID", "<macau_logo>")
+            _lp3.add_header("Content-Disposition", "inline", filename="macau_logo.png")
+            _rel3.attach(_lp3)
+        _outer3.attach(_rel3)
+        _raw3 = _fpb64.urlsafe_b64encode(_outer3.as_bytes()).decode()
+        _svc3.users().messages().send(userId="me", body={"raw": _raw3}).execute()
+    except Exception as _fpe:
+        print(f"[forgot-password] email send failed: {_fpe}", flush=True)
+
+    return {"ok": True}
+
+
 @app.post("/auth/login", tags=["Auth"])
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     username = payload.username.strip()
