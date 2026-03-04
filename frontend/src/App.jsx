@@ -1198,7 +1198,17 @@ const App = () => {
   // Load admin data whenever the admin sections become active (covers login redirect + manual nav)
   useEffect(() => {
     if (activeMenu === 'admin-carreras') { fetchAdminCareers(); fetchAdminUsers() }
-    if (activeMenu === 'admin-usuarios') fetchAdminUsers()
+    if (activeMenu === 'admin-usuarios') {
+      fetchAdminUsers()
+      // Fetch Gmail connection status for admin notifications
+      const token = localStorage.getItem('auth_token')
+      if (token) {
+        fetch(`${API_BASE_URL}/notifications/gmail/status`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d) setGmailConnected(d.connected) })
+          .catch(() => {})
+      }
+    }
     if (activeMenu !== 'admin-usuarios') setResetPasswordModal(null)
   }, [activeMenu])
 
@@ -15536,6 +15546,40 @@ const App = () => {
         {activeMenu === 'admin-usuarios' && (
           <div style={styles.section}>
             <h2>👤 Usuarios</h2>
+
+            {/* Gmail connection card for admin notifications */}
+            <div style={{ background: gmailConnected ? '#e8f5e9' : '#fff8e1', border: `1px solid ${gmailConnected ? '#a5d6a7' : '#ffe082'}`, borderRadius: '10px', padding: '12px 18px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: '200px' }}>
+                <div style={{ fontWeight: 700, fontSize: '13px', color: gmailConnected ? '#2e7d32' : '#e65100', marginBottom: '2px' }}>
+                  {gmailConnected ? '✓ Gmail vinculado' : '⚠ Gmail no vinculado'}
+                </div>
+                <div style={{ fontSize: '12px', color: '#555' }}>
+                  {gmailConnected
+                    ? 'Los resets de contraseña pueden notificarse automáticamente por correo.'
+                    : 'Vincula Gmail para poder notificar a los usuarios cuando se resetea su contraseña.'}
+                </div>
+              </div>
+              {!gmailConnected ? (
+                <button
+                  onClick={connectGmail}
+                  style={{ background: '#e65100', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
+                >
+                  Conectar Gmail
+                </button>
+              ) : (
+                <button
+                  onClick={async () => {
+                    const token = localStorage.getItem('auth_token')
+                    if (!token) return
+                    await fetch(`${API_BASE_URL}/notifications/gmail/disconnect`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+                    setGmailConnected(false)
+                  }}
+                  style={{ background: 'none', border: '1px solid #a5d6a7', borderRadius: '8px', padding: '6px 14px', fontSize: '12px', color: '#555', cursor: 'pointer' }}
+                >
+                  Desconectar
+                </button>
+              )}
+            </div>
 
             {/* Actions bar */}
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap' }}>
