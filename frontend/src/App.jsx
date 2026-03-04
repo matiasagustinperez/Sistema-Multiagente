@@ -19147,7 +19147,7 @@ const App = () => {
                   })
                   const filteredRows = applyTableFilters(baseRows, instrumentsTableFilters, instrTextGetters)
                   const instrumentSubjectRows = applyTableSort(filteredRows, instrumentsTableSort, instrGetters)
-                  const _canSendInstrNotify = !isDocenteView && gmailConnected && (viewRole === 'director' || viewRole === 'secretario')
+                  const _canSendInstrNotify = !isDocenteView && gmailConnected && (viewRole === 'director' || viewRole === 'secretario' || viewRole === 'comision_curricular')
                   const _showNotifyArea = !isDocenteView && (viewRole === 'director' || viewRole === 'secretario' || viewRole === 'comision_curricular')
                   const _instrNotifiableRows = instrumentSubjectRows.filter(r => r.tp === 0 || r.parcial === 0 || r.final === 0)
                   const _instrSelectedNotifiable = _instrNotifiableRows.filter(r => selectedInstrSubjects.has(`${r.career}||${r.subject}`))
