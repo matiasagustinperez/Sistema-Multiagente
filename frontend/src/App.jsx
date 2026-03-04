@@ -110,42 +110,131 @@ const AdminCareerInlineEdit = ({ career, apiBase, onSaved, onCancel }) => {
   )
 }
 
-// ── Shared animated-background blobs (used by LoginScreen & RolePickerScreen) ──
-const LOGIN_BLOB_CSS = `
-  @keyframes macauBlob1 {
-    0%,100% { transform: translate(0,0) scale(1); }
-    33%      { transform: translate(40px,-55px) scale(1.08); }
-    66%      { transform: translate(-25px,35px) scale(0.93); }
-  }
-  @keyframes macauBlob2 {
-    0%,100% { transform: translate(0,0) scale(1); }
-    40%     { transform: translate(-50px,40px) scale(1.1); }
-    70%     { transform: translate(35px,-35px) scale(0.91); }
-  }
-  @keyframes macauBlob3 {
-    0%,100% { transform: translate(0,0) scale(1); }
-    30%     { transform: translate(30px,50px) scale(1.06); }
-    60%     { transform: translate(-40px,-20px) scale(0.95); }
-  }
-  @keyframes macauBlob4 {
-    0%,100% { transform: translate(0,0) scale(1); }
-    50%     { transform: translate(-30px,-45px) scale(1.09); }
-  }
-  @keyframes macauBlob5 {
-    0%,100% { transform: translate(0,0) scale(1); }
-    45%     { transform: translate(45px,30px) scale(0.92); }
-  }
-`
-const LoginBlobs = () => (
-  <>
-    <style>{LOGIN_BLOB_CSS}</style>
-    <div style={{ position:'absolute', top:'-160px', left:'-160px', width:'600px', height:'600px', borderRadius:'50%', background:'#4fc3f7', opacity:0.18, filter:'blur(80px)', animation:'macauBlob1 14s ease-in-out infinite', pointerEvents:'none' }} />
-    <div style={{ position:'absolute', bottom:'-140px', right:'-150px', width:'540px', height:'540px', borderRadius:'50%', background:'#1565c0', opacity:0.15, filter:'blur(90px)', animation:'macauBlob2 19s ease-in-out infinite', pointerEvents:'none' }} />
-    <div style={{ position:'absolute', top:'30%', left:'50%', width:'460px', height:'460px', borderRadius:'50%', background:'#0288d1', opacity:0.12, filter:'blur(70px)', animation:'macauBlob3 11s ease-in-out infinite', pointerEvents:'none' }} />
-    <div style={{ position:'absolute', top:'5%', right:'5%', width:'340px', height:'340px', borderRadius:'50%', background:'#00897b', opacity:0.14, filter:'blur(75px)', animation:'macauBlob4 22s ease-in-out infinite', pointerEvents:'none' }} />
-    <div style={{ position:'absolute', bottom:'10%', left:'3%', width:'300px', height:'300px', borderRadius:'50%', background:'#3949ab', opacity:0.13, filter:'blur(65px)', animation:'macauBlob5 16s ease-in-out infinite', pointerEvents:'none' }} />
-  </>
-)
+// ── Shared animated-background canvas (used by LoginScreen & RolePickerScreen) ──
+const LoginBackground = () => {
+  const canvasRef = React.useRef(null)
+  React.useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    let animId
+    let W = 0, H = 0
+
+    const resize = () => {
+      W = canvas.width = canvas.offsetWidth
+      H = canvas.height = canvas.offsetHeight
+    }
+    resize()
+    const ro = new ResizeObserver(resize)
+    ro.observe(canvas)
+
+    // ── Nodes (network particles) ──
+    const N = 65
+    const nodes = Array.from({ length: N }, () => ({
+      x: Math.random() * (W || 800),
+      y: Math.random() * (H || 600),
+      vx: (Math.random() - 0.5) * 0.45,
+      vy: (Math.random() - 0.5) * 0.45,
+      r: 1.4 + Math.random() * 2,
+    }))
+
+    // ── MACAU ghost text ──
+    let macauAlpha = 0.0
+    let macauTick = 0
+
+    // ── Flowing lines (sinusoidal curves drifting across) ──
+    const LINES = 6
+    const flowLines = Array.from({ length: LINES }, (_, i) => ({
+      phase: (i / LINES) * Math.PI * 2,
+      speed: 0.0004 + Math.random() * 0.0003,
+      amp: 50 + Math.random() * 80,
+      freq: 0.004 + Math.random() * 0.003,
+      yBase: (i + 1) / (LINES + 1),
+      color: ['#4fc3f7','#1565c0','#0288d1','#00897b','#3949ab','#7986cb'][i % 6],
+    }))
+
+    let t = 0
+    const draw = () => {
+      if (!W || !H) { animId = requestAnimationFrame(draw); return }
+      ctx.clearRect(0, 0, W, H)
+
+      t++
+
+      // ── 1. MACAU ghost behind everything ──
+      macauTick++
+      // Slowly pulsate: 0.04 → 0.11 over ~6s
+      macauAlpha = 0.04 + 0.07 * (0.5 + 0.5 * Math.sin(macauTick * 0.008))
+      const fs = Math.min(W * 0.26, 160)
+      ctx.save()
+      ctx.font = `900 ${fs}px 'Arial Black', Arial, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillStyle = `rgba(255,255,255,${macauAlpha})`
+      ctx.letterSpacing = `${fs * 0.12}px`
+      ctx.fillText('MACAU', W / 2, H / 2)
+      ctx.restore()
+
+      // ── 2. Flowing sinusoidal lines ──
+      flowLines.forEach(fl => {
+        fl.phase += fl.speed
+        ctx.beginPath()
+        for (let px = 0; px <= W; px += 3) {
+          const py = H * fl.yBase + fl.amp * Math.sin(fl.freq * px + fl.phase)
+          px === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)
+        }
+        ctx.strokeStyle = fl.color + '55'  // ~33% opacity
+        ctx.lineWidth = 1.2
+        ctx.stroke()
+      })
+
+      // ── 3. Network nodes ──
+      nodes.forEach(n => {
+        n.x += n.vx; n.y += n.vy
+        if (n.x < 0) { n.x = 0; n.vx *= -1 }
+        if (n.x > W) { n.x = W; n.vx *= -1 }
+        if (n.y < 0) { n.y = 0; n.vy *= -1 }
+        if (n.y > H) { n.y = H; n.vy *= -1 }
+      })
+
+      const MAX_DIST = 170
+      for (let i = 0; i < N; i++) {
+        for (let j = i + 1; j < N; j++) {
+          const dx = nodes[i].x - nodes[j].x
+          const dy = nodes[i].y - nodes[j].y
+          const d = Math.sqrt(dx * dx + dy * dy)
+          if (d < MAX_DIST) {
+            const alpha = (1 - d / MAX_DIST) * 0.45
+            ctx.beginPath()
+            ctx.strokeStyle = `rgba(130,190,255,${alpha})`
+            ctx.lineWidth = 0.9
+            ctx.moveTo(nodes[i].x, nodes[i].y)
+            ctx.lineTo(nodes[j].x, nodes[j].y)
+            ctx.stroke()
+          }
+        }
+      }
+
+      nodes.forEach(n => {
+        ctx.beginPath()
+        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
+        ctx.fillStyle = 'rgba(160,215,255,0.75)'
+        ctx.fill()
+      })
+
+      animId = requestAnimationFrame(draw)
+    }
+    draw()
+    return () => { cancelAnimationFrame(animId); ro.disconnect() }
+  }, [])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }}
+    />
+  )
+}
+const LoginBlobs = LoginBackground  // alias for RolePickerScreen
 
 // ── LoginScreen ───────────────────────────────────────────────────────────────
 const LoginScreen = ({ onLogin }) => {
