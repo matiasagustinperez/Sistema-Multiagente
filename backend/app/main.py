@@ -5689,9 +5689,8 @@ async def forgot_password(payload: dict, db: Session = Depends(get_db)):
         func.lower(models.Teacher.email) == email_input,
         models.Teacher.is_admin == False,
     ).first()
-    # Always return success to avoid user enumeration
     if not teacher or not teacher.email:
-        return {"ok": True}
+        return {"ok": False, "notFound": True}
 
     # Reset password to their email
     new_pw = teacher.email

@@ -363,7 +363,7 @@ const LoginScreen = ({ onLogin }) => {
             </div>
             {forgotResult === 'ok' ? (
               <div style={{ background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', color: '#2e7d32' }}>
-                ✓ Si ese email existe en el sistema, recibirás un correo con tu contraseña.
+                ✓ ¡Listo! Te enviamos tu contraseña al correo ingresado.
               </div>
             ) : (
               <>
@@ -375,9 +375,12 @@ const LoginScreen = ({ onLogin }) => {
                   value={forgotEmail}
                   onChange={e => { setForgotEmail(e.target.value); setForgotResult(null) }}
                   placeholder="tu@email.com"
-                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #c5d5f7', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '10px' }}
+                  style={{ width: '100%', padding: '8px 10px', border: `1px solid ${forgotResult === 'notFound' ? '#ffe082' : '#c5d5f7'}`, borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '8px' }}
                   autoFocus
                 />
+                {forgotResult === 'notFound' && (
+                  <div style={{ color: '#e65100', fontSize: '12px', marginBottom: '8px' }}>⚠ Ese correo no se encuentra registrado en el sistema.</div>
+                )}
                 {forgotResult === 'error' && (
                   <div style={{ color: '#b00020', fontSize: '12px', marginBottom: '8px' }}>Ocurrió un error. Intentá de nuevo.</div>
                 )}
@@ -393,7 +396,9 @@ const LoginScreen = ({ onLogin }) => {
                         body: JSON.stringify({ email: forgotEmail.trim() }),
                       })
                       if (!res.ok) throw new Error()
-                      setForgotResult('ok')
+                      const data = await res.json()
+                      if (data.notFound) setForgotResult('notFound')
+                      else setForgotResult('ok')
                     } catch {
                       setForgotResult('error')
                     } finally {
