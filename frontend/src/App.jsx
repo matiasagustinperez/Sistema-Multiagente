@@ -8541,6 +8541,8 @@ const App = () => {
       const token = localStorage.getItem('auth_token')
       const senderName = viewRole === 'director'
         ? `Dirección - ${activeCareer || ''}`
+        : viewRole === 'comision_curricular'
+        ? `Comisión Curricular - ${activeCareer || ''}`
         : `Secretaría - ${activeCareer || ''}`
       const res = await fetch(`${API_BASE_URL}/instruments/notify`, {
         method: 'POST',
