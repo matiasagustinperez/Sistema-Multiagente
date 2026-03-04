@@ -1056,6 +1056,7 @@ const App = () => {
   const [instrNotifyModal, setInstrNotifyModal] = useState(null) // null | { subjects: [{career,study_plan,subject,missing_types}] }
   const [instrNotifySending, setInstrNotifySending] = useState(false)
   const [instrNotifyResult, setInstrNotifyResult] = useState(null) // null | { sent, total, results }
+  const [instrNotifyDeadline, setInstrNotifyDeadline] = useState('')
 
   const [editingPlanId, setEditingPlanId] = useState(null)
   const [correlativeMode, setCorrelativeMode] = useState(false)
@@ -1452,6 +1453,7 @@ const App = () => {
     setSelectedInstrSubjects(new Set())
     setInstrNotifyModal(null)
     setInstrNotifyResult(null)
+    setInstrNotifyDeadline('')
     setDeleteProposalModal(null)
     setPlanIsDirty(false)
     setPlanUnsavedModal(null)
@@ -8534,7 +8536,7 @@ const App = () => {
       const res = await fetch(`${API_BASE_URL}/instruments/notify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ subjects: instrNotifyModal.subjects, sender_name: senderName }),
+        body: JSON.stringify({ subjects: instrNotifyModal.subjects, sender_name: senderName, deadline: instrNotifyDeadline }),
       })
       if (!res.ok) throw new Error((await res.json()).detail || 'Error enviando notificaciones')
       const data = await res.json()
@@ -18901,7 +18903,7 @@ const App = () => {
                       </div>
 
                       {instrNotifyModal.subjects.length === 1 ? (
-                        <div style={{ border: '1px solid #e8eaf6', borderRadius: '8px', padding: '16px', background: '#f8f9ff', marginBottom: '20px' }}>
+                        <div style={{ border: '1px solid #e8eaf6', borderRadius: '8px', padding: '16px', background: '#f8f9ff', marginBottom: '16px' }}>
                           <div style={{ fontSize: '11px', color: '#7986cb', fontWeight: 700, marginBottom: '10px', letterSpacing: '0.5px' }}>VISTA PREVIA DEL CORREO</div>
                           <div style={{ fontSize: '13px', color: '#333', lineHeight: 1.7 }}>
                             <div><strong>Para:</strong> equipo docente de {instrNotifyModal.subjects[0].subject}</div>
@@ -18909,19 +18911,41 @@ const App = () => {
                             <hr style={{ border: 'none', borderTop: '1px solid #e8eaf6', margin: '10px 0' }} />
                             <div>Estimado/a equipo docente,</div>
                             <div style={{ margin: '8px 0' }}>
-                              El presente correo es para informarles que la asignatura <strong>{instrNotifyModal.subjects[0].subject}</strong> ({instrNotifyModal.subjects[0].career}){' '}
+                              Al revisar el sistema, hemos observado que la asignatura <strong>{instrNotifyModal.subjects[0].subject}</strong> ({instrNotifyModal.subjects[0].career}){' '}
                               {instrNotifyModal.subjects[0].missing_types.length === 3
-                                ? 'no cuenta con ningún instrumento de evaluación cargado en el sistema.'
+                                ? 'no cuenta con ningún instrumento de evaluación cargado.'
                                 : <>no cuenta con todos los instrumentos requeridos. Faltan cargar: <strong>{instrNotifyModal.subjects[0].missing_types.join(', ')}</strong>.</>}
                             </div>
-                            <div>Les solicitamos que procedan a cargar los archivos correspondientes en <strong>MACAU</strong> a la brevedad.</div>
+                            <div>Les solicitamos que procedan a cargar los archivos correspondientes en el sistema a la brevedad.</div>
+                            {instrNotifyDeadline && (
+                              <div style={{ marginTop: '6px', color: '#b45309', fontWeight: 600 }}>Les pedimos que realicen la carga <strong>antes del {instrNotifyDeadline}</strong>.</div>
+                            )}
                           </div>
                         </div>
                       ) : (
-                        <div style={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '8px', padding: '12px 16px', marginBottom: '20px', fontSize: '13px', color: '#7c5300' }}>
+                        <div style={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', fontSize: '13px', color: '#7c5300' }}>
                           📌 Se enviará un correo personalizado a cada equipo docente, mencionando puntualmente los tipos de instrumentos faltantes de su asignatura.
                         </div>
                       )}
+
+                      {/* Deadline */}
+                      <div style={{ marginBottom: '20px', background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '14px 16px' }}>
+                        <label style={{ fontSize: '12px', fontWeight: 700, color: '#555', display: 'block', marginBottom: '6px' }}>
+                          🗓 Fecha límite (opcional)
+                        </label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                          <input
+                            type="date"
+                            value={instrNotifyDeadline}
+                            onChange={e => setInstrNotifyDeadline(e.target.value)}
+                            style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '13px' }}
+                          />
+                          {instrNotifyDeadline && (
+                            <button onClick={() => setInstrNotifyDeadline('')} style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>×</button>
+                          )}
+                          <span style={{ fontSize: '12px', color: '#888' }}>{instrNotifyDeadline ? `Se incluirá la fecha en el correo` : 'Si no se define, no se mencionará ningún plazo'}</span>
+                        </div>
+                      </div>
 
                       <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                         <button onClick={() => setInstrNotifyModal(null)} style={{ background: '#78909c', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 18px', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>Cancelar</button>
@@ -19005,6 +19029,7 @@ const App = () => {
                   const filteredRows = applyTableFilters(baseRows, instrumentsTableFilters, instrTextGetters)
                   const instrumentSubjectRows = applyTableSort(filteredRows, instrumentsTableSort, instrGetters)
                   const _canSendInstrNotify = !isDocenteView && gmailConnected && (viewRole === 'director' || viewRole === 'secretario')
+                  const _showNotifyArea = !isDocenteView && (viewRole === 'director' || viewRole === 'secretario')
                   const _instrNotifiableRows = instrumentSubjectRows.filter(r => r.tp === 0 || r.parcial === 0 || r.final === 0)
                   const _instrSelectedNotifiable = _instrNotifiableRows.filter(r => selectedInstrSubjects.has(`${r.career}||${r.subject}`))
 
@@ -19015,23 +19040,31 @@ const App = () => {
                           Instrumentos Evaluativos
                           {activeCareer && <span style={{ fontWeight: 400, fontSize: '15px', color: '#666', marginLeft: '12px' }}>{activeCareer}</span>}
                         </h2>
-                        {_canSendInstrNotify && (
-                          <button
-                            disabled={_instrSelectedNotifiable.length === 0}
-                            onClick={() => {
-                              const subjects = _instrSelectedNotifiable.map(r => ({
-                                career: r.career,
-                                study_plan: r.study_plan || '',
-                                subject: r.subject,
-                                missing_types: [...(r.tp === 0 ? ['TP'] : []), ...(r.parcial === 0 ? ['Parcial'] : []), ...(r.final === 0 ? ['Final'] : [])]
-                              }))
-                              setInstrNotifyModal({ subjects })
-                              setInstrNotifyResult(null)
-                            }}
-                            style={{ background: _instrSelectedNotifiable.length === 0 ? '#b0bec5' : '#1565c0', color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 18px', fontWeight: 700, fontSize: '13px', cursor: _instrSelectedNotifiable.length === 0 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                          >
-                            ✉ Notificar{_instrSelectedNotifiable.length > 0 ? ` (${_instrSelectedNotifiable.length})` : ''}
-                          </button>
+                        {_showNotifyArea && (
+                          !gmailConnected ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: '#7c5300' }}>
+                              <span>Para notificar, necesitás conectar Gmail</span>
+                              <button onClick={connectGmail} style={{ background: '#f57c00', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 12px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}>Conectar Gmail</button>
+                            </div>
+                          ) : (
+                            <button
+                              disabled={_instrSelectedNotifiable.length === 0}
+                              onClick={() => {
+                                const subjects = _instrSelectedNotifiable.map(r => ({
+                                  career: r.career,
+                                  study_plan: r.study_plan || '',
+                                  subject: r.subject,
+                                  missing_types: [...(r.tp === 0 ? ['TP'] : []), ...(r.parcial === 0 ? ['Parcial'] : []), ...(r.final === 0 ? ['Final'] : [])]
+                                }))
+                                setInstrNotifyModal({ subjects })
+                                setInstrNotifyResult(null)
+                                setInstrNotifyDeadline('')
+                              }}
+                              style={{ background: _instrSelectedNotifiable.length === 0 ? '#b0bec5' : '#1565c0', color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 18px', fontWeight: 700, fontSize: '13px', cursor: _instrSelectedNotifiable.length === 0 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                            >
+                              ✉ Notificar{_instrSelectedNotifiable.length > 0 ? ` (${_instrSelectedNotifiable.length})` : ''}
+                            </button>
+                          )
                         )}
                       </div>
 

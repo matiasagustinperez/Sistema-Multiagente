@@ -8260,6 +8260,7 @@ async def instruments_notify(request: Request, payload: dict = Body(...), db: Se
 
     subjects_payload = payload.get("subjects") or []
     sender_name = (payload.get("sender_name") or "").strip()
+    deadline = (payload.get("deadline") or "").strip()  # optional: 'YYYY-MM-DD' or display string
     if not subjects_payload:
         raise HTTPException(status_code=422, detail="La lista de asignaturas está vacía.")
 
@@ -8368,6 +8369,7 @@ async def instruments_notify(request: Request, payload: dict = Body(...), db: Se
 
         _img_tag = '<img src="cid:macau_logo" alt="MACAU" style="height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;"/>' if _logo_b else ""
         _sys_url = os.getenv("SYSTEM_URL", "http://localhost:5173")
+        _deadline_html = f'<p>Les pedimos que realicen la carga <strong>antes del {deadline}</strong>.</p>' if deadline else ''
 
         _html = (
             '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'
@@ -8381,19 +8383,21 @@ async def instruments_notify(request: Request, payload: dict = Body(...), db: Se
             '</td></tr>'
             '<tr><td style="padding:32px 36px;color:#222;font-size:14px;line-height:1.75;">'
             f'<p>Estimado/a equipo docente,</p>'
-            f'<p>El presente correo es para informarles que, al revisar el sistema <strong>MACAU</strong>, '
+            f'<p>El presente correo es para informarles que, al revisar el sistema, '
             f'hemos observado que la asignatura <strong>{subject}</strong>'
             f'{f" (carrera: {career})" if career else ""} '
             f'no cuenta con {missing_text} cargados en el sistema.</p>'
             f'<p>Puntualmente, {missing_detail}.</p>'
             f'<p>Les solicitamos que, a la brevedad posible, procedan a cargar los archivos correspondientes '
-            f'en la plataforma <strong>MACAU</strong> (Multiagente para la Acreditación ante CONEAU).</p>'
-            f'<p><a href="{_sys_url}" style="display:inline-block;background:#1a237e;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Acceder al Sistema MACAU</a></p>'
+            f'en el sistema.</p>'
+            + _deadline_html +
+            f'<p><a href="{_sys_url}" style="display:inline-block;background:#1a237e;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Acceder al Sistema</a></p>'
             f'<p style="color:#666;font-size:12px;margin-top:20px;">Este aviso fue generado automáticamente para el equipo docente de <em>{subject}</em>.</p>'
             '</td></tr>'
             '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
             + _img_tag +
-            f'<div style="color:#555;font-size:13px;margin-top:4px;">Enviado por: <strong>{sender_name or "Sistema MACAU"}</strong></div>'
+            f'<div style="color:#555;font-size:13px;margin-top:4px;">Enviado por: <strong>{sender_name or sender.name}</strong></div>'
+            f'<div style="color:#aaa;font-size:11px;margin-top:2px;">{sender.email}</div>'
             '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditación ante CONEAU</div>'
             '</td></tr>'
             '</table></td></tr></table>'
