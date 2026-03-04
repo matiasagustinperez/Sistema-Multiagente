@@ -8223,3 +8223,202 @@ def download_instrument_file(instrument_id: int, db: Session = Depends(get_db)):
         filename=inst.original_filename,
         media_type=inst.mime_type or "application/octet-stream",
     )
+
+
+# ── Instrument notifications ────────────────────────────────────────────────
+
+@app.post("/instruments/notify", tags=["Instruments"])
+async def instruments_notify(request: Request, payload: dict = Body(...), db: Session = Depends(get_db)):
+    """
+    Send reminder emails to subject teaching teams about missing evaluative instruments.
+    Payload: {
+      subjects: [{career, study_plan, subject, missing_types: ['TP'|'Parcial'|'Final']}],
+      sender_name: str
+    }
+    """
+    import json as _inj, base64 as _inb64
+    from email.mime.multipart import MIMEMultipart as _INMMP
+    from email.mime.text import MIMEText as _INMT
+    from email.mime.image import MIMEImage as _INMI
+    from email.utils import formataddr as _infa
+    from email.header import Header as _INH
+
+    # Auth
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No autorizado.")
+    token_data = decode_access_token(auth_header[7:])
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Token inválido.")
+    role = token_data.get("active_role") or token_data.get("role") or ""
+    if role not in ("director", "secretario", "admin"):
+        raise HTTPException(status_code=403, detail="Solo el Director o Secretario pueden enviar notificaciones.")
+
+    sender = db.query(models.Teacher).filter(models.Teacher.id == token_data["id"]).first()
+    if not sender or not sender.gmail_refresh_token:
+        raise HTTPException(status_code=400, detail="Primero conectá tu cuenta de Gmail.")
+
+    subjects_payload = payload.get("subjects") or []
+    sender_name = (payload.get("sender_name") or "").strip()
+    if not subjects_payload:
+        raise HTTPException(status_code=422, detail="La lista de asignaturas está vacía.")
+
+    # Build Gmail service
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    _csp = os.path.join(backend_dir, "secrets", "oauth-client.json")
+    if os.path.exists(_csp):
+        try:
+            with open(_csp) as _f: _sec = _inj.load(_f)
+            _e = _sec.get("installed") or _sec.get("web") or {}
+            client_id = _e.get("client_id", client_id)
+            client_secret = _e.get("client_secret", client_secret)
+        except Exception:
+            pass
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build as _inbuild
+        _creds = Credentials(
+            token=None, refresh_token=sender.gmail_refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id, client_secret=client_secret, scopes=_GMAIL_SCOPES,
+        )
+        _svc = _inbuild("gmail", "v1", credentials=_creds)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"No se pudo conectar con Gmail: {exc}")
+
+    try:
+        _gaddr = _svc.users().getProfile(userId="me").execute().get("emailAddress") or sender.email or "me"
+    except Exception:
+        _gaddr = sender.email or "me"
+
+    if sender_name and _gaddr and _gaddr != "me":
+        try:
+            _svc.users().settings().sendAs().patch(
+                userId="me", sendAsEmail=_gaddr, body={"displayName": sender_name}
+            ).execute()
+        except Exception:
+            pass
+
+    def _in_make_from(display, address):
+        try:
+            display.encode("ascii")
+            return _infa((display, address))
+        except UnicodeEncodeError:
+            _h = _INH(charset="utf-8", maxlinelen=998)
+            _h.append(display, charset="utf-8")
+            return f"{_h.encode()} <{address}>"
+
+    _logo_p = os.path.join(backend_dir, "..", "frontend", "Logo MACAU.png")
+    _logo_b = None
+    try:
+        with open(_logo_p, "rb") as _lf: _logo_b = _lf.read()
+    except Exception:
+        pass
+
+    results = []
+
+    for subj_item in subjects_payload:
+        career = (subj_item.get("career") or "").strip()
+        study_plan = (subj_item.get("study_plan") or "").strip()
+        subject = (subj_item.get("subject") or "").strip()
+        missing_types = subj_item.get("missing_types") or []
+
+        if not career or not subject or not missing_types:
+            results.append({"subject": subject, "status": "skipped", "reason": "datos incompletos"})
+            continue
+
+        # Find all proposals for this subject+career → get teaching team
+        proposals_qs = db.query(models.Proposal).filter(
+            models.Proposal.career == career,
+            models.Proposal.subject == subject,
+        )
+        if study_plan:
+            proposals_qs = proposals_qs.filter(models.Proposal.study_plan == study_plan)
+        proposals_list = proposals_qs.all()
+
+        teacher_ids_seen = set()
+        teacher_rows = []
+        for prop in proposals_list:
+            for pt in prop.teachers:
+                if pt.teacher_id not in teacher_ids_seen:
+                    teacher_ids_seen.add(pt.teacher_id)
+                    if pt.teacher and pt.teacher.email:
+                        teacher_rows.append(pt.teacher)
+
+        if not teacher_rows:
+            results.append({"subject": subject, "status": "no_teachers", "recipients": []})
+            continue
+
+        # Build missing types text
+        _type_labels = {"TP": "Trabajos Prácticos (TP)", "Parcial": "Parciales", "Final": "Finales"}
+        if len(missing_types) == 3:
+            missing_text = "ningún instrumento de evaluación"
+            missing_detail = "no se han cargado Trabajos Prácticos, Parciales ni Finales"
+        else:
+            mt_names = [_type_labels.get(t, t) for t in missing_types]
+            missing_text = "algunos instrumentos de evaluación"
+            missing_detail = "faltan cargar: <strong>" + ", ".join(mt_names) + "</strong>"
+
+        docentes_list_html = "".join(
+            f'<li style="margin:2px 0;">{t.name} &lt;{t.email}&gt;</li>' for t in teacher_rows
+        )
+        recipient_emails = [t.email for t in teacher_rows]
+        to_header = ", ".join(f'"{t.name}" <{t.email}>' for t in teacher_rows)
+
+        _img_tag = '<img src="cid:macau_logo" alt="MACAU" style="height:52px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;"/>' if _logo_b else ""
+        _sys_url = os.getenv("SYSTEM_URL", "http://localhost:5173")
+
+        _html = (
+            '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'
+            '<style>body{margin:0;padding:0;background:#f0f4f8;font-family:Arial,Helvetica,sans-serif;}</style>'
+            '</head><body style="margin:0;padding:0;background:#f0f4f8;">'
+            '<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:32px 0;">'
+            '<tr><td align="center">'
+            '<table width="83%" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10);">'
+            '<tr><td style="background:#1a237e;padding:22px 36px;">'
+            '<div style="color:#fff;font-size:20px;font-weight:700;">Instrumentos Evaluativos — Recordatorio</div>'
+            '</td></tr>'
+            '<tr><td style="padding:32px 36px;color:#222;font-size:14px;line-height:1.75;">'
+            f'<p>Estimado/a equipo docente,</p>'
+            f'<p>El presente correo es para informarles que, al revisar el sistema <strong>MACAU</strong>, '
+            f'hemos observado que la asignatura <strong>{subject}</strong>'
+            f'{f" (carrera: {career})" if career else ""} '
+            f'no cuenta con {missing_text} cargados en el sistema.</p>'
+            f'<p>Puntualmente, {missing_detail}.</p>'
+            f'<p>Les solicitamos que, a la brevedad posible, procedan a cargar los archivos correspondientes '
+            f'en la plataforma <strong>MACAU</strong> (Multiagente para la Acreditación ante CONEAU).</p>'
+            f'<p><a href="{_sys_url}" style="display:inline-block;background:#1a237e;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Acceder al Sistema MACAU</a></p>'
+            f'<p style="color:#666;font-size:12px;margin-top:20px;">Este aviso fue generado automáticamente para el equipo docente de <em>{subject}</em>.</p>'
+            '</td></tr>'
+            '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
+            + _img_tag +
+            f'<div style="color:#555;font-size:13px;margin-top:4px;">Enviado por: <strong>{sender_name or "Sistema MACAU"}</strong></div>'
+            '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditación ante CONEAU</div>'
+            '</td></tr>'
+            '</table></td></tr></table>'
+            '</body></html>'
+        )
+
+        try:
+            _outer = _INMMP("mixed")
+            _outer["to"] = to_header
+            _outer["from"] = _in_make_from(sender_name or "Sistema MACAU", _gaddr)
+            _outer["subject"] = f"Recordatorio: instrumentos evaluativos pendientes — {subject}"
+            _rel = _INMMP("related")
+            _rel.attach(_INMT(_html, "html", "utf-8"))
+            if _logo_b:
+                _lp = _INMI(_logo_b, _subtype="png")
+                _lp.add_header("Content-ID", "<macau_logo>")
+                _lp.add_header("Content-Disposition", "inline", filename="macau_logo.png")
+                _rel.attach(_lp)
+            _outer.attach(_rel)
+            _raw = _inb64.urlsafe_b64encode(_outer.as_bytes()).decode()
+            _svc.users().messages().send(userId="me", body={"raw": _raw}).execute()
+            results.append({"subject": subject, "status": "sent", "recipients": recipient_emails})
+        except Exception as _se:
+            print(f"[instruments/notify] send failed for {subject!r}: {_se}", flush=True)
+            results.append({"subject": subject, "status": "error", "error": str(_se), "recipients": recipient_emails})
+
+    sent_count = sum(1 for r in results if r["status"] == "sent")
+    return {"ok": True, "sent": sent_count, "total": len(subjects_payload), "results": results}

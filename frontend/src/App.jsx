@@ -1051,6 +1051,11 @@ const App = () => {
   const [instrumentsFoldersList, setInstrumentsFoldersList] = useState([])
   const [instrumentsTableSort, setInstrumentsTableSort] = useState({ key: '', direction: 'asc' })
   const [instrumentsTableFilters, setInstrumentsTableFilters] = useState({ subject: '', yearLabel: '', quarterLabel: '' })
+  // Instrument notification
+  const [selectedInstrSubjects, setSelectedInstrSubjects] = useState(new Set()) // key: `${career}||${subject}`
+  const [instrNotifyModal, setInstrNotifyModal] = useState(null) // null | { subjects: [{career,study_plan,subject,missing_types}] }
+  const [instrNotifySending, setInstrNotifySending] = useState(false)
+  const [instrNotifyResult, setInstrNotifyResult] = useState(null) // null | { sent, total, results }
 
   const [editingPlanId, setEditingPlanId] = useState(null)
   const [correlativeMode, setCorrelativeMode] = useState(false)
@@ -1364,9 +1369,9 @@ const App = () => {
   // Load admin data whenever the admin sections become active (covers login redirect + manual nav)
   useEffect(() => {
     if (activeMenu === 'admin-carreras') { fetchAdminCareers(); fetchAdminUsers() }
-    if (activeMenu === 'admin-usuarios') {
-      fetchAdminUsers()
-      // Fetch Gmail connection status for admin notifications
+    if (activeMenu === 'admin-usuarios') { fetchAdminUsers() }
+    // Fetch Gmail connection status when entering menus that can send notifications
+    if (activeMenu === 'admin-usuarios' || activeMenu === 'docentes' || activeMenu === 'instrumentos') {
       const token = localStorage.getItem('auth_token')
       if (token) {
         fetch(`${API_BASE_URL}/notifications/gmail/status`, { headers: { Authorization: `Bearer ${token}` } })
@@ -1444,6 +1449,9 @@ const App = () => {
     setInstrumentsFoldersList([])
     setInstrumentsTableSort({ key: '', direction: 'asc' })
     setInstrumentsTableFilters({ subject: '', yearLabel: '', quarterLabel: '' })
+    setSelectedInstrSubjects(new Set())
+    setInstrNotifyModal(null)
+    setInstrNotifyResult(null)
     setDeleteProposalModal(null)
     setPlanIsDirty(false)
     setPlanUnsavedModal(null)
@@ -8515,6 +8523,33 @@ const App = () => {
   }
 
   // ── Evaluative Instruments functions ────────────────────────────────────────
+  const sendInstrumentNotifications = async () => {
+    if (!instrNotifyModal) return
+    setInstrNotifySending(true)
+    try {
+      const token = localStorage.getItem('auth_token')
+      const senderName = viewRole === 'director'
+        ? `Dirección - ${activeCareer || ''}`
+        : `Secretaría - ${activeCareer || ''}`
+      const res = await fetch(`${API_BASE_URL}/instruments/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ subjects: instrNotifyModal.subjects, sender_name: senderName }),
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || 'Error enviando notificaciones')
+      const data = await res.json()
+      setInstrNotifyResult(data)
+      setSelectedInstrSubjects(new Set())
+    } catch (e) {
+      setInstrNotifyResult({
+        sent: 0, total: instrNotifyModal.subjects.length,
+        results: instrNotifyModal.subjects.map(s => ({ subject: s.subject, status: 'error', error: e.message }))
+      })
+    } finally {
+      setInstrNotifySending(false)
+    }
+  }
+
   const fetchInstrumentsSummary = async (career) => {
     if (!career) { setInstrumentsSummary([]); return }
     try {
@@ -18810,6 +18845,100 @@ const App = () => {
         {/* INSTRUMENTOS EVALUATIVOS */}
         {activeMenu === 'instrumentos' && (
           <div style={styles.section}>
+
+            {/* Notify modal */}
+            {instrNotifyModal && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+                <div style={{ background: '#fff', borderRadius: '12px', padding: '28px 32px', maxWidth: '680px', width: '100%', maxHeight: '85vh', overflowY: 'auto', position: 'relative', boxShadow: '0 8px 40px rgba(0,0,0,0.22)' }}>
+                  <button onClick={() => { setInstrNotifyModal(null); setInstrNotifyResult(null) }} style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
+                  <h3 style={{ margin: '0 0 16px', color: '#1a237e', fontSize: '17px' }}>📧 Notificar equipo docente</h3>
+
+                  {instrNotifyResult ? (
+                    <div>
+                      <div style={{ background: instrNotifyResult.sent > 0 ? '#e8f5e9' : '#fff3e0', border: `1px solid ${instrNotifyResult.sent > 0 ? '#a5d6a7' : '#ffe082'}`, borderRadius: '8px', padding: '14px 16px', marginBottom: '16px' }}>
+                        <strong style={{ color: instrNotifyResult.sent > 0 ? '#2e7d32' : '#e65100' }}>
+                          {instrNotifyResult.sent > 0 ? '✓' : '⚠'} Envío completado: {instrNotifyResult.sent} de {instrNotifyResult.total} correo{instrNotifyResult.total !== 1 ? 's' : ''} enviado{instrNotifyResult.total !== 1 ? 's' : ''}
+                        </strong>
+                      </div>
+                      <ul style={{ paddingLeft: '20px', margin: '0 0 20px', fontSize: '13px' }}>
+                        {instrNotifyResult.results.map((r, i) => (
+                          <li key={i} style={{ marginBottom: '6px', color: r.status === 'sent' ? '#2e7d32' : r.status === 'no_teachers' ? '#e65100' : '#b00020' }}>
+                            <strong>{r.subject}</strong>: {r.status === 'sent' ? `✓ Enviado a ${(r.recipients || []).join(', ')}` : r.status === 'no_teachers' ? '⚠ Sin docentes registrados en el sistema' : `✕ Error: ${r.error}`}
+                          </li>
+                        ))}
+                      </ul>
+                      <div style={{ textAlign: 'right' }}>
+                        <button onClick={() => { setInstrNotifyModal(null); setInstrNotifyResult(null) }} style={{ background: '#1565c0', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 22px', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>Cerrar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p style={{ color: '#555', fontSize: '13px', margin: '0 0 14px' }}>Se enviará un correo de recordatorio al equipo docente de cada asignatura seleccionada, mencionando los instrumentos que faltan cargar.</p>
+
+                      <div style={{ border: '1px solid #e0e0e0', borderRadius: '8px', overflow: 'hidden', marginBottom: '20px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: '#f5f7ff' }}>
+                              <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: 700, color: '#555', borderBottom: '1px solid #e0e0e0' }}>Asignatura</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: 700, color: '#555', borderBottom: '1px solid #e0e0e0' }}>Tipos faltantes</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: 700, color: '#555', borderBottom: '1px solid #e0e0e0' }}>Carrera</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {instrNotifyModal.subjects.map((s, i) => (
+                              <tr key={i} style={{ borderBottom: '1px solid #f0f0f0', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                <td style={{ padding: '8px 12px', fontSize: '13px' }}><strong>{s.subject}</strong></td>
+                                <td style={{ padding: '8px 12px', fontSize: '13px' }}>
+                                  {s.missing_types.map(t => (
+                                    <span key={t} style={{ background: t==='TP'?'#e3f2fd':t==='Parcial'?'#fff3e0':'#f3e5f5', color: t==='TP'?'#1565c0':t==='Parcial'?'#e65100':'#6a1b9a', borderRadius: '999px', padding: '2px 9px', fontSize: '11px', fontWeight: 600, marginRight: '4px', display: 'inline-block' }}>{t}</span>
+                                  ))}
+                                </td>
+                                <td style={{ padding: '8px 12px', fontSize: '12px', color: '#666' }}>{s.career}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {instrNotifyModal.subjects.length === 1 ? (
+                        <div style={{ border: '1px solid #e8eaf6', borderRadius: '8px', padding: '16px', background: '#f8f9ff', marginBottom: '20px' }}>
+                          <div style={{ fontSize: '11px', color: '#7986cb', fontWeight: 700, marginBottom: '10px', letterSpacing: '0.5px' }}>VISTA PREVIA DEL CORREO</div>
+                          <div style={{ fontSize: '13px', color: '#333', lineHeight: 1.7 }}>
+                            <div><strong>Para:</strong> equipo docente de {instrNotifyModal.subjects[0].subject}</div>
+                            <div><strong>Asunto:</strong> Recordatorio: instrumentos evaluativos pendientes — {instrNotifyModal.subjects[0].subject}</div>
+                            <hr style={{ border: 'none', borderTop: '1px solid #e8eaf6', margin: '10px 0' }} />
+                            <div>Estimado/a equipo docente,</div>
+                            <div style={{ margin: '8px 0' }}>
+                              El presente correo es para informarles que la asignatura <strong>{instrNotifyModal.subjects[0].subject}</strong> ({instrNotifyModal.subjects[0].career}){' '}
+                              {instrNotifyModal.subjects[0].missing_types.length === 3
+                                ? 'no cuenta con ningún instrumento de evaluación cargado en el sistema.'
+                                : <>no cuenta con todos los instrumentos requeridos. Faltan cargar: <strong>{instrNotifyModal.subjects[0].missing_types.join(', ')}</strong>.</>}
+                            </div>
+                            <div>Les solicitamos que procedan a cargar los archivos correspondientes en <strong>MACAU</strong> a la brevedad.</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '8px', padding: '12px 16px', marginBottom: '20px', fontSize: '13px', color: '#7c5300' }}>
+                          📌 Se enviará un correo personalizado a cada equipo docente, mencionando puntualmente los tipos de instrumentos faltantes de su asignatura.
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                        <button onClick={() => setInstrNotifyModal(null)} style={{ background: '#78909c', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 18px', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>Cancelar</button>
+                        <button
+                          disabled={instrNotifySending}
+                          onClick={sendInstrumentNotifications}
+                          style={{ background: instrNotifySending ? '#90a4ae' : '#1565c0', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 22px', fontWeight: 700, fontSize: '13px', cursor: instrNotifySending ? 'not-allowed' : 'pointer' }}
+                        >
+                          {instrNotifySending ? 'Enviando...' : `Enviar ${instrNotifyModal.subjects.length === 1 ? 'correo' : `${instrNotifyModal.subjects.length} correos`}`}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
             {!instrumentsSubject ? (
               // ── LIST VIEW: subjects summary ──────────────────────────────
               <>
@@ -18875,6 +19004,9 @@ const App = () => {
                   })
                   const filteredRows = applyTableFilters(baseRows, instrumentsTableFilters, instrTextGetters)
                   const instrumentSubjectRows = applyTableSort(filteredRows, instrumentsTableSort, instrGetters)
+                  const _canSendInstrNotify = !isDocenteView && gmailConnected && (viewRole === 'director' || viewRole === 'secretario')
+                  const _instrNotifiableRows = instrumentSubjectRows.filter(r => r.tp === 0 || r.parcial === 0 || r.final === 0)
+                  const _instrSelectedNotifiable = _instrNotifiableRows.filter(r => selectedInstrSubjects.has(`${r.career}||${r.subject}`))
 
                   return (
                     <>
@@ -18883,6 +19015,24 @@ const App = () => {
                           Instrumentos Evaluativos
                           {activeCareer && <span style={{ fontWeight: 400, fontSize: '15px', color: '#666', marginLeft: '12px' }}>{activeCareer}</span>}
                         </h2>
+                        {_canSendInstrNotify && (
+                          <button
+                            disabled={_instrSelectedNotifiable.length === 0}
+                            onClick={() => {
+                              const subjects = _instrSelectedNotifiable.map(r => ({
+                                career: r.career,
+                                study_plan: r.study_plan || '',
+                                subject: r.subject,
+                                missing_types: [...(r.tp === 0 ? ['TP'] : []), ...(r.parcial === 0 ? ['Parcial'] : []), ...(r.final === 0 ? ['Final'] : [])]
+                              }))
+                              setInstrNotifyModal({ subjects })
+                              setInstrNotifyResult(null)
+                            }}
+                            style={{ background: _instrSelectedNotifiable.length === 0 ? '#b0bec5' : '#1565c0', color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 18px', fontWeight: 700, fontSize: '13px', cursor: _instrSelectedNotifiable.length === 0 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                          >
+                            ✉ Notificar{_instrSelectedNotifiable.length > 0 ? ` (${_instrSelectedNotifiable.length})` : ''}
+                          </button>
+                        )}
                       </div>
 
                       {instrumentsLoading && <div style={{ color: '#888' }}>Cargando...</div>}
@@ -18900,6 +19050,16 @@ const App = () => {
                         <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #ddd' }}>
                           <thead>
                             <tr style={{ background: '#0066cc', color: '#fff', borderBottom: '2px solid #ddd' }}>
+                              {_canSendInstrNotify && (
+                                <th style={{ padding: '8px', width: '42px', textAlign: 'center', fontWeight: 'bold', borderRight: '1px solid rgba(255,255,255,0.3)' }}>
+                                  <input
+                                    type="checkbox"
+                                    title="Seleccionar todos los incompletos"
+                                    checked={_instrNotifiableRows.length > 0 && _instrNotifiableRows.every(r => selectedInstrSubjects.has(`${r.career}||${r.subject}`))}
+                                    onChange={e => setSelectedInstrSubjects(e.target.checked ? new Set(_instrNotifiableRows.map(r => `${r.career}||${r.subject}`)) : new Set())}
+                                  />
+                                </th>
+                              )}
                               <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'subject')}>Asignatura{getSortIndicator(instrumentsTableSort, 'subject')}</th>
                               <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'yearLabel')}>Año{getSortIndicator(instrumentsTableSort, 'yearLabel')}</th>
                               <th style={{ padding: '8px', textAlign: 'left', fontWeight: 'bold', borderRight: '1px solid #ddd', cursor: 'pointer' }} onClick={() => toggleSort(setInstrumentsTableSort, 'quarterLabel')}>Cuatrimestre{getSortIndicator(instrumentsTableSort, 'quarterLabel')}</th>
@@ -18911,6 +19071,7 @@ const App = () => {
                               <th style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold' }}>Acción</th>
                             </tr>
                             <tr style={{ background: '#eaf3ff' }}>
+                              {_canSendInstrNotify && <th style={{ padding: '6px', borderRight: '1px solid #eee', width: '42px' }} />}
                               <th style={{ padding: '6px', borderRight: '1px solid #eee' }}>
                                 <input style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #d9d9d9', borderRadius: '4px' }} value={instrumentsTableFilters.subject} onChange={e => setInstrumentsTableFilters(p => ({ ...p, subject: e.target.value }))} placeholder="Buscar" />
                               </th>
@@ -18929,8 +19090,20 @@ const App = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {instrumentSubjectRows.map((row, idx) => (
-                              <tr key={idx} style={{ borderBottom: '1px solid #ddd', backgroundColor: idx % 2 === 0 ? '#f9f9f9' : '#fff' }}>
+                            {instrumentSubjectRows.map((row, idx) => {
+                              const _rowKey = `${row.career}||${row.subject}`
+                              const _isNotifiable = row.tp === 0 || row.parcial === 0 || row.final === 0
+                              const _isChecked = selectedInstrSubjects.has(_rowKey)
+                              return (
+                              <tr key={idx} style={{ borderBottom: '1px solid #ddd', backgroundColor: _isChecked ? '#e8f0fe' : idx % 2 === 0 ? '#f9f9f9' : '#fff' }}>
+                                {_canSendInstrNotify && (
+                                  <td style={{ padding: '8px', textAlign: 'center', width: '42px' }}>
+                                    {_isNotifiable
+                                      ? <input type="checkbox" checked={_isChecked} onChange={e => setSelectedInstrSubjects(prev => { const next = new Set(prev); e.target.checked ? next.add(_rowKey) : next.delete(_rowKey); return next })} />
+                                      : <span title="Completa: los 3 tipos tienen instrumentos cargados" style={{ color: '#81c784', fontSize: '15px' }}>&#10003;</span>
+                                    }
+                                  </td>
+                                )}
                                 <td style={{ padding: '8px' }}><strong>{row.subject}</strong></td>
                                 <td style={{ padding: '8px' }}>{row.yearLabel}</td>
                                 <td style={{ padding: '8px' }}>{row.quarterLabel}</td>
@@ -18966,7 +19139,8 @@ const App = () => {
                                   </button>
                                 </td>
                               </tr>
-                            ))}
+                              )
+                            })}
                           </tbody>
                         </table>
                       )}
