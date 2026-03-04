@@ -471,3 +471,14 @@ class Career(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     director_id = Column(Integer, nullable=True)
     secretario_id = Column(Integer, nullable=True)
+
+
+# ── Career Committee Members ────────────────────────────────────────────────
+
+class CareerCommitteeMember(Base):
+    __tablename__ = "career_committee_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    career_id = Column(Integer, ForeignKey("careers.id", ondelete="CASCADE"), nullable=False, index=True)
+    teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

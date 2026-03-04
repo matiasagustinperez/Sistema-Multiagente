@@ -27,6 +27,7 @@ def init_db():
     ensure_accreditation_settings_columns()
     ensure_accreditation_workplan_columns()
     ensure_careers_columns()
+    ensure_committee_table()
     ensure_auth_columns()
 
 
@@ -59,6 +60,20 @@ def ensure_careers_columns():
                 conn.commit()
             except Exception:
                 pass
+
+
+def ensure_committee_table():
+    """Create career_committee_members table if it doesn't exist."""
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS career_committee_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                career_id INTEGER NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+                teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.commit()
 
 
 def ensure_proposals_columns():

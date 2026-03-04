@@ -5590,6 +5590,17 @@ def _build_user_payload(teacher: "models.Teacher", db) -> dict:
             career_assignments.append({"role": "secretario", "careerId": c.id, "careerName": c.name})
             assigned_career_names.add(c.name)
 
+    # 1b) comision_curricular assignments (from CareerCommitteeMember junction table)
+    committee_rows = db.query(models.CareerCommitteeMember).filter(
+        models.CareerCommitteeMember.teacher_id == teacher.id
+    ).all()
+    for cm in committee_rows:
+        career_obj = db.query(models.Career).filter(models.Career.id == cm.career_id).first()
+        if career_obj:
+            already = any(a["role"] == "comision_curricular" and a["careerId"] == career_obj.id for a in career_assignments)
+            if not already:
+                career_assignments.append({"role": "comision_curricular", "careerId": career_obj.id, "careerName": career_obj.name})
+
     # 2) docente career assignments (from TeacherCareer junction table)
     # Canonicalize career name against Career table to avoid case mismatches
     canonical_map = {c.name.lower().strip(): c.name for c in db.query(models.Career).all()}
@@ -5613,6 +5624,8 @@ def _build_user_payload(teacher: "models.Teacher", db) -> dict:
         top_role = "director"
     elif any(a["role"] == "secretario" for a in career_assignments):
         top_role = "secretario"
+    elif any(a["role"] == "comision_curricular" for a in career_assignments):
+        top_role = "comision_curricular"
     else:
         top_role = "docente"
 
@@ -6485,6 +6498,15 @@ def list_careers(
             t = db.query(models.Teacher).filter(models.Teacher.id == tid).first()
             teacher_cache[tid] = t.name if t else None
         return teacher_cache[tid]
+
+    # Build committee members map {career_id: [{id, name}]}
+    committee_rows = db.query(models.CareerCommitteeMember).all()
+    committee_map: dict[int, list] = {}
+    for cm in committee_rows:
+        t = db.query(models.Teacher).filter(models.Teacher.id == cm.teacher_id).first()
+        if t:
+            committee_map.setdefault(cm.career_id, []).append({"id": t.id, "name": t.name})
+
     return [
         {
             "id": c.id,
@@ -6495,6 +6517,7 @@ def list_careers(
             "secretario_id": c.secretario_id,
             "director_name": teacher_name(c.director_id),
             "secretario_name": teacher_name(c.secretario_id),
+            "committee_members": committee_map.get(c.id, []),
         }
         for c in careers
     ]
@@ -6561,6 +6584,43 @@ def delete_career(career_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Carrera no encontrada.")
     db.delete(career)
     db.commit()
+    return Response(status_code=204)
+
+
+@app.post("/careers/{career_id}/committee", tags=["Careers"])
+def add_committee_member(career_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Add a teacher as Comisión Curricular member for a career."""
+    teacher_id = payload.get("teacher_id")
+    if not teacher_id:
+        raise HTTPException(status_code=422, detail="teacher_id requerido.")
+    career = db.query(models.Career).filter(models.Career.id == career_id).first()
+    if not career:
+        raise HTTPException(status_code=404, detail="Carrera no encontrada.")
+    teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    existing = db.query(models.CareerCommitteeMember).filter(
+        models.CareerCommitteeMember.career_id == career_id,
+        models.CareerCommitteeMember.teacher_id == teacher_id
+    ).first()
+    if existing:
+        return {"ok": True, "message": "Ya es miembro."}
+    member = models.CareerCommitteeMember(career_id=career_id, teacher_id=teacher_id)
+    db.add(member)
+    db.commit()
+    return {"ok": True, "id": member.id, "teacher_name": teacher.name}
+
+
+@app.delete("/careers/{career_id}/committee/{teacher_id}", status_code=204, tags=["Careers"])
+def remove_committee_member(career_id: int, teacher_id: int, db: Session = Depends(get_db)):
+    """Remove a teacher from Comisión Curricular of a career."""
+    row = db.query(models.CareerCommitteeMember).filter(
+        models.CareerCommitteeMember.career_id == career_id,
+        models.CareerCommitteeMember.teacher_id == teacher_id
+    ).first()
+    if row:
+        db.delete(row)
+        db.commit()
     return Response(status_code=204)
 
 

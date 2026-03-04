@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+﻿import React, { useState, useEffect, useRef } from 'react'
 import logoMacau from '../Logo MACAU.png'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8011').replace(/\/$/, '')
@@ -425,10 +425,11 @@ const LoginScreen = ({ onLogin }) => {
 
 // ── RolePickerScreen ─────────────────────────────────────────────────────────
 const ROLE_PICKER_INFO = {
-  director:   { label: 'Director',   color: '#1565c0', bg: '#e3f2fd', border: '#90caf9', icon: '🎓' },
-  secretario: { label: 'Secretario', color: '#e65100', bg: '#fff3e0', border: '#ffcc80', icon: '📋' },
-  docente:    { label: 'Docente',    color: '#2e7d32', bg: '#e8f5e9', border: '#a5d6a7', icon: '👩‍🏫' },
-  admin:      { label: 'Admin',      color: '#7c3aed', bg: '#f3e8ff', border: '#c4b5fd', icon: '⚙️' },
+  director:             { label: 'Director',                 color: '#1565c0', bg: '#e3f2fd', border: '#90caf9', icon: '🎓' },
+  secretario:           { label: 'Secretario',               color: '#e65100', bg: '#fff3e0', border: '#ffcc80', icon: '📋' },
+  docente:              { label: 'Docente',                  color: '#2e7d32', bg: '#e8f5e9', border: '#a5d6a7', icon: '👩‍🏫' },
+  admin:                { label: 'Admin',                    color: '#7c3aed', bg: '#f3e8ff', border: '#c4b5fd', icon: '⚙️' },
+  comision_curricular:  { label: 'Comisión Curricular',      color: '#00695c', bg: '#e0f2f1', border: '#80cbc4', icon: '📚' },
 }
 const RolePickerScreen = ({ user, career, roles, onPick }) => (
   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #e8f4f8 0%, #d0e8f0 100%)', position: 'relative', overflow: 'hidden' }}>
@@ -567,7 +568,7 @@ const App = () => {
     } else {
       const role = rolesInFirstCareer[0] || user.role || 'docente'
       setViewRole(role)
-      if (role === 'director' || role === 'secretario') setActiveMenu('home')
+      if (role === 'director' || role === 'secretario' || role === 'comision_curricular') setActiveMenu('home')
       else setActiveMenu('propuestas')
     }
   }
@@ -1086,6 +1087,7 @@ const App = () => {
   const [adminCareerFormSaving, setAdminCareerFormSaving] = useState(false)
   const [adminCareerEditId, setAdminCareerEditId] = useState(null)  // id of career being edited inline
   const [adminCareerResponsableModal, setAdminCareerResponsableModal] = useState(null) // {careerId, type:'director'|'secretario', currentId, selectedId}
+  const [adminCareerCommitteeModal, setAdminCareerCommitteeModal] = useState(null) // {careerId, careerName, search, selectedId, dropdownOpen}
   const [planIsDirty, setPlanIsDirty] = useState(false)
   const [planUnsavedModal, setPlanUnsavedModal] = useState(null) // {type:'menu'|'career', value:string}
   const planNavBypassRef = useRef(false)
@@ -5410,7 +5412,7 @@ const App = () => {
       const teachers = await teachersRes.json().catch(() => [])
       const careers = await careersRes.json().catch(() => [])
 
-      // Build role map: teacherId → [ { role: 'director'|'secretario', careerName } ]
+      // Build role map: teacherId → [ { role: 'director'|'secretario'|'comision_curricular', careerName } ]
       const roleMap = {}
       ;(Array.isArray(careers) ? careers : []).forEach(c => {
         if (c.director_id) {
@@ -5420,6 +5422,13 @@ const App = () => {
         if (c.secretario_id) {
           if (!roleMap[c.secretario_id]) roleMap[c.secretario_id] = []
           roleMap[c.secretario_id].push({ role: 'secretario', careerName: c.name })
+        }
+        if (Array.isArray(c.committee_members)) {
+          c.committee_members.forEach(cm => {
+            if (!roleMap[cm.id]) roleMap[cm.id] = []
+            const already = roleMap[cm.id].some(a => a.role === 'comision_curricular' && a.careerName === c.name)
+            if (!already) roleMap[cm.id].push({ role: 'comision_curricular', careerName: c.name })
+          })
         }
       })
 
@@ -9075,13 +9084,14 @@ const App = () => {
   }
 
   const isDocenteView = viewRole === 'docente'
+  const isComisionView = viewRole === 'comision_curricular'
   const isAdminView = viewRole === 'admin'
   const isSecretarioView = viewRole === 'secretario'
   const isDirectorView = viewRole === 'director'
   // Solo el Director puede eliminar entidades
   const canDelete = viewRole === 'director'
   // Director y Secretario pueden enviar notificaciones
-  const canNotify = viewRole === 'director' || viewRole === 'secretario'
+  const canNotify = viewRole === 'director' || viewRole === 'secretario' || viewRole === 'comision_curricular'
 
   // ── Per-user career + role access (derived from currentUser.career_assignments) ──
   const userCareers = currentUser
@@ -9177,7 +9187,7 @@ const App = () => {
     })
   }
 
-  const canCreateProposal = !isDocenteView && isProposalReadyToCreate()
+  const canCreateProposal = !isDocenteView && !isComisionView && isProposalReadyToCreate()
   const canSaveDraft = !!(
     (formData.carrera || activeCareer) && 
     formData.asignatura && 
@@ -9187,7 +9197,7 @@ const App = () => {
     formData.cuatrimestre &&
     formData.regimen &&
     formData.caracter &&
-    (!isDocenteView || !!editingProposalId)
+    !isComisionView && (!isDocenteView || !!editingProposalId)
   )
   const fullProposalStarterRequiresCompetencies = !isTechnicalCareerName(formData.carrera || activeCareer)
   const fullProposalStarterPendingItems = [
@@ -9373,7 +9383,7 @@ const App = () => {
       setFullProposalSubProgress({ current: 0, total: 0, label: '' })
     }
   }
-  const canSaveEdits = !!(formData.carrera || activeCareer) && !!formData.asignatura && (!isDocenteView || !!editingProposalId)
+  const canSaveEdits = !!(formData.carrera || activeCareer) && !!formData.asignatura && (!isDocenteView && !isComisionView || !!editingProposalId)
   const normalizedActiveCareer = normalizeCareer(activeCareer)
   const filteredByCareer = normalizedActiveCareer
     ? proposals.filter((proposal) => normalizeCareer(proposal.career) === normalizedActiveCareer)
@@ -10828,7 +10838,7 @@ const App = () => {
   const handleRolePick = (role) => {
     setViewRole(role)
     setRolePickerPending(null)
-    if (role === 'director' || role === 'secretario') setActiveMenu('home')
+    if (role === 'director' || role === 'secretario' || role === 'comision_curricular') setActiveMenu('home')
     else setActiveMenu('propuestas')
   }
 
@@ -10855,23 +10865,23 @@ const App = () => {
           {/* Role badge */}
           <div style={{
             display: 'inline-block', marginTop: '10px',
-            background: isAdminView ? '#7c3aed' : isSecretarioView ? '#e65100' : isDocenteView ? '#2e7d32' : '#1565c0',
+            background: isAdminView ? '#7c3aed' : isSecretarioView ? '#e65100' : isDocenteView ? '#2e7d32' : isComisionView ? '#00695c' : '#1565c0',
             color: '#fff', borderRadius: '999px', padding: '3px 12px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px'
           }}>
-            {isAdminView ? 'Administrador' : isSecretarioView ? 'Secretario' : isDocenteView ? 'Docente' : 'Director'}
+            {isAdminView ? 'Administrador' : isSecretarioView ? 'Secretario' : isDocenteView ? 'Docente' : isComisionView ? 'Comisión Curricular' : 'Director'}
           </div>
           {/* Role switcher – inline, directly under active badge */}
           {!isAdminView && rolesForCurrentCareer.length > 1 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'center', marginTop: '8px' }}>
               {rolesForCurrentCareer.filter(role => role !== viewRole).map(role => {
-                const labels = { director: 'Director', secretario: 'Secretario', docente: 'Docente', admin: 'Admin' }
-                const colors = { director: '#1565c0', secretario: '#e65100', docente: '#2e7d32', admin: '#7c3aed' }
+                const labels = { director: 'Director', secretario: 'Secretario', docente: 'Docente', admin: 'Admin', comision_curricular: 'Comisión Curricular' }
+                const colors = { director: '#1565c0', secretario: '#e65100', docente: '#2e7d32', admin: '#7c3aed', comision_curricular: '#00695c' }
                 return (
                   <button
                     key={role}
                     onClick={() => {
                       setViewRole(role)
-                      if (role === 'director' || role === 'secretario') setActiveMenu('home')
+                      if (role === 'director' || role === 'secretario' || role === 'comision_curricular') setActiveMenu('home')
                       else if (role === 'docente') setActiveMenu('propuestas')
                     }}
                     style={{
@@ -15625,6 +15635,82 @@ const App = () => {
               </div>
             )}
 
+            {/* Committee member modal */}
+            {adminCareerCommitteeModal && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ background: '#fff', borderRadius: '12px', padding: '28px', maxWidth: '420px', width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+                  <h3 style={{ margin: '0 0 8px', fontSize: '16px' }}>Agregar Miembro — Comisión Curricular</h3>
+                  <p style={{ color: '#555', fontSize: '13px', marginBottom: '14px' }}>
+                    Carrera: <strong>{adminCareerCommitteeModal.careerName}</strong>
+                  </p>
+                  {(() => {
+                    const q = (adminCareerCommitteeModal.search || '').toLowerCase()
+                    const existingIds = (adminCareers.find(c => c.id === adminCareerCommitteeModal.careerId)?.committee_members || []).map(m => m.id)
+                    const filtered = adminUsers.filter(u =>
+                      !existingIds.includes(u.id) &&
+                      (!q || (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q))
+                    )
+                    const setM = patch => setAdminCareerCommitteeModal(m => ({ ...m, ...patch }))
+                    return (
+                      <div style={{ position: 'relative', marginBottom: '18px' }}>
+                        <input
+                          style={{ ...styles.input, width: '100%', marginBottom: 0, boxSizing: 'border-box' }}
+                          placeholder="Buscar usuario por nombre o email..."
+                          value={adminCareerCommitteeModal.search}
+                          autoFocus
+                          onChange={e => setM({ search: e.target.value, selectedId: '', dropdownOpen: true })}
+                          onFocus={() => setM({ dropdownOpen: true })}
+                          onBlur={() => setTimeout(() => setM({ dropdownOpen: false }), 150)}
+                        />
+                        {adminCareerCommitteeModal.dropdownOpen && (
+                          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: '#fff', border: '1px solid #80cbc4', borderTop: 'none', borderRadius: '0 0 8px 8px', maxHeight: '220px', overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.12)' }}>
+                            {filtered.length === 0 ? (
+                              <div style={{ padding: '10px 12px', color: '#aaa', fontSize: '13px', fontStyle: 'italic' }}>Sin resultados</div>
+                            ) : filtered.map(u => (
+                              <div
+                                key={u.id}
+                                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px', background: String(adminCareerCommitteeModal.selectedId) === String(u.id) ? '#e0f2f1' : 'transparent', borderBottom: '1px solid #f0f4f8' }}
+                                onMouseDown={() => setM({ selectedId: String(u.id), search: u.name + (u.email ? ` (${u.email})` : ''), dropdownOpen: false })}
+                                onMouseEnter={e => e.currentTarget.style.background = '#f0faf9'}
+                                onMouseLeave={e => e.currentTarget.style.background = String(adminCareerCommitteeModal.selectedId) === String(u.id) ? '#e0f2f1' : 'transparent'}
+                              >
+                                <span style={{ fontWeight: 600 }}>{u.name}</span>
+                                {u.email && <span style={{ color: '#777', marginLeft: '6px', fontSize: '12px' }}>{u.email}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {adminCareerCommitteeModal.selectedId && (
+                          <div style={{ marginTop: '6px', fontSize: '12px', color: '#00695c' }}>
+                            ✓ Seleccionado: <strong>{adminCareerCommitteeModal.search.split(' (')[0]}</strong>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button style={{ ...styles.button, background: '#90a4ae' }} onClick={() => setAdminCareerCommitteeModal(null)}>Cancelar</button>
+                    <button
+                      style={{ ...styles.button, background: adminCareerCommitteeModal.selectedId ? '#00695c' : '#b0bec5' }}
+                      disabled={!adminCareerCommitteeModal.selectedId}
+                      onClick={async () => {
+                        await fetch(`${API_BASE_URL}/careers/${adminCareerCommitteeModal.careerId}/committee`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ teacher_id: parseInt(adminCareerCommitteeModal.selectedId, 10) })
+                        })
+                        setAdminCareerCommitteeModal(null)
+                        await fetchAdminCareers()
+                        fetchAdminUsers()
+                      }}
+                    >
+                      Agregar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Careers table */}
             {adminCareersLoading ? (
               <div style={{ padding: '30px', textAlign: 'center', color: '#888' }}>Cargando...</div>
@@ -15639,6 +15725,7 @@ const App = () => {
                       <th style={{ padding: '10px 12px', textAlign: 'center', width: '80px' }}>Estado</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left', width: '200px' }}>Director/a</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left', width: '200px' }}>Secretario/a</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '200px' }}>Comisión Curricular</th>
                       <th style={{ padding: '10px 12px', textAlign: 'right', width: '170px' }}>Acciones</th>
                     </tr>
                   </thead>
@@ -15693,6 +15780,31 @@ const App = () => {
                               onClick={() => setAdminCareerResponsableModal({ careerId: career.id, type: 'secretario', currentId: career.secretario_id ?? null, selectedId: career.secretario_id ?? '', search: career.secretario_name ?? '', dropdownOpen: false })}
                             >
                               ✏️
+                            </button>
+                          </div>
+                        </td>
+                        {/* Comisión Curricular */}
+                        <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {(career.committee_members || []).map(m => (
+                              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <span style={{ fontSize: '12px', color: '#00695c', background: '#e0f2f1', borderRadius: '12px', padding: '1px 8px' }}>{m.name}</span>
+                                <button
+                                  style={{ background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: '0 2px' }}
+                                  title={`Quitar a ${m.name}`}
+                                  onClick={async () => {
+                                    await fetch(`${API_BASE_URL}/careers/${career.id}/committee/${m.id}`, { method: 'DELETE' })
+                                    await fetchAdminCareers()
+                                    fetchAdminUsers()
+                                  }}
+                                >×</button>
+                              </div>
+                            ))}
+                            <button
+                              style={{ background: 'none', border: '1px dashed #80cbc4', borderRadius: '6px', padding: '2px 8px', fontSize: '12px', color: '#00695c', cursor: 'pointer', whiteSpace: 'nowrap', marginTop: '2px', alignSelf: 'flex-start' }}
+                              onClick={() => setAdminCareerCommitteeModal({ careerId: career.id, careerName: career.name, search: '', selectedId: '', dropdownOpen: false })}
+                            >
+                              + Agregar miembro
                             </button>
                           </div>
                         </td>
@@ -15887,10 +15999,11 @@ const App = () => {
               })
               const roleBadge = (role, careerName) => {
                 const map = {
-                  director:   { label: 'Director',   bg: '#1565c0', color: '#fff' },
-                  secretario: { label: 'Secretario', bg: '#e65100', color: '#fff' },
-                  docente:    { label: 'Docente',    bg: '#2e7d32', color: '#fff' },
-                  admin:      { label: 'Admin',      bg: '#7c3aed', color: '#fff' },
+                  director:            { label: 'Director',               bg: '#1565c0', color: '#fff' },
+                  secretario:          { label: 'Secretario',             bg: '#e65100', color: '#fff' },
+                  docente:             { label: 'Docente',                bg: '#2e7d32', color: '#fff' },
+                  admin:               { label: 'Admin',                  bg: '#7c3aed', color: '#fff' },
+                  comision_curricular: { label: 'Comisión Curricular', bg: '#00695c', color: '#fff' },
                 }
                 const s = map[role] || { label: role, bg: '#90a4ae', color: '#fff' }
                 const key = `${role}-${careerName || ''}`
@@ -19029,7 +19142,7 @@ const App = () => {
                   const filteredRows = applyTableFilters(baseRows, instrumentsTableFilters, instrTextGetters)
                   const instrumentSubjectRows = applyTableSort(filteredRows, instrumentsTableSort, instrGetters)
                   const _canSendInstrNotify = !isDocenteView && gmailConnected && (viewRole === 'director' || viewRole === 'secretario')
-                  const _showNotifyArea = !isDocenteView && (viewRole === 'director' || viewRole === 'secretario')
+                  const _showNotifyArea = !isDocenteView && (viewRole === 'director' || viewRole === 'secretario' || viewRole === 'comision_curricular')
                   const _instrNotifiableRows = instrumentSubjectRows.filter(r => r.tp === 0 || r.parcial === 0 || r.final === 0)
                   const _instrSelectedNotifiable = _instrNotifiableRows.filter(r => selectedInstrSubjects.has(`${r.career}||${r.subject}`))
 
