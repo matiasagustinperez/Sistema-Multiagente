@@ -19690,14 +19690,16 @@ const App = () => {
                   >
                     {viewProposalGdocValidateLoading ? 'Validando remoto...' : 'Validar cambios remotos (GDoc)'}
                   </button>
-                  <button
-                    style={{ ...styles.button, background: viewProposal.gdoc_url ? '#ff9800' : '#bbb' }}
-                    onClick={() => unlinkProposalGdoc(viewProposal.id)}
-                    disabled={!viewProposal.gdoc_url}
-                    title={!viewProposal.gdoc_url ? 'Sin enlace de Google Docs' : 'Desvincular enlace'}
-                  >
-                    Desvincular link
-                  </button>
+                  {!isDocenteView && (
+                    <button
+                      style={{ ...styles.button, background: viewProposal.gdoc_url ? '#ff9800' : '#bbb' }}
+                      onClick={() => unlinkProposalGdoc(viewProposal.id)}
+                      disabled={!viewProposal.gdoc_url}
+                      title={!viewProposal.gdoc_url ? 'Sin enlace de Google Docs' : 'Desvincular enlace'}
+                    >
+                      Desvincular link
+                    </button>
+                  )}
                 </div>
 
               {viewProposalLinkIssue && (
@@ -19918,14 +19920,16 @@ const App = () => {
                                     />
                                   </>
                                 )}
-                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                  <button
-                                    style={{ ...styles.button, background: '#2e7d32', padding: '6px 10px' }}
-                                    onClick={() => saveIntelligentSuggestionEdits(viewProposal.id, result.id)}
-                                  >
-                                    Guardar sugerencia
-                                  </button>
-                                </div>
+                                {!isDocenteView && (
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                    <button
+                                      style={{ ...styles.button, background: '#2e7d32', padding: '6px 10px' }}
+                                      onClick={() => saveIntelligentSuggestionEdits(viewProposal.id, result.id)}
+                                    >
+                                      Guardar sugerencia
+                                    </button>
+                                  </div>
+                                )}
                               </>
                             )}
                           </div>
@@ -19943,13 +19947,17 @@ const App = () => {
                     <span style={{ fontSize: '13px', color: '#15803d', background: '#dcfce7', border: '1px solid #86efac', borderRadius: '6px', padding: '6px 12px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       ✅ Enlazado
                     </span>
-                    <button
-                      style={{ ...styles.button, background: '#64748b', marginRight: 0, whiteSpace: 'nowrap' }}
-                      onClick={() => { setViewProposalGdocEditMode(true); setViewProposalGdocInput(viewProposal.gdoc_url || '') }}
-                    >
-                      Cambiar enlace
-                    </button>
+                    {!isDocenteView && (
+                      <button
+                        style={{ ...styles.button, background: '#64748b', marginRight: 0, whiteSpace: 'nowrap' }}
+                        onClick={() => { setViewProposalGdocEditMode(true); setViewProposalGdocInput(viewProposal.gdoc_url || '') }}
+                      >
+                        Cambiar enlace
+                      </button>
+                    )}
                   </div>
+                ) : isDocenteView ? (
+                  <span style={{ fontSize: '13px', color: '#888', fontStyle: 'italic' }}>Sin enlace de Google Docs</span>
                 ) : (
                   <div>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
