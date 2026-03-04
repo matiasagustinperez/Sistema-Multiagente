@@ -1484,6 +1484,8 @@ const App = () => {
       ? `Dirección - ${activeCareer || ''}`
       : viewRole === 'secretario'
       ? `Secretaría - ${activeCareer || ''}`
+      : viewRole === 'comision_curricular'
+      ? `Comisión Curricular - ${activeCareer || ''}`
       : (currentUser?.name || '')
     setEmailSenderName(autoName)
   }, [currentUser?.id, viewRole, activeCareer])
@@ -5077,6 +5079,8 @@ const App = () => {
       ? `Dirección - ${activeCareer || ''}`
       : viewRole === 'secretario'
       ? `Secretaría - ${activeCareer || ''}`
+      : viewRole === 'comision_curricular'
+      ? `Comisión Curricular - ${activeCareer || ''}`
       : (currentUser?.name || '')
     setEmailSenderName(autoName)
     setShowEmailModal(true)
