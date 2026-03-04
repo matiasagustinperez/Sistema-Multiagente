@@ -9091,6 +9091,7 @@ const App = () => {
 
   const isDocenteView = viewRole === 'docente'
   const isComisionView = viewRole === 'comision_curricular'
+  const isReadOnlyRole = isDocenteView || isComisionView  // cannot create or edit anything
   const isAdminView = viewRole === 'admin'
   const isSecretarioView = viewRole === 'secretario'
   const isDirectorView = viewRole === 'director'
@@ -9236,7 +9237,7 @@ const App = () => {
     !isNonEmptyText(formData.evaluacion) &&
     !isNonEmptyText(formData.bibliografia)
   )
-  const canStartFullProposalWithIa = !isDocenteView && fullProposalStarterBaseReady && fullProposalStarterSectionsEmpty && !isGeneratingFullProposal
+  const canStartFullProposalWithIa = !isReadOnlyRole && fullProposalStarterBaseReady && fullProposalStarterSectionsEmpty && !isGeneratingFullProposal
   const fullProposalDraftRaCountValid = Number.isInteger(parseInt(fullProposalDraft.raCount, 10)) && parseInt(fullProposalDraft.raCount, 10) >= 1 && parseInt(fullProposalDraft.raCount, 10) <= 10
   const fullProposalDraftUnitCountValid = Number.isInteger(parseInt(fullProposalDraft.unitCount, 10)) && parseInt(fullProposalDraft.unitCount, 10) >= 1 && parseInt(fullProposalDraft.unitCount, 10) <= 12
   const fullProposalDraftTpCountValid = Number.isInteger(parseInt(fullProposalDraft.tpCount, 10)) && parseInt(fullProposalDraft.tpCount, 10) >= 1 && parseInt(fullProposalDraft.tpCount, 10) <= 12
@@ -10749,7 +10750,7 @@ const App = () => {
   const renderCompetencySection = ({ title, type, required }) => {
     const items = Array.isArray(formData[type]) ? formData[type] : []
     const isGeneric = type === 'competenciasGenItems'
-    const canEditCompetencies = !isDocenteView
+    const canEditCompetencies = !isReadOnlyRole
     const catalogList = isGeneric ? careerCompetencies.generic : careerCompetencies.specific
     const planName = formData.plan || getCatalogPlanName(activeCareer)
     const filteredCatalogList = filterCompetenciesByPlan(catalogList, planName, activeCareer)
@@ -11158,7 +11159,7 @@ const App = () => {
             <h2>Propuestas Académicas</h2>
             
             {/* CARDS SECTION */}
-            {!isDocenteView && (
+            {!isReadOnlyRole && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '30px', marginTop: '20px' }}>
                 <div style={{ 
                   border: '2px solid #0066cc', 
@@ -11234,7 +11235,7 @@ const App = () => {
               {filteredProposals.length > 0 ? (
                 <div style={{ overflowX: 'auto' }}>
                   {/* Toolbar de acciones masivas (solo director) */}
-                  {!isDocenteView && selectedProposalIds.size > 0 && (
+                  {!isReadOnlyRole && selectedProposalIds.size > 0 && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', padding: '8px 12px', background: '#e8f0fe', borderRadius: '6px', border: '1px solid #c6dafc' }}>
                       <span style={{ fontWeight: 600, color: '#1a3d5c', fontSize: '13px' }}>{selectedProposalIds.size} seleccionada(s)</span>
                       <button
@@ -11262,7 +11263,7 @@ const App = () => {
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ backgroundColor: '#0066cc', color: 'white' }}>
-                        {!isDocenteView && (
+                        {!isReadOnlyRole && (
                           <th style={{ width: '36px', padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>
                             <input
                               type="checkbox"
@@ -11332,7 +11333,7 @@ const App = () => {
                         <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #0066cc' }}>Acciones</th>
                       </tr>
                       <tr style={{ backgroundColor: '#f4f8ff' }}>
-                        {!isDocenteView && <th style={{ width: '36px', padding: '6px' }} />}
+                        {!isReadOnlyRole && <th style={{ width: '36px', padding: '6px' }} />}
                         <th style={{ width: '70px', padding: '6px' }}>
                           <input
                             style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #cfd8dc', borderRadius: '4px' }}
@@ -11445,7 +11446,7 @@ const App = () => {
                             borderBottom: '1px solid #eee'
                           }}
                         >
-                          {!isDocenteView && (
+                          {!isReadOnlyRole && (
                             <td style={{ width: '36px', padding: '10px', textAlign: 'center' }}>
                               <input
                                 type="checkbox"
@@ -11490,10 +11491,10 @@ const App = () => {
                               👁️
                             </button>
                             <button
-                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: prop.editing_locked ? '#bbb' : 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d', cursor: prop.editing_locked ? 'not-allowed' : 'pointer' }}
-                              title={prop.editing_locked ? 'Propuesta cerrada para edición' : 'Editar propuesta'}
-                              onClick={() => !prop.editing_locked && loadProposalForEdit(prop.id)}
-                              disabled={prop.editing_locked}
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: (prop.editing_locked || isComisionView) ? '#bbb' : 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d', cursor: (prop.editing_locked || isComisionView) ? 'not-allowed' : 'pointer' }}
+                              title={prop.editing_locked ? 'Propuesta cerrada para edición' : (isComisionView ? 'La Comisión Curricular no puede editar propuestas' : 'Editar propuesta')}
+                              onClick={() => !prop.editing_locked && !isComisionView && loadProposalForEdit(prop.id)}
+                              disabled={prop.editing_locked || isComisionView}
                             >
                               ✏️
                             </button>
@@ -11504,7 +11505,7 @@ const App = () => {
                             >
                               ⬇️
                             </button>
-                            {!isDocenteView && (
+                            {!isReadOnlyRole && (
                               <>
                                 <button
                                   style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: prop.editing_locked ? '#2e7d32' : '#c62828', color: '#fff' }}
@@ -11538,7 +11539,7 @@ const App = () => {
           </div>
         )}
 
-        {activeMenu === 'configuracion' && !isDocenteView && (
+        {activeMenu === 'configuracion' && !isReadOnlyRole && (
           <div style={styles.section}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
@@ -11676,7 +11677,7 @@ const App = () => {
                           updateFormData('plan', plan.name)
                         }
                       }}
-                      disabled={isDocenteView}
+                      disabled={isReadOnlyRole}
                     >
                       <option value="">Seleccionar carrera...</option>
                       {careerOptions.map((career) => (
@@ -11774,7 +11775,7 @@ const App = () => {
                           style={styles.input}
                           value={formData.plan}
                           onChange={(e) => updateFormData('plan', e.target.value)}
-                          disabled={isDocenteView || planOptions.length === 0}
+                          disabled={isReadOnlyRole || planOptions.length === 0}
                         >
                           <option value="">Seleccionar...</option>
                           {hasCustomPlanOption && (
@@ -11796,15 +11797,15 @@ const App = () => {
                     </div>
                     <div>
                       <label style={styles.label}>Año Académico *</label>
-                      <input style={styles.input} value={formData.anio} onChange={(e) => updateFormData('anio', e.target.value)} placeholder="Ej: 2024" disabled={isDocenteView} />
+                      <input style={styles.input} value={formData.anio} onChange={(e) => updateFormData('anio', e.target.value)} placeholder="Ej: 2024" disabled={isReadOnlyRole} />
                     </div>
                     <div>
                       <label style={styles.label}>Año en carrera *</label>
-                      <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} placeholder="Ej: 1, 2, 3, 4, 5" disabled={isDocenteView} />
+                      <input style={styles.input} value={formData.ciclo} onChange={(e) => updateFormData('ciclo', e.target.value)} placeholder="Ej: 1, 2, 3, 4, 5" disabled={isReadOnlyRole} />
                     </div>
                     <div>
                       <label style={styles.label}>Cuatrimestre *</label>
-                      <select style={styles.input} value={formData.cuatrimestre} onChange={(e) => updateFormData('cuatrimestre', e.target.value)} disabled={isDocenteView}>
+                      <select style={styles.input} value={formData.cuatrimestre} onChange={(e) => updateFormData('cuatrimestre', e.target.value)} disabled={isReadOnlyRole}>
                         <option value="">Seleccionar...</option>
                         <option>1er Cuatrimestre</option>
                         <option>2do Cuatrimestre</option>
@@ -11817,25 +11818,25 @@ const App = () => {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '20px', padding: '0 10px', gridColumn: '1 / -1' }}>
                     <div>
                       <label style={styles.label}>Carácter</label>
-                      <select style={styles.input} value={formData.caracter} onChange={(e) => updateFormData('caracter', e.target.value)} disabled={isDocenteView}>
+                      <select style={styles.input} value={formData.caracter} onChange={(e) => updateFormData('caracter', e.target.value)} disabled={isReadOnlyRole}>
                         <option>Obligatoria</option>
                         <option>Optativa</option>
                       </select>
                     </div>
                     <div>
                       <label style={styles.label}>Régimen</label>
-                      <select style={styles.input} value={formData.regimen} onChange={(e) => updateFormData('regimen', e.target.value)} disabled={isDocenteView}>
+                      <select style={styles.input} value={formData.regimen} onChange={(e) => updateFormData('regimen', e.target.value)} disabled={isReadOnlyRole}>
                         <option>Cuatrimestral</option>
                         <option>Anual</option>
                       </select>
                     </div>
                     <div>
                       <label style={styles.label}>Hs Teóricas</label>
-                      <input style={styles.input} type="number" value={formData.hsTeo} onChange={(e) => updateFormData('hsTeo', e.target.value)} min="0" disabled={isDocenteView} />
+                      <input style={styles.input} type="number" value={formData.hsTeo} onChange={(e) => updateFormData('hsTeo', e.target.value)} min="0" disabled={isReadOnlyRole} />
                     </div>
                     <div>
                       <label style={styles.label}>Hs Prácticas</label>
-                      <input style={styles.input} type="number" value={formData.hsPrac} onChange={(e) => updateFormData('hsPrac', e.target.value)} min="0" disabled={isDocenteView} />
+                      <input style={styles.input} type="number" value={formData.hsPrac} onChange={(e) => updateFormData('hsPrac', e.target.value)} min="0" disabled={isReadOnlyRole} />
                     </div>
                     <div>
                       <label style={styles.label}>Total</label>
@@ -11863,7 +11864,7 @@ const App = () => {
               <div style={styles.section}>
                 <h3>Equipo Docente</h3>
                 {equipoDocente.map(doc => {
-                  const suggestions = !isDocenteView && docenteAutocompleteId === doc.id
+                  const suggestions = !isReadOnlyRole && docenteAutocompleteId === doc.id
                     ? getTeacherSuggestions(doc.nombre)
                     : []
                   return (
@@ -11879,7 +11880,7 @@ const App = () => {
                           }}
                           onFocus={() => setDocenteAutocompleteId(doc.id)}
                           onBlur={() => setTimeout(() => setDocenteAutocompleteId(null), 150)}
-                          disabled={isDocenteView}
+                          disabled={isReadOnlyRole}
                         />
                         {suggestions.length > 0 && (
                           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #ddd', borderRadius: '4px', zIndex: 5, maxHeight: '160px', overflowY: 'auto' }}>
@@ -11896,20 +11897,20 @@ const App = () => {
                           </div>
                         )}
                       </div>
-                      <select style={styles.input} value={doc.categoria} onChange={(e) => updateDocente(doc.id, 'categoria', e.target.value)} disabled={isDocenteView}>
+                      <select style={styles.input} value={doc.categoria} onChange={(e) => updateDocente(doc.id, 'categoria', e.target.value)} disabled={isReadOnlyRole}>
                         <option>TITULAR</option>
                         <option>ASOCIADO</option>
                         <option>ADJUNTO</option>
                         <option>JTP</option>
                         <option>AYUDANTE 1º</option>
                       </select>
-                      <input style={styles.input} placeholder="Correo" value={doc.correo} onChange={(e) => updateDocente(doc.id, 'correo', e.target.value)} disabled={isDocenteView} />
-                      <button style={{ ...styles.button, marginRight: 0 }} onClick={() => deleteDocente(doc.id)} disabled={equipoDocente.length === 1 || isDocenteView}>X</button>
+                      <input style={styles.input} placeholder="Correo" value={doc.correo} onChange={(e) => updateDocente(doc.id, 'correo', e.target.value)} disabled={isReadOnlyRole} />
+                      <button style={{ ...styles.button, marginRight: 0 }} onClick={() => deleteDocente(doc.id)} disabled={equipoDocente.length === 1 || isReadOnlyRole}>X</button>
                     </div>
                   )
                 })}
                 <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
-                  <button style={styles.button} onClick={addDocente} disabled={isDocenteView}>+ Agregar Docente</button>
+                  <button style={styles.button} onClick={addDocente} disabled={isReadOnlyRole}>+ Agregar Docente</button>
                 </div>
               </div>
 
@@ -12802,7 +12803,7 @@ const App = () => {
             ) : (
               <div style={{ overflowX: 'auto', marginTop: '20px' }}>
                 {/* Toolbar de acciones masivas (solo director) */}
-                {!isDocenteView && selectedProposalIds.size > 0 && (
+                {!isReadOnlyRole && selectedProposalIds.size > 0 && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', padding: '8px 12px', background: '#fff3e0', borderRadius: '6px', border: '1px solid #ffcc80' }}>
                     <span style={{ fontWeight: 600, color: '#5c3d00', fontSize: '13px' }}>{selectedProposalIds.size} seleccionada(s)</span>
                     <button
@@ -12830,7 +12831,7 @@ const App = () => {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#ff9900', color: 'white' }}>
-                      {!isDocenteView && (
+                      {!isReadOnlyRole && (
                         <th style={{ width: '36px', padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>
                           <input
                             type="checkbox"
@@ -12891,7 +12892,7 @@ const App = () => {
                       <th style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #ff9900' }}>Acciones</th>
                     </tr>
                     <tr style={{ backgroundColor: '#fff6e6' }}>
-                      {!isDocenteView && <th style={{ width: '36px', padding: '6px' }} />}
+                      {!isReadOnlyRole && <th style={{ width: '36px', padding: '6px' }} />}
                       <th style={{ width: '70px', padding: '6px' }}>
                         <input
                           style={{ width: '100%', padding: '4px 6px', fontSize: '12px', marginBottom: 0, border: '1px solid #e0c9a0', borderRadius: '4px' }}
@@ -12987,7 +12988,7 @@ const App = () => {
                           : (idx % 2 === 0 ? '#f9f9f9' : '#fff'),
                         borderBottom: '1px solid #eee'
                       }}>
-                        {!isDocenteView && (
+                        {!isReadOnlyRole && (
                           <td style={{ width: '36px', padding: '10px', textAlign: 'center' }}>
                             <input
                               type="checkbox"
@@ -13024,8 +13025,8 @@ const App = () => {
                           <button
                             style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: prop.editing_locked ? '#bbb' : 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d', cursor: prop.editing_locked ? 'not-allowed' : 'pointer' }}
                             title={prop.editing_locked ? 'Propuesta cerrada para edición' : 'Editar propuesta'}
-                            onClick={() => !prop.editing_locked && loadProposalForEdit(prop.id)}
-                            disabled={prop.editing_locked}
+                            onClick={() => !prop.editing_locked && !isComisionView && loadProposalForEdit(prop.id)}
+                            disabled={prop.editing_locked || isComisionView}
                           >
                             ✏️
                           </button>
@@ -13036,7 +13037,7 @@ const App = () => {
                           >
                             ⬇️
                           </button>
-                          {!isDocenteView && (
+                          {!isReadOnlyRole && (
                             <>
                               <button
                                 style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: prop.editing_locked ? '#2e7d32' : '#c62828', color: '#fff' }}
@@ -13068,7 +13069,7 @@ const App = () => {
         )}
 
         {/* IMPORT PROPOSAL */}
-        {activeMenu === 'propuestas' && proposalsMode === 'import' && !isDocenteView && (
+        {activeMenu === 'propuestas' && proposalsMode === 'import' && !isReadOnlyRole && (
           <div style={styles.section}>
             <button style={{ ...styles.button, background: '#ccc', color: '#000' }} onClick={() => {
               setProposalsMode(null)
@@ -14917,7 +14918,7 @@ const App = () => {
 
                 {controlPanelMode === 'config' && (
                   <div style={{ display: 'grid', gap: '12px' }}>
-                    {!isDocenteView && (
+                    {!isReadOnlyRole && (
                       <div style={{ border: '1px solid #d8e2f0', borderRadius: '8px', padding: '12px', background: '#f8fbff' }}>
                         <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '10px' }}>Nuevo control inteligente</div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr auto', gap: '10px', marginBottom: '10px' }}>
@@ -15125,7 +15126,7 @@ const App = () => {
                                         ))}
                                       </div>
                                     )}
-                                    {!isDocenteView && (
+                                    {!isReadOnlyRole && (
                                       <div style={{ display: 'flex', gap: '8px' }}>
                                         <button
                                           style={{ ...styles.button, background: '#546e7a', padding: '6px 10px' }}
@@ -15154,7 +15155,7 @@ const App = () => {
                         </div>
                       )}
                     </div>
-                    {!isDocenteView && (
+                    {!isReadOnlyRole && (
                       <div style={{ border: '1px solid #d8e2f0', borderRadius: '8px', padding: '10px 12px', background: '#f8fbff' }}>
                         <div style={{ fontWeight: 700, color: '#1a3d5c', marginBottom: '8px' }}>Modo de ejecución permitido para docente</div>
                         {intelligentModeSettingsLoading && (
@@ -15191,7 +15192,7 @@ const App = () => {
                         </div>
                       </div>
                     )}
-                    {!isDocenteView && (
+                    {!isReadOnlyRole && (
                       <div style={{ border: '1px solid #d8e2f0', borderRadius: '8px', padding: '10px 12px', background: '#f8fbff' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
                           <div style={{ fontWeight: 700, color: '#1a3d5c' }}>Parámetros por modo IA</div>
@@ -15383,7 +15384,7 @@ const App = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                       {(() => {
                         const noActiveControls = !activeControlIdsForCurrentView.length
-                        const canGuideToConfig = noActiveControls && !isDocenteView
+                        const canGuideToConfig = noActiveControls && !isReadOnlyRole
                         const disableMainAction = batchIntelligentRun.isRunning || !selectedIntelligentVisibleIds.length || (noActiveControls && isDocenteView)
                         return (
                       <button
@@ -19348,8 +19349,8 @@ const App = () => {
                       >
                         📂 Abrir carpeta
                       </a>
-                      {!isDocenteView && <button style={{ ...styles.button, background: '#78909c', padding: '4px 10px', fontSize: '12px' }} onClick={() => { setInstrumentFolderLinkMode(true); setInstrumentFolderLinkInput(instrumentFolder.gdrive_folder_url || '') }}>Cambiar URL</button>}
-                      {!isDocenteView && <button style={{ ...styles.button, background: '#c62828', padding: '4px 10px', fontSize: '12px' }} onClick={unlinkInstrumentDriveFolder} disabled={instrumentFolderLoading}>Desvincular</button>}
+                      {!isReadOnlyRole && <button style={{ ...styles.button, background: '#78909c', padding: '4px 10px', fontSize: '12px' }} onClick={() => { setInstrumentFolderLinkMode(true); setInstrumentFolderLinkInput(instrumentFolder.gdrive_folder_url || '') }}>Cambiar URL</button>}
+                      {!isReadOnlyRole && <button style={{ ...styles.button, background: '#c62828', padding: '4px 10px', fontSize: '12px' }} onClick={unlinkInstrumentDriveFolder} disabled={instrumentFolderLoading}>Desvincular</button>}
                     </div>
                   ) : (
                     <div>
@@ -19365,7 +19366,7 @@ const App = () => {
                         >
                           {instrumentFolderLoading ? 'Creando...' : '➕ Crear carpeta en Drive'}
                         </button>
-                        {!isDocenteView && (
+                        {!isReadOnlyRole && (
                           <button
                             style={{ ...styles.button, background: '#6c757d' }}
                             onClick={() => setInstrumentFolderLinkMode(v => !v)}
@@ -19376,7 +19377,7 @@ const App = () => {
                       </div>
                     </div>
                   )}
-                  {instrumentFolderLinkMode && !isDocenteView && (
+                  {instrumentFolderLinkMode && !isReadOnlyRole && (
                     <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                       <div style={{ flex: 1, minWidth: '280px' }}>
                         <input
@@ -19730,7 +19731,7 @@ const App = () => {
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {!isDocenteView && (
+                  {!isReadOnlyRole && (
                     <button
                       style={{ ...styles.button, marginRight: 0, background: viewProposal.editing_locked ? '#2e7d32' : '#c62828', color: '#fff', whiteSpace: 'nowrap' }}
                       onClick={() => toggleProposalLock(viewProposal.id, !viewProposal.editing_locked)}
@@ -19809,7 +19810,7 @@ const App = () => {
                   >
                     {viewProposalGdocValidateLoading ? 'Validando remoto...' : 'Validar cambios remotos (GDoc)'}
                   </button>
-                  {!isDocenteView && (
+                  {!isReadOnlyRole && (
                     <button
                       style={{ ...styles.button, background: viewProposal.gdoc_url ? '#ff9800' : '#bbb' }}
                       onClick={() => unlinkProposalGdoc(viewProposal.id)}
@@ -20039,7 +20040,7 @@ const App = () => {
                                     />
                                   </>
                                 )}
-                                {!isDocenteView && (
+                                {!isReadOnlyRole && (
                                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                                     <button
                                       style={{ ...styles.button, background: '#2e7d32', padding: '6px 10px' }}
@@ -20066,7 +20067,7 @@ const App = () => {
                     <span style={{ fontSize: '13px', color: '#15803d', background: '#dcfce7', border: '1px solid #86efac', borderRadius: '6px', padding: '6px 12px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       ✅ Enlazado
                     </span>
-                    {!isDocenteView && (
+                    {!isReadOnlyRole && (
                       <button
                         style={{ ...styles.button, background: '#64748b', marginRight: 0, whiteSpace: 'nowrap' }}
                         onClick={() => { setViewProposalGdocEditMode(true); setViewProposalGdocInput(viewProposal.gdoc_url || '') }}
