@@ -1851,7 +1851,7 @@ sincronizaci\'{o}n.
 \begin{figure}[H]
 \centering
 \shorthandoff{<>}
-\resizebox{0.5\linewidth}{!}{%
+\resizebox{0.25\linewidth}{!}{%
 \begin{tikzpicture}[
   x=1cm, y=1cm,
   caja/.style={
@@ -1885,13 +1885,13 @@ sincronizaci\'{o}n.
 \draw[fbd]
   ([yshift= 6pt]GD0.west) -- ([yshift= 6pt]BD0.east)
   node[lbl, midway, above=3pt] {\texttt{link-gdoc}};
-\node[lbl, gray] at (5, -1.55) {\footnotesize el usuario aporta la URL; el sistema valida};
+\node[lbl, white] at (5, -1.55) {\footnotesize el usuario aporta la URL; el sistema valida};
 
 % flecha izquierda→derecha (create-gdoc)
 \draw[fgd]
   ([yshift=-6pt]BD0.east) -- ([yshift=-6pt]GD0.west)
   node[lbl, midway, below=3pt] {\texttt{create-gdoc}};
-\node[lbl, gray] at (5, -2.4) {\footnotesize genera DOCX en BD, sube a Drive, retorna enlace};
+\node[lbl, white] at (5, -2.4) {\footnotesize genera DOCX en BD, sube a Drive, retorna enlace};
 
 %% línea separadora
 \draw[lin] (-1.5, -3.2) -- (11.5, -3.2);
