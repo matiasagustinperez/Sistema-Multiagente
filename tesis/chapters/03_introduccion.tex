@@ -1,0 +1,267 @@
+% =============================================================================
+% CAPÍTULO 1 — INTRODUCCIÓN
+% =============================================================================
+\chapter{Introducción}
+\label{ch:introduccion}
+
+\section{Contexto y motivación}
+\label{sec:contexto}
+
+La Calidad de la Educación Superior en Argentina está regulada a través de un sistema de evaluación institucional y acreditación de carreras que tiene a la \textbf{Comisión Nacional de Evaluación y Acreditación Universitaria (CONEAU)} como organismo central \citep{ordenanza62}. Desde su creación, y en particular a partir de las sucesivas actualizaciones normativas que culminaron en la Ordenanza N°~75/23 \citep{ordenanza75}, la acreditación ha dejado de ser un procedimiento burocrático puntual para convertirse en un proceso continuo de mejora institucional que atraviesa toda la vida académica de una carrera. Acreditar implica demostrar, ante evaluadores externos, que una carrera cumple con estándares de calidad definidos en términos de planes de estudios, perfiles de egreso, competencias, cuerpo docente, infraestructura y, de manera cada vez más central, la coherencia entre lo que el plan declara y lo que efectivamente ocurre en el aula \citep{GuzmanForestello2015, coneaUacreditacion2019}.
+
+En ese marco, la dirección de una Carrera Universitaria asume una responsabilidad de naturaleza esencialmente operativa y documental. Debe garantizar que cada asignatura cuente con una propuesta académica actualizada, alineada con el perfil de egreso y las competencias del plan vigente, revisada periódicamente y disponible para la inspección de los evaluadores externos. Sin embargo, este trabajo raramente cuenta con herramientas específicas: en la mayoría de las instituciones Argentinas se apoya en correo electrónico, archivos en formatos heterogéneos y procesos de revisión que dependen de la iniciativa individual de cada director o secretario académico \citep{sanabria2023procesos}.
+
+La participación en un proceso de acreditación es, en esencia, un esfuerzo colectivo que involucra a múltiples actores institucionales: autoridades de la carrera y la unidad académica, cuerpo docente, secretarios académicos, personal no docente con responsabilidades registrales, y representantes estudiantiles y de graduados \citep{sanabria2023procesos, greiner2023plan}. Cada uno de ellos aporta información sobre alguna de las cinco dimensiones que la CONEAU evalúa: contexto institucional, plan de estudios y formación, cuerpo académico, alumnos y graduados, e infraestructura y equipamiento \citep{coneau2017procedimientos}. Toda esa información dispersa ---programas de asignaturas, nóminas docentes, carga horaria, indicadores de egreso, planes de mejora--- debe integrarse y cargarse en \textit{CONEAU Global}, la plataforma oficial mediante la cual las instituciones realizan su autoevaluación y presentan la documentación de respaldo para su revisión por los comités de pares evaluadores (\url{https://global.coneau.gob.ar})\footnote{El sistema CONEAU Global está disponible en \url{https://global.coneau.gob.ar/coneauglobal}.}. Para sostener este proceso de manera continua, las universidades argentinas han incorporado a sus estructuras organizativas áreas especializadas en aseguramiento de la calidad, aunque sin seguir un modelo uniforme: se identifican como Secretaría de Evaluación y Acreditación, Dirección de Evaluación Institucional, Coordinación de Calidad Universitaria u otras denominaciones equivalentes \citep{marquina2022implicancias}. En algunos casos estos procesos se concentran en un área central del Rectorado; en otros, se distribuyen entre la conducción central y las propias unidades académicas, lo que añade capas adicionales de coordinación y gestión documental.
+
+La literatura especializada documenta con consistencia las dificultades que este esquema genera. \citet{sanchez2022acreditacion} señalan que la transformación impulsada por CONFEDI en el modelo de formación por competencias profundizó la exigencia documental sin que las instituciones adoptaran herramientas de gestión que acompañaran ese cambio. \citet{greiner2023plan} identifican que la elaboración del plan institucional de adecuación a los estándares es uno de los cuellos de botella más frecuentes en los procesos de acreditación, no por falta de voluntad institucional sino por ausencia de mecanismos sistemáticos de seguimiento. \citet{duarte2023literature}, en una revisión de sistemas de acreditación en educación superior a nivel internacional, concluyen que la fragmentación documental y la falta de integración entre los sistemas de gestión académica y los procesos de evaluación externa constituyen obstáculos transversales, independientemente del marco normativo nacional. A esto se suma que los procesos manuales de seguimiento presentan baja reproducibilidad, escasa estandarización y dificultades para monitorear el cumplimiento de criterios distribuidos en múltiples dimensiones \citep{tortosasistemas, casadiego2025acreditacion}.
+
+A este panorama se suma la irrupción, en los últimos años, de tecnologías que abren nuevas posibilidades para la automatización de tareas cognitivas y la gestión documental inteligente. Los \textbf{Modelos de Lenguaje de Gran Escala (LLM)} han demostrado capacidades notables para la generación, revisión, clasificación y reformulación de textos en dominios especializados \citep{garcia2025desarrollo, farsane2025automatizacion}. Por su parte, los \textbf{Sistemas Multiagente (MAS)} ofrecen un paradigma arquitectónico adecuado para coordinar múltiples procesos distribuidos con distintos niveles de autonomía \citep{perez2022breve, sakurada2021multi, jimenez_romero_multi_agent_llm_2025}. La emergencia de protocolos de interoperabilidad como el \textbf{Model Context Protocol (MCP)} \citep{hou2025model, ehtesham2025survey} habilita nuevas formas de integración entre herramientas de inteligencia artificial y sistemas externos, ampliando el alcance de lo que los agentes pueden hacer en entornos institucionales reales. La convergencia de estas líneas tecnológicas está siendo explorada activamente en dominios como la ingeniería de software, la gestión del conocimiento y la automatización de flujos de trabajo complejos \citep{he2025llm, agashe2023llm}.
+
+En el ámbito de la gestión documental institucional, trabajos recientes muestran el potencial de estas tecnologías para asistir en la producción, validación y trazabilidad de documentos \citep{paun2025implementacion, cascavita2025sistema, collado2024implementacion}. No obstante, su aplicación al dominio específico de la gestión académica universitaria orientada a la acreditación presenta características particulares que no están cubiertas por las soluciones existentes: la necesidad de adaptar la generación de contenido a estructuras normadas (planes de estudios, competencias, resultados de aprendizaje), de integrar el proceso de revisión en flujos de trabajo institucionales reales, y de mantener la trazabilidad documental que los estándares de la CONEAU exigen.
+
+Es en este cruce ---entre las demandas operativas de la gestión de carreras universitarias, las exigencias documentales del proceso de acreditación y las capacidades emergentes de la inteligencia artificial--- donde se inscribe el presente trabajo. La propuesta no busca sustituir la labor de los equipos docentes ni la responsabilidad de las autoridades académicas en los procesos de gestión y decisión institucional. Su propósito es radicalmente distinto: proveer una plataforma que centralice, sistematice y asista el conjunto de actividades que ya se realizan, pero que hoy se ejecutan de manera fragmentada, con escasa visibilidad entre los actores y sin mecanismos formales de seguimiento.
+
+En la práctica, esto significa que un director de carrera puede consultar en tiempo real el estado de cada propuesta de asignatura ---cuáles están completas, cuáles están en revisión, cuáles tienen observaciones pendientes---, sin necesidad de enviar correos individuales ni revisar carpetas compartidas. Un docente recibe asistencia inteligente para redactar o actualizar su propuesta, con sugerencias generadas por LLM que puede aceptar, modificar o descartar según su criterio. Un secretario de carrera puede exportar la documentación en los formatos requeridos, mantener el registro de versiones y construir gradualmente el acervo de evidencias que demanda el proceso de autoevaluación ante la CONEAU. Y quienes integran la comisión de acreditación disponen de un panel compartido donde el avance del proceso es visible, trazable y auditable para todos los involucrados.
+
+La plataforma propuesta actúa, en este sentido, como un articulador institucional: reduce la carga administrativa repetitiva, estructura la información dispersa, incorpora inteligencia artificial en los puntos del proceso donde más valor puede aportar, y genera la trazabilidad documental que los estándares de acreditación exigen. No reemplaza el juicio académico ni la responsabilidad institucional; los amplifica, permitiendo que quienes toman decisiones lo hagan con mejor información, en menos tiempo y con mayor certeza sobre el estado real de la carrera.
+
+% =============================================================================
+\section{El proceso actual de gestión académica: diagnóstico \textit{AS-IS}}
+\label{sec:proceso_asis}
+% =============================================================================
+
+Para comprender la brecha que este trabajo aborda, es necesario describir con precisión cómo se gestiona hoy el ciclo de vida de las propuestas de asignatura y la documentación asociada al proceso de acreditación en una carrera universitaria argentina típica. El siguiente diagnóstico se basa en la experiencia directa del autor como docente y director de carrera en la Universidad Nacional de Chilecito (UNdeC) y refleja una dinámica ampliamente extendida en el sistema universitario nacional.
+
+\subsection{Actores y sus responsabilidades}
+\label{subsec:actores_asis}
+
+El proceso involucra cuatro actores principales, cada uno con responsabilidades definidas pero sin herramientas compartidas de coordinación:
+
+\begin{description}
+    \item[Docente responsable de la asignatura] Elabora o actualiza la propuesta académica de su asignatura ---incluyendo objetivos, contenidos, metodología, bibliografía, sistema de evaluación y resultados de aprendizaje--- y gestiona las instancias evaluativas (trabajos prácticos, parciales, finales) a lo largo del cuatrimestre.
+
+    \item[Director de carrera] Convoca el proceso de actualización de propuestas, recibe la documentación entregada por los docentes, articula con la Comisión Curricular y es responsable último de que todas las asignaturas cuenten con propuestas válidas y actualizadas para el ciclo lectivo.
+
+    \item[Comisión Curricular (CC)] Órgano colegiado que revisa las propuestas por áreas temáticas afines. Sus miembros analizan la coherencia interna de cada propuesta, su alineación con el perfil de egreso y las competencias del plan, y la adecuación a los estándares normativos. Emite observaciones y valida las versiones corregidas.
+
+    \item[Secretaría académica] Da soporte administrativo al proceso: registra la documentación recibida y aprobada y gestiona el archivo institucional.
+\end{description}
+
+\subsection{Ciclo temporal y flujo del proceso}
+\label{subsec:ciclo_asis}
+
+El ciclo de actualización de propuestas sigue un calendario relativamente fijo. Durante \textbf{diciembre, enero y los primeros días de febrero}, los docentes elaboran o actualizan sus propuestas para el ciclo lectivo siguiente. Una vez vencido este plazo, las propuestas se consideran cerradas y no deberían modificarse. El proceso concreto sigue los siguientes pasos:
+
+\begin{enumerate}
+    \item \textbf{Convocatoria}: el director de carrera notifica a los docentes ---por correo electrónico--- que deben entregar o actualizar su propuesta antes de la fecha límite de cierre establecida en los primeros días de febrero.
+
+    \item \textbf{Elaboración}: cada docente prepara su propuesta en formato DOCX, siguiendo una plantilla institucional provista por la dirección de carrera.
+
+    \item \textbf{Entrega}: el docente envía el archivo por correo electrónico al director, o lo deposita en una carpeta de Google Drive compartida. En la práctica, ambos canales coexisten sin consistencia: algunas propuestas llegan por correo, otras por Drive y, en ocasiones, por ambos, generando versiones duplicadas sin control de cuál es la definitiva.
+
+    \item \textbf{Convocatoria a la Comisión Curricular}: una vez recibida la documentación, el director convoca a la CC para iniciar la revisión colectiva.
+
+    \item \textbf{Revisión}: la CC dispone de un plazo de \textbf{2 a 3 semanas} para revisar el conjunto de propuestas. Dado que el total por carrera oscila entre \textbf{45 y 55 asignaturas}, la carga se distribuye por áreas temáticas: cada miembro analiza el subconjunto correspondiente a su área de conocimiento.
+
+    \item \textbf{Devolución de observaciones}: los miembros de la CC comunican sus observaciones por correo electrónico, dirigidas al director de carrera o directamente a los equipos docentes con copia al director. No existe un formato estandarizado: las observaciones pueden aparecer como comentarios en el cuerpo del correo, anotaciones sobre el propio DOCX, o listados de ítems a corregir.
+
+    \item \textbf{Corrección y reenvío}: los docentes corrigen sus propuestas y las reenvían por el mismo canal, iniciando un nuevo sub-ciclo de revisión. La cantidad de iteraciones depende de la complejidad de las observaciones y de la disponibilidad de los actores involucrados.
+
+    \item \textbf{Validación}: el director da por aprobada la propuesta. Esta aprobación no queda registrada en ningún sistema formal; depende de la memoria operativa del director o de una marca manual en la planilla de seguimiento.
+\end{enumerate}
+
+La Figura~\ref{fig:flujo_asis} sintetiza este flujo de manera esquemática, destacando el bucle de revisión--corrección que puede repetirse en múltiples iteraciones y los puntos de fricción donde la información se fragmenta.
+
+\begin{figure}[!h]
+\centering
+\begin{tikzpicture}[
+  node distance=0.55cm and 2.6cm,
+  start/.style={
+    rectangle, rounded corners=4pt, draw=Micolor1, line width=1pt,
+    fill=Micolor1, text=white, font=\small\bfseries,
+    text width=4.2cm, align=center, minimum height=0.72cm
+  },
+  proc/.style={
+    rectangle, draw=gray!60, line width=0.8pt,
+    fill=gray!10, font=\small,
+    text width=4.2cm, align=center, minimum height=0.72cm
+  },
+  warn/.style={
+    rectangle, draw=orange!70, line width=0.8pt,
+    fill=orange!12, font=\small\itshape,
+    text width=4.2cm, align=center, minimum height=0.72cm
+  },
+  dec/.style={
+    diamond, draw=Micolor1, line width=0.8pt,
+    fill=Micolor1!12, font=\small,
+    text width=2.0cm, align=center, aspect=2.2, inner sep=1pt
+  },
+  arr/.style={-{Stealth[length=5pt,width=4pt]}, thick, gray!70},
+  redarr/.style={-{Stealth[length=5pt,width=4pt]}, thick, Micolor1!80},
+  lbl/.style={font=\scriptsize, fill=white, inner sep=1pt}
+]
+
+%% ── Columna izquierda (flujo principal, top-down) ──────────────────────────
+\node[start]  (conv)   {Convocatoria del Director\\{\footnotesize(email a docentes)}};
+\node[proc,   below=of conv]  (elab)   {Elaboración / actualización DOCX\\{\footnotesize(Dic.\ -- primeros días de Feb.)}};
+\node[warn,   below=of elab]  (entrega){Entrega por \textbf{email} o \textbf{Google Drive}\\{\footnotesize(canales sin consistencia)}};
+\node[proc,   below=of entrega](recep) {Recepción y verificación inicial\\{\footnotesize(planilla Excel manual)}};
+\node[proc,   below=of recep] (cc)     {Revisión CC por área temática\\{\footnotesize(2--3 semanas · 45--55 asignaturas)}};
+\node[dec,    below=of cc]    (ok)     {¿Propuesta aprobada?};
+\node[start,  below=of ok]    (fin)    {Propuesta validada\\{\footnotesize(registro informal)}};
+
+%% ── Columna derecha (bucle de corrección) ──────────────────────────────────
+\node[warn,   right=2.8cm of ok]   (obs)  {Observaciones por email\\{\footnotesize(con copia al Director)}};
+\node[proc,   above=0.55cm of obs] (corr) {Corrección por el docente\\{\footnotesize(reenvío del DOCX)}};
+
+%% ── Flechas flujo principal ─────────────────────────────────────────────────
+\draw[arr]    (conv)    -- (elab);
+\draw[arr]    (elab)    -- (entrega);
+\draw[arr]    (entrega) -- (recep);
+\draw[arr]    (recep)   -- (cc);
+\draw[arr]    (cc)      -- (ok);
+\draw[arr]    (ok)      -- node[lbl,left]{Sí} (fin);
+
+%% ── Bucle de revisión (rojo) ────────────────────────────────────────────────
+\draw[redarr] (ok)   -- node[lbl,above]{No} (obs);
+\draw[redarr] (obs)  -- (corr);
+\draw[redarr] (corr.west) -- ++(-0.5,0) |- node[lbl,right,pos=0.25]{nueva versión} (cc.east);
+
+\end{tikzpicture}
+\caption{Flujo del proceso de gestión de propuestas de asignatura en el modelo \textit{AS-IS}.
+  El bucle \textcolor{Micolor1}{rojo} representa las iteraciones de revisión--corrección,
+  las cuales pueden repetirse sin límite formal y sin historial de versiones.}
+\label{fig:flujo_asis}
+\end{figure}
+
+\subsection{Herramientas de seguimiento utilizadas}
+\label{subsec:herramientas_asis}
+
+La única herramienta de seguimiento formal es una \textbf{planilla de cálculo} ---Excel o equivalente--- que el director o un miembro de la CC mantiene de forma manual. Esta planilla registra, para cada asignatura, si la propuesta fue recibida y si cumple o no con un conjunto de ítems de control, esencialmente los mismos criterios aplicados en la revisión rápida de propuestas. Sin embargo, presenta limitaciones estructurales que la hacen insuficiente como mecanismo de gestión:
+
+\begin{itemize}
+    \item \textbf{Sin visibilidad para el docente}: el docente no puede consultar el estado de su propia propuesta sin solicitarlo explícitamente al director.
+
+    \item \textbf{Criterio variable}: cada revisor aplica el checklist según criterio en común en función a los estándares de CONEAU; los resultados no son homogéneos entre propuestas ni entre distintos ciclos lectivos.
+
+    \item \textbf{Sin historial de versiones}: cuando un docente reenvía una propuesta corregida, la versión anterior queda dispersa en los hilos de correo o se sobreescribe silenciosamente en Drive sin dejar registro.
+
+    \item \textbf{Sin visibilidad agregada}: la planilla es local a cada carrera; no hay forma de consolidar indicadores globales para el proceso de autoevaluación institucional ante la CONEAU.
+\end{itemize}
+
+\subsection{Gestión de instancias evaluativas}
+\label{subsec:evaluativas_asis}
+
+A lo largo del cuatrimestre, los docentes deben compartir con la dirección los enunciados de trabajos prácticos, parciales y exámenes finales. Este proceso opera con aún menor formalización que el de las propuestas:
+
+\begin{itemize}
+    \item Los archivos se comparten por correo electrónico o mediante enlaces ad hoc de Google Drive, sin una estructura de carpetas acordada ni nomenclatura uniforme entre asignaturas.
+
+    \item El director de carrera carece de visibilidad del estado de entrega de estas instancias sin consultar individualmente a cada docente.
+
+    \item En el contexto de una acreditación CONEAU, puede requerirse evidencia de que los programas se ejecutaron según lo planificado; la dispersión de estos documentos hace que su recuperación sea lenta y, frecuentemente, incompleta.
+\end{itemize}
+
+\subsection{Síntesis de problemas estructurales}
+\label{subsec:problemas_asis}
+
+El diagnóstico anterior permite identificar un conjunto de problemas recurrentes que no son exclusivos de la UNdeC, sino inherentes al modelo de gestión manual ampliamente extendido en el sistema universitario argentino:
+
+\begin{table}[!h]
+\centering
+\caption{Problemas estructurales del proceso de gestión académica actual}
+\label{tab:problemas_asis}
+\begin{tabular}{p{3.4cm} p{10.6cm}}
+\hline
+\textbf{Dimensión} & \textbf{Problema identificado} \\
+\hline
+Visibilidad       & Ningún actor dispone de una vista unificada del estado de las propuestas; el director debe cruzar correos y planillas manualmente. \\[4pt]
+Coordinación      & La comunicación ocurre por email sin registro estructurado; los acuerdos dependen de la iniciativa individual de cada actor. \\[4pt]
+Trazabilidad      & No existe historial de versiones ni registro de quién aprobó qué y en qué momento; esto resulta crítico ante una auditoría CONEAU. \\[4pt]
+Homogeneidad      & La revisión depende del criterio de cada miembro de la CC; no hay reglas formalizadas aplicadas de forma sistemática y uniforme. \\[4pt]
+Carga operativa   & El director acumula tareas de recordatorio, seguimiento y coordinación que no agregan valor académico al proceso. \\[4pt]
+Escalabilidad     & Con 45 a 55 asignaturas por carrera, el proceso se vuelve difícilmente manejable a medida que crece el número de carreras bajo supervisión. \\
+\hline
+\end{tabular}
+\end{table}
+
+Estos problemas constituyen la base empírica sobre la cual se formula el planteamiento del problema en la sección siguiente y justifican el enfoque tecnológico de la solución propuesta.
+
+\section{Planteamiento del problema}
+\label{sec:problema}
+
+Las instituciones universitarias argentinas que llevan adelante procesos de acreditaci\'{o}n ante la CONEAU enfrentan una brecha concreta entre la complejidad documental que esos procesos exigen y las herramientas con las que cuentan para gestionarla. La gesti\'{o}n del ciclo de vida de las propuestas de asignatura, el seguimiento del cumplimiento normativo por asignatura, la trazabilidad de las evidencias institucionales y la coordinaci\'{o}n entre m\'{u}ltiples actores con roles diferenciados se realizan hoy de manera fragmentada, sin integraci\'{o}n entre sistemas y sin apoyo de inteligencia artificial. Ninguna soluci\'{o}n disponible en el mercado aborda de forma integral este conjunto de necesidades bajo el marco normativo espec\'{i}fico de la CONEAU, lo que constituye una brecha de aplicaci\'{o}n que este trabajo se propone cubrir mediante el dise\~{n}o e implementaci\'{o}n de una plataforma especializada.
+
+El presente proyecto se desarrolla tomando como caso de estudio la \textbf{Universidad Nacional de Chilecito (UNdeC)}\footnote{\url{https://www.undec.edu.ar/}}, instituci\'{o}n en la que el autor se desempe\~{n}a como docente y director de carrera, lo que ha permitido relevar de primera mano las necesidades operativas del dominio. Los alcances y limitaciones del trabajo se delimitan a continuaci\'{o}n.
+
+\textbf{Alcances:}
+\begin{itemize}
+    \item \textit{Institucional:} la plataforma se valida sobre la UNdeC, pero su arquitectura es agn\'{o}stica respecto de la instituci\'{o}n y puede adaptarse a cualquier universidad argentina con m\'{i}nimas reconfiguraciones.
+    \item \textit{Funcional:} cubre la gesti\'{o}n de carreras universitarias que acreditan ante la CONEAU, con independencia de la disciplina, en el marco de una unidad acad\'{e}mica (escuela o facultad) que agrupa m\'{u}ltiples carreras.
+    \item \textit{Normativo:} el marco de referencia es la normativa vigente de la CONEAU (Ordenanzas N°~62 y N°~75/23) y los est\'{a}ndares de acreditaci\'{o}n para carreras de grado reguladas en Argentina.
+    \item \textit{Tecnol\'{o}gico:} la soluci\'{o}n integra una arquitectura full-stack (FastAPI + React) con capacidades de inteligencia artificial basadas en LLM mediante MCP, evaluadas sobre documentaci\'{o}n institucional real.
+\end{itemize}
+
+\textbf{Limitaciones:}
+\begin{itemize}
+    \item No se contempla integraci\'{o}n directa con los sistemas de informaci\'{o}n acad\'{e}mica institucionales (SIU-Guaran\'{i} u equivalentes).
+    \item No se aborda la generaci\'{o}n autom\'{a}tica de informes con formato de carga directa en CONEAU Global.
+    \item La gesti\'{o}n de la evaluaci\'{o}n externa por pares (visitas de comit\'{e}s evaluadores) queda fuera del alcance funcional.
+    \item El sistema no contempla procesos de acreditaci\'{o}n internacional ni marcos normativos distintos al de la CONEAU Argentina.
+\end{itemize}
+
+\section{Objetivos}
+\label{sec:objetivos}
+
+\subsection{Objetivo general}
+
+Diseñar, implementar y evaluar una \textbf{plataforma de gestión académico-administrativa} asistida por \textbf{Inteligencia Artificial} que centralice el ciclo de vida de las propuestas de asignatura, la administración de carreras y docentes, y la organización de la evidencia documental requerida para los procesos de acreditación de Carreras Universitarias ante la \textbf{CONEAU}, mejorando la eficiencia, la trazabilidad y la calidad de la gestión institucional.
+
+\subsection{Objetivos específicos}
+
+\begin{enumerate}
+    \item Analizar el marco normativo vigente de la CONEAU y las soluciones existentes para la gesti\'{o}n documental en procesos de acreditaci\'{o}n universitaria, con el fin de identificar los requerimientos funcionales y las brechas tecnol\'{o}gicas que justifican el desarrollo de la plataforma propuesta.
+
+    \item Dise\~{n}ar e implementar un m\'{o}dulo de gesti\'{o}n del ciclo de vida de las propuestas de asignatura que soporte la creaci\'{o}n manual, la importaci\'{o}n desde archivos DOCX y Google Docs, el control editorial por estados y la exportaci\'{o}n en m\'{u}ltiples formatos (DOCX, PDF, Google Docs, XML y JSON), con el fin de centralizar y estandarizar la documentaci\'{o}n acad\'{e}mica de las asignaturas.
+
+    \item Integrar capacidades de Procesamiento de Lenguaje Natural mediante modelos de lenguaje de gran escala (LLM) para la generaci\'{o}n asistida de secciones de propuestas de asignatura, la validaci\'{o}n ortogr\'{a}fica y gramatical de contenidos, la reformulaci\'{o}n asistida y la ejecuci\'{o}n de controles inteligentes configurables de cumplimiento normativo, con el prop\'{o}sito de reducir la carga cognitiva sobre los equipos docentes y mejorar la consistencia de la documentaci\'{o}n acad\'{e}mica.
+
+    \item Desarrollar un m\'{o}dulo de administraci\'{o}n de trabajos pr\'{a}cticos y evaluaciones parciales y finales por asignatura, que registre el estado de entrega de cada instancia evaluativa y lo vincule a la propuesta de asignatura correspondiente, permitiendo el seguimiento del cumplimiento del programa acad\'{e}mico.
+
+    \item Establecer un sistema de autenticaci\'{o}n y control de acceso basado en roles diferenciados ---Directivo, Docente, Secretario y Miembro de la Comisi\'{o}n Curricular--- con permisos espec\'{i}ficos por rol y por carrera, con el fin de garantizar la seguridad, la trazabilidad de acciones y la integridad de la informaci\'{o}n institucional.
+
+    \item Construir m\'{o}dulos de gesti\'{o}n del plan de estudios en estructura jer\'{a}rquica y del cat\'{a}logo de competencias gen\'{e}ricas y espec\'{i}ficas, alineados con los est\'{a}ndares de la CONEAU, que permitan vincular asignaturas, competencias y propuestas de asignatura en una estructura acad\'{e}mica coherente y trazable.
+
+    \item Incorporar integraci\'{o}n bidireccional con Google Workspace ---Google Docs para la edici\'{o}n colaborativa de propuestas y Google Drive para el almacenamiento documental--- de modo que el docente pueda modificar su propuesta indistintamente desde la plataforma o desde el documento compartido, y el sistema sincronice autom\'{a}ticamente los cambios en ambas direcciones, con el prop\'{o}sito de eliminar la duplicidad de herramientas y garantizar la coherencia permanente entre la versi\'{o}n editada colaborativamente y la informaci\'{o}n registrada en el sistema.
+
+    \item Automatizar el env\'{i}o de notificaciones por correo electr\'{o}nico, mediante integraci\'{o}n con Gmail OAuth, para alertar a docentes sobre propuestas incompletas, trabajos pr\'{a}cticos pendientes y evaluaciones no registradas, y para notificar a los responsables del proceso de acreditaci\'{o}n sobre actividades y tareas del plan de trabajo con vencimientos pr\'{o}ximos o incumplidos, con el fin de facilitar el seguimiento del cumplimiento de los plazos acad\'{e}micos e institucionales establecidos.
+
+    \item Sistematizar la gesti\'{o}n documental orientada al proceso de acreditaci\'{o}n ante la CONEAU mediante el registro, versionado, auditor\'{i}a e integridad de evidencias y el seguimiento del plan de trabajo por etapas de la comisi\'{o}n de autoevaluaci\'{o}n, con el fin de centralizar y garantizar la trazabilidad de la evidencia institucional requerida por los est\'{a}ndares de acreditaci\'{o}n.
+
+    \item Validar la plataforma desarrollada mediante su aplicaci\'{o}n a un caso de estudio real en la Universidad Nacional de Chilecito (UNdeC), con el fin de verificar la cobertura funcional de los requerimientos del proceso de acreditaci\'{o}n ante la CONEAU y la adecuaci\'{o}n de las capacidades de asistencia basadas en inteligencia artificial.
+\end{enumerate}
+
+\section{Contribuciones}
+\label{sec:contribuciones}
+
+Las principales contribuciones de este trabajo son:
+
+\begin{itemize}
+    \item Una plataforma de gesti\'{o}n acad\'{e}mico-administrativa asistida por inteligencia artificial que integra sistemas multiagente (MAS), modelos de lenguaje de gran escala (LLM) y el protocolo MCP, aplicada al dominio espec\'{i}fico de la acreditaci\'{o}n universitaria ante la CONEAU y orientada a cubrir el ciclo de vida documental del proceso.
+    \item Un modelo de roles y flujos de trabajo institucionales formalizado para el proceso de acreditaci\'{o}n, implementado como sistema de control de acceso diferenciado y seguimiento de estados documentales alineado con la normativa vigente.
+    \item Una arquitectura de software full-stack reproducible que demuestra la viabilidad t\'{e}cnica de integrar LLM con sistemas de gesti\'{o}n documental institucional en un dominio regulado por est\'{a}ndares normativos espec\'{i}ficos.
+    \item Una validaci\'{o}n emp\'{i}rica del sistema sobre documentaci\'{o}n institucional real de la Universidad Nacional de Chilecito (UNdeC), con an\'{a}lisis de cobertura funcional respecto a los est\'{a}ndares de acreditaci\'{o}n de la CONEAU.
+\end{itemize}
+
+\section{Estructura de la tesis}
+\label{sec:estructura}
+
+El resto de este documento se organiza como sigue:
+
+\begin{itemize}
+    \item El Capítulo~\ref{ch:estado_del_arte} revisa el estado del arte en sistemas multiagente, LLM, MCP y acreditación universitaria.
+    \item El Capítulo~\ref{ch:metodologia} describe la metodología de investigación y desarrollo adoptada.
+    \item El Capítulo~\ref{ch:desarrollo} detalla el diseño e implementación del sistema.
+    \item El Capítulo~\ref{ch:resultados} presenta los resultados de la evaluación.
+    \item El Capítulo~\ref{ch:conclusiones} expone las conclusiones y trabajos futuros.
+\end{itemize}

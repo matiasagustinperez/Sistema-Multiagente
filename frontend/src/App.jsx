@@ -828,6 +828,8 @@ const App = () => {
   const [imgCustomW, setImgCustomW] = useState('')
   const [emailSenderName, setEmailSenderName] = useState('')
   const [includePersonalName, setIncludePersonalName] = useState(true)
+  const [emailAiLoading, setEmailAiLoading] = useState(null) // 'spelling'|'grammar'|'reformulate'|null
+  const [emailBodyHasText, setEmailBodyHasText] = useState(false)
   const [teacherFocusTargetId, setTeacherFocusTargetId] = useState(null)
   const [teacherHighlightId, setTeacherHighlightId] = useState(null)
   const teacherAnchorRefs = useRef({})
@@ -21294,6 +21296,54 @@ const App = () => {
                 style={{ background: '#fff', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px', color: '#666' }}
               >⊘</button>
             </div>
+            {/* AI writing assistant buttons */}
+            {(() => {
+              const aiActions = [
+                { key: 'spelling',   label: '✏️ Ortografía',  title: 'Corregir errores ortográficos' },
+                { key: 'grammar',    label: '📝 Gramática',   title: 'Corregir gramática y puntuación' },
+                { key: 'reformulate',label: '✨ Reformular',  title: 'Reformular el texto de manera más profesional' },
+              ]
+              const handleAiAction = async (action) => {
+                const rawHtml = bodyEditorRef.current?.innerHTML || ''
+                const textPayload = rawHtml.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+                if (!textPayload) return
+                setEmailAiLoading(action)
+                try {
+                  const token = localStorage.getItem('auth_token')
+                  const res = await fetch(`${API_BASE_URL}/notifications/email/ai-assist`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ text: textPayload, action }),
+                  })
+                  const data = await res.json()
+                  if (res.ok && data.text && bodyEditorRef.current) {
+                    bodyEditorRef.current.innerHTML = data.text
+                    // Trigger re-check so buttons stay enabled
+                    setEmailBodyHasText(bodyEditorRef.current.innerText.trim().length > 0)
+                  }
+                } catch (_) {}
+                setEmailAiLoading(null)
+              }
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', background: '#f0f4ff', border: '1px solid #c5cae9', borderTop: 'none', borderBottom: 'none', padding: '5px 10px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#5c6bc0', marginRight: '4px', whiteSpace: 'nowrap' }}>✦ IA:</span>
+                  {aiActions.map(({ key, label, title }) => (
+                    <button key={key} type="button" title={title}
+                      onClick={() => handleAiAction(key)}
+                      disabled={emailSending || emailAiLoading !== null || !emailBodyHasText}
+                      style={{
+                        background: emailAiLoading === key ? '#3949ab' : '#fff',
+                        color: emailAiLoading === key ? '#fff' : '#3949ab',
+                        border: '1px solid #7986cb', borderRadius: '4px',
+                        padding: '2px 10px', cursor: emailAiLoading !== null ? 'wait' : 'pointer',
+                        fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap',
+                        opacity: (emailSending || !emailBodyHasText || (emailAiLoading !== null && emailAiLoading !== key)) ? 0.5 : 1,
+                      }}
+                    >{emailAiLoading === key ? '⏳ ...' : label}</button>
+                  ))}
+                </div>
+              )
+            })()}
             {/* Image resize floating toolbar */}
             {imgToolbar && selectedImgRef.current && (
               <div
@@ -21367,6 +21417,10 @@ const App = () => {
               contentEditable={!emailSending}
               suppressContentEditableWarning
               data-placeholder="Escribí tu mensaje aquí..."
+              onInput={() => {
+                const txt = (bodyEditorRef.current?.innerText || '').trim()
+                setEmailBodyHasText(txt.length > 0)
+              }}
               onKeyDown={e => {
                 if (e.key === 'Tab') {
                   e.preventDefault()

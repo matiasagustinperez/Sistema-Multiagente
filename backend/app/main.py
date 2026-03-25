@@ -708,7 +708,6 @@ def google_auth_authorize():
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
-        include_granted_scopes="true",
     )
     return {"auth_url": auth_url}
 
@@ -5749,6 +5748,11 @@ async def forgot_password(payload: dict, db: Session = Depends(get_db)):
         _gaddr3 = admin.email or "me"
 
     _dn3 = "Administraci\u00f3n MACAU"
+    _orig_dn3 = ""
+    try:
+        _orig_dn3 = _svc3.users().settings().sendAs().get(userId="me", sendAsEmail=_gaddr3).execute().get("displayName", "")
+    except Exception:
+        pass
     try:
         _svc3.users().settings().sendAs().patch(
             userId="me", sendAsEmail=_gaddr3, body={"displayName": _dn3}
@@ -5819,6 +5823,15 @@ async def forgot_password(payload: dict, db: Session = Depends(get_db)):
         _svc3.users().messages().send(userId="me", body={"raw": _raw3}).execute()
     except Exception as _fpe:
         print(f"[forgot-password] email send failed: {_fpe}", flush=True)
+
+    # Restore original Gmail display name
+    if _orig_dn3 and _gaddr3 and _gaddr3 != "me":
+        try:
+            _svc3.users().settings().sendAs().patch(
+                userId="me", sendAsEmail=_gaddr3, body={"displayName": _orig_dn3}
+            ).execute()
+        except Exception:
+            pass
 
     return {"ok": True}
 
@@ -5950,8 +5963,13 @@ def reset_passwords(request: Request, payload: ResetPasswordsRequest, db: Sessio
     except Exception:
         _gaddr2 = admin.email or "me"
 
-    # Patch sendAs display name to "Administración MACAU"
+    # Patch sendAs display name to "Administración MACAU" (temporarily)
     _admin_dn = "Administraci\u00f3n MACAU"
+    _orig_dn2 = ""
+    try:
+        _orig_dn2 = _svc2.users().settings().sendAs().get(userId="me", sendAsEmail=_gaddr2).execute().get("displayName", "")
+    except Exception:
+        pass
     try:
         _svc2.users().settings().sendAs().patch(
             userId="me", sendAsEmail=_gaddr2,
@@ -6033,6 +6051,15 @@ def reset_passwords(request: Request, payload: ResetPasswordsRequest, db: Sessio
             _notify_sent.append(_t.email)
         except Exception as _ne:
             _notify_errors.append({"email": _t.email, "error": str(_ne)})
+
+    # Restore original Gmail display name
+    if _orig_dn2 and _gaddr2 and _gaddr2 != "me":
+        try:
+            _svc2.users().settings().sendAs().patch(
+                userId="me", sendAsEmail=_gaddr2, body={"displayName": _orig_dn2}
+            ).execute()
+        except Exception:
+            pass
 
     return {**base_result, "notified": _notify_sent, "notify_errors": _notify_errors}
 
@@ -6307,7 +6334,12 @@ async def gmail_send(
     # Update the Gmail account's sendAs display name so Gmail actually shows it
     # (Gmail API ignores the From header in raw messages — only sendAs controls the display name)
     _display_for_send = (sender_name or "").strip()
+    _orig_dn_send = ""
     if _display_for_send and _gmail_address and _gmail_address != "me":
+        try:
+            _orig_dn_send = service.users().settings().sendAs().get(userId="me", sendAsEmail=_gmail_address).execute().get("displayName", "")
+        except Exception:
+            pass
         try:
             service.users().settings().sendAs().patch(
                 userId="me",
@@ -6453,6 +6485,15 @@ async def gmail_send(
             sent.append(em)
         except Exception as exc:
             errors.append({"email": em, "error": str(exc)})
+
+    # Restore original Gmail display name
+    if _orig_dn_send and _gmail_address and _gmail_address != "me":
+        try:
+            service.users().settings().sendAs().patch(
+                userId="me", sendAsEmail=_gmail_address, body={"displayName": _orig_dn_send}
+            ).execute()
+        except Exception:
+            pass
 
     return {"sent": sent, "errors": errors, "count": len(sent)}
 
@@ -6755,6 +6796,75 @@ def ai_generate(payload: AiPrompt):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class EmailAiAssistRequest(BaseModel):
+    text: str
+    action: str  # "spelling" | "grammar" | "reformulate"
+
+
+@app.post("/notifications/email/ai-assist", tags=["Notifications"])
+def email_ai_assist(payload: EmailAiAssistRequest):
+    """Corrige ortografía, gramática o reformula el texto de un correo institucional."""
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="El texto no puede estar vacío.")
+    action = payload.action.strip().lower()
+
+    html_instructions = (
+        "Devolvé el resultado como HTML limpio usando SOLO estas etiquetas: "
+        "<p> para párrafos, <strong> para resaltar palabras clave, <em> para énfasis, "
+        "<ul>/<ol> con <li> para listas cuando corresponda, <br> para saltos dentro de un párrafo. "
+        "NO uses <html>, <head>, <body>, <div>, <span>, ni ninguna otra etiqueta. "
+        "NO agregues explicaciones, encabezados ni comentarios fuera del HTML. "
+        "Asegurate de que cada idea diferente sea un <p> separado, nunca todo junto en un solo párrafo."
+    )
+
+    if action == "spelling":
+        system_prompt = (
+            "Corregí únicamente los errores ortográficos del siguiente texto institucional en español argentino. "
+            "No cambies el estilo, el tono ni la estructura de las oraciones. "
+            f"{html_instructions} "
+            f"{TERMINOLOGY_POLICY_PROMPT}"
+        )
+    elif action == "grammar":
+        system_prompt = (
+            "Corregí los errores gramaticales y de puntuación del siguiente texto institucional en español argentino. "
+            "Mejorá la cohesión si es necesario, pero respetá el sentido original. "
+            f"{html_instructions} "
+            f"{TERMINOLOGY_POLICY_PROMPT}"
+        )
+    elif action == "reformulate":
+        system_prompt = (
+            "Reformulá de manera notablemente más clara, profesional y fluida el siguiente texto institucional en español argentino. "
+            "Estructurá bien las ideas: usá párrafos separados, listas si hay enumeraciones, y resaltá con <strong> "
+            "los términos o fechas importantes. Mantené el significado y el tono formal. "
+            f"{html_instructions} "
+            f"{TERMINOLOGY_POLICY_PROMPT}"
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Acción desconocida: {action!r}. Usar 'spelling', 'grammar' o 'reformulate'.")
+    try:
+        client = get_openai_client()
+        resp = create_chat_completion_compatible(
+            client,
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=1500,
+        )
+        result = normalize_terminology_text((resp.choices[0].message.content or "").strip())
+        # Strip markdown code fences if model wrapped the HTML
+        import re as _re_ai
+        result = _re_ai.sub(r"^```[a-zA-Z]*\n?", "", result)
+        result = _re_ai.sub(r"\n?```$", "", result).strip()
+        return {"status": "success", "text": result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/ai-reformulate")
@@ -8353,7 +8463,12 @@ async def instruments_notify(request: Request, payload: dict = Body(...), db: Se
     except Exception:
         _gaddr = sender.email or "me"
 
+    _orig_dn_instr = ""
     if sender_name and _gaddr and _gaddr != "me":
+        try:
+            _orig_dn_instr = _svc.users().settings().sendAs().get(userId="me", sendAsEmail=_gaddr).execute().get("displayName", "")
+        except Exception:
+            pass
         try:
             _svc.users().settings().sendAs().patch(
                 userId="me", sendAsEmail=_gaddr, body={"displayName": sender_name}
@@ -8485,4 +8600,14 @@ async def instruments_notify(request: Request, payload: dict = Body(...), db: Se
             results.append({"subject": subject, "status": "error", "error": str(_se), "recipients": recipient_emails})
 
     sent_count = sum(1 for r in results if r["status"] == "sent")
+
+    # Restore original Gmail display name
+    if _orig_dn_instr and _gaddr and _gaddr != "me":
+        try:
+            _svc.users().settings().sendAs().patch(
+                userId="me", sendAsEmail=_gaddr, body={"displayName": _orig_dn_instr}
+            ).execute()
+        except Exception:
+            pass
+
     return {"ok": True, "sent": sent_count, "total": len(subjects_payload), "results": results}

@@ -1,0 +1,58 @@
+\babel@toc {spanish}{}\relax 
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {1.1}{\ignorespaces Problemas estructurales del proceso de gestión académica actual}}{7}{table.caption.8}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {2.1}{\ignorespaces Dimensiones de los estándares de acreditación (Resoluciones Ministeriales / Ordenanza CONEAU N°~62).}}{13}{table.caption.9}%
+\contentsline {table}{\numberline {2.2}{\ignorespaces Síntesis comparativa de trabajos en gestión documental inteligente.}}{18}{table.caption.11}%
+\contentsline {table}{\numberline {2.3}{\ignorespaces Principales metodologías de diseño de Sistemas Multiagente. Fuente: \citet {perez2022breve}.}}{21}{table.caption.13}%
+\contentsline {table}{\numberline {2.4}{\ignorespaces Principales técnicas de prompt engineering para LLM}}{26}{table.caption.19}%
+\contentsline {table}{\numberline {2.5}{\ignorespaces Trabajos representativos en LLM aplicados a gestión documental especializada}}{29}{table.caption.21}%
+\contentsline {table}{\numberline {2.6}{\ignorespaces Capacidades del servidor MCP y su modelo de control}}{32}{table.caption.23}%
+\contentsline {table}{\numberline {2.7}{\ignorespaces Comparación de protocolos de interoperabilidad para agentes de IA \citep {ehtesham2025survey}}}{33}{table.caption.24}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {4.1}{\ignorespaces Comparación del proceso de gestión académica antes y después de la plataforma.}}{40}{table.4.1}%
+\contentsline {table}{\numberline {4.2}{\ignorespaces Módulos funcionales de \textsc {macau} y su correspondencia con los objetivos del sistema.}}{44}{table.4.2}%
+\contentsline {table}{\numberline {4.3}{\ignorespaces Atributos principales de la entidad \texttt {Proposal}.}}{51}{table.4.3}%
+\contentsline {table}{\numberline {4.4}{\ignorespaces Entidad \texttt {teachers} — perfil e identidad docente.}}{53}{table.4.4}%
+\contentsline {table}{\numberline {4.5}{\ignorespaces Entidad \texttt {study\_subjects} — asignatura del plan de estudios.}}{55}{table.4.5}%
+\contentsline {table}{\numberline {4.6}{\ignorespaces Entidad \texttt {intelligent\_controls} — definición de controles LLM.}}{57}{table.4.6}%
+\contentsline {table}{\numberline {4.7}{\ignorespaces Entidad \texttt {evaluative\_instruments} — registro de evaluaciones.}}{58}{table.4.7}%
+\contentsline {table}{\numberline {4.8}{\ignorespaces Entidad \texttt {accreditation\_settings} — parámetros del proceso de acreditación.}}{59}{table.4.8}%
+\contentsline {table}{\numberline {4.9}{\ignorespaces Endpoints del módulo de plan de estudios.}}{79}{table.caption.37}%
+\contentsline {table}{\numberline {4.10}{\ignorespaces Roles y principales permisos por módulo.}}{81}{table.caption.38}%
+\contentsline {table}{\numberline {4.11}{\ignorespaces Grupos de endpoints de la API REST.}}{87}{table.4.11}%
+\contentsline {table}{\numberline {4.12}{\ignorespaces Secciones del frontend y acceso por rol.}}{88}{table.4.12}%
+\contentsline {table}{\numberline {4.13}{\ignorespaces Decisiones de diseño y candidatos a revisión futura.}}{94}{table.4.13}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {B.1}{\ignorespaces Especificación completa de \texttt {proposals}.}}{110}{table.B.1}%
+\contentsline {table}{\numberline {B.2}{\ignorespaces Especificación de \texttt {proposal\_competencies}.}}{113}{table.B.2}%
+\contentsline {table}{\numberline {B.3}{\ignorespaces Especificación de \texttt {proposal\_teachers}.}}{113}{table.B.3}%
+\contentsline {table}{\numberline {B.4}{\ignorespaces Especificación de \texttt {proposal\_intelligent\_control\_results}.}}{114}{table.B.4}%
+\contentsline {table}{\numberline {B.5}{\ignorespaces Especificación completa de \texttt {teachers}.}}{114}{table.B.5}%
+\contentsline {table}{\numberline {B.6}{\ignorespaces Especificación de \texttt {teacher\_careers}.}}{116}{table.B.6}%
+\contentsline {table}{\numberline {B.7}{\ignorespaces Especificación de \texttt {careers}.}}{116}{table.B.7}%
+\contentsline {table}{\numberline {B.8}{\ignorespaces Especificación de \texttt {career\_committee\_members}.}}{117}{table.B.8}%
+\contentsline {table}{\numberline {B.9}{\ignorespaces Especificación de \texttt {study\_plans}.}}{117}{table.B.9}%
+\contentsline {table}{\numberline {B.10}{\ignorespaces Especificación de \texttt {study\_years}.}}{118}{table.B.10}%
+\contentsline {table}{\numberline {B.11}{\ignorespaces Especificación de \texttt {study\_terms}.}}{118}{table.B.11}%
+\contentsline {table}{\numberline {B.12}{\ignorespaces Especificación completa de \texttt {study\_subjects}.}}{119}{table.B.12}%
+\contentsline {table}{\numberline {B.13}{\ignorespaces Especificación de \texttt {study\_subject\_prerequisites}.}}{120}{table.B.13}%
+\contentsline {table}{\numberline {B.14}{\ignorespaces Especificación de \texttt {competency\_catalog}.}}{120}{table.B.14}%
+\contentsline {table}{\numberline {B.15}{\ignorespaces Especificación completa de \texttt {intelligent\_controls}.}}{121}{table.B.15}%
+\contentsline {table}{\numberline {B.16}{\ignorespaces Especificación de \texttt {intelligent\_control\_settings}.}}{121}{table.B.16}%
+\contentsline {table}{\numberline {B.17}{\ignorespaces Especificación completa de \texttt {evaluative\_instruments}.}}{123}{table.B.17}%
+\contentsline {table}{\numberline {B.18}{\ignorespaces Especificación de \texttt {evaluative\_instrument\_folders}.}}{124}{table.B.18}%
+\contentsline {table}{\numberline {B.19}{\ignorespaces Especificación de \texttt {accreditation\_settings}.}}{125}{table.B.19}%
+\contentsline {table}{\numberline {B.20}{\ignorespaces Especificación de \texttt {accreditation\_evidence\_registry}.}}{125}{table.B.20}%
+\contentsline {table}{\numberline {B.21}{\ignorespaces Especificación de \texttt {accreditation\_evidence\_versions}.}}{127}{table.B.21}%
+\contentsline {table}{\numberline {B.22}{\ignorespaces Especificación de \texttt {accreditation\_evidence\_audit\_log}.}}{128}{table.B.22}%
+\contentsline {table}{\numberline {B.23}{\ignorespaces Especificación de \texttt {accreditation\_work\_plan\_activities}.}}{129}{table.B.23}%
+\contentsline {table}{\numberline {B.24}{\ignorespaces Especificación de \texttt {accreditation\_work\_plan\_tasks}.}}{130}{table.B.24}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }

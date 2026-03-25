@@ -1,0 +1,3748 @@
+% =============================================================================
+% CAPÍTULO 4 — DESARROLLO DE LA SOLUCIÓN
+% =============================================================================
+\chapter{Desarrollo de la Solución}
+\label{ch:desarrollo}
+
+% ─────────────────────────────────────────────────────────────────────────────
+% NOTA PARA REDACCIÓN
+%
+%  Este capítulo cuenta la historia completa de CÓMO funciona la plataforma.
+%  La narrativa sigue el mismo orden que un usuario recorrería el sistema:
+%    1. Por qué existe (comparación AS-IS -> TO-BE)
+%    2. Qué es y cómo está organizado (visión, arquitectura, modelo de datos)
+%    3. El flujo principal: propuesta de asignatura (importar -> editar -> validar -> aprobar)
+%    4. Las capacidades inteligentes (controles automáticos, LLM, RAG, MCP)
+%    5. Los módulos institucionales (plan de estudios, docentes, evaluaciones, acreditación)
+%    6. La infraestructura (API, frontend, seguridad)
+%    7. Las decisiones técnicas clave
+% ─────────────────────────────────────────────────────────────────────────────
+
+El presente capítulo describe el desarrollo de \textsc{macau}: desde las
+decisiones de arquitectura hasta la implementación de cada módulo funcional.
+El sistema combina gestión documental estructurada, validación normativa
+automatizada, asistencia de inteligencia artificial y trazabilidad de
+procesos en una plataforma diseñada para el contexto de la gestión
+académica universitaria.
+
+La exposición parte del diagnóstico presentado en el capítulo anterior y
+lo confronta con el modelo propuesto, mostrando de qué manera cada punto
+de fricción del proceso actual fue convertido en un mecanismo sistemático
+y trazable.
+A partir de ahí se describe la arquitectura de la plataforma, el modelo
+de datos que la sostiene y el ciclo completo de vida de una propuesta de
+asignatura: desde su importación hasta su aprobación, pasando por la edición
+asistida y la validación normativa.
+
+Las secciones centrales del capítulo se dedican a las capacidades
+inteligentes del sistema: los controles automáticos de consistencia,
+la asistencia LLM para la redacción, el módulo de búsqueda semántica
+mediante recuperación aumentada por generación (RAG) y la capa de
+agentes basada en el \emph{Model Context Protocol}.
+Se presentan luego los módulos institucionales que completan la plataforma
+---plan de estudios, competencias, docentes, instrumentos evaluativos,
+acreditación y notificaciones--- y se finaliza con la descripción de la
+API REST, la interfaz de usuario, las medidas de seguridad y las
+decisiones de diseño que condicionaron la arquitectura.
+
+%% =============================================================================
+\section{Del proceso manual a la plataforma: contraste \textit{AS-IS} / \textit{TO-BE}}
+\label{sec:asis_tobe}
+%% =============================================================================
+
+El diagnóstico presentado en la Sección~\ref{sec:proceso_asis} identificó seis dimensiones de
+problema en el modelo de gestión académica vigente: ausencia de visibilidad sobre el estado
+de las propuestas; coordinación dependiente de hilos de correo electrónico no estructurados;
+falta de trazabilidad en el historial de versiones y aprobaciones; heterogeneidad en la
+aplicación de los criterios de revisión; carga operativa acumulada en el director de carrera;
+y baja escalabilidad ante el volumen de 45 a 55 asignaturas por ciclo lectivo
+(véase Tabla~\ref{tab:problemas_asis}).
+La plataforma desarrollada en este trabajo ---denominada \textsc{macau}
+(\textit{MultiAgente de Apoyo a la Calidad Académica Universitaria})---
+transforma cada uno de esos puntos de fricción
+en un mecanismo sistemático, trazable y asistido por inteligencia artificial.
+
+Para organizar este análisis se utiliza la notación \textbf{\textit{AS-IS} / \textit{TO-BE}},
+habitual en el rediseño de procesos de negocio:
+el modelo \textit{AS-IS} describe el proceso \emph{tal como funciona actualmente},
+con sus herramientas, actores y fricciones reales;
+el modelo \textit{TO-BE} describe cómo ese mismo proceso queda estructurado
+\emph{una vez incorporada la plataforma}.
+La comparación no evalúa tecnología por tecnología, sino dimensión por dimensión
+del problema operativo identificado en el diagnóstico.
+
+La Tabla~\ref{tab:asis_tobe} sintetiza la transformación en cada dimensión.
+No se trata de digitalizar el proceso existente, sino de rediseñarlo: los instrumentos
+de coordinación y control pasan de ser externos al proceso ---el correo electrónico,
+la planilla Excel--- a ser intrínsecos a él, generados y registrados por el propio sistema
+en cada acción de cada actor.
+
+\setlength{\extrarowheight}{4pt}
+\arrayrulecolor{black}
+\begin{longtable}{p{3cm} p{5cm} p{7cm}}
+\caption{Comparación del proceso de gestión académica antes y después de la plataforma.}
+\label{tab:asis_tobe} \\
+\toprule
+\textbf{Dimensión} & \textbf{Proceso manual (\textit{AS-IS})} & \textbf{Con la plataforma (\textit{TO-BE})} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{r}{\small\textit{(continúa\ldots)}} \\[2pt]
+\toprule
+\textbf{Dimensión} & \textbf{Proceso manual (\textit{AS-IS})} & \textbf{Con la plataforma (\textit{TO-BE})} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Entrega de propuesta
+  & Docente envía DOCX por email o deposita en Google Drive;
+    canal sin consistencia, versiones duplicadas posibles.
+  & Dirección o Secretaría importa DOCX o enlaza Google Doc directamente
+    en la plataforma; el sistema registra fecha, versión y autor. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Seguimiento del estado
+  & Director actualiza manualmente una planilla Excel;
+    el docente no tiene visibilidad sin consultarlo explícitamente.
+  & Dashboard en tiempo real por carrera: cada propuesta
+    muestra su estado actual (Borrador / En revisión / Observada /
+    Aprobada / Archivada) para todos los actores involucrados. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Revisión de la CC
+  & Cada miembro aplica el checklist según su criterio personal;
+    resultados no homogéneos entre asignaturas ni entre ciclos.
+  & Controles normativos autom\'{a}ticos (derivados de los criterios
+    de acreditaci\'{o}n CONEAU) ejecutados por el sistema; reporte
+    estructurado de conformidad por campo y por asignatura. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Devolución de observaciones
+  & Correo electrónico libre, con o sin copia al director;
+    sin formato estandarizado ni registro centralizado.
+  & Las observaciones se registran en la plataforma asociadas
+    a la propuesta; el docente las recibe con una notificación
+    automática generada por el Director o Miembro de la Comisión Curricular con asistencia LLM. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Historial y versionado
+  & Ninguno: el reenvío de una propuesta corregida sobreescribe
+    silenciosamente la versión anterior en Drive.
+  & Log de auditoría inmutable: cada cambio de estado,
+    edición de campo o acción de agente queda registrado
+    con actor, timestamp y hash del contenido. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Instrumentos evaluativos
+  & TPs, parciales y finales se comparten por email o Drive
+    ad hoc; el director no tiene visibilidad sin consultar
+    individualmente a cada docente.
+  & Módulo centralizado de instrumentos por asignatura
+    y carrera, vinculado a carpetas de Google Drive;
+    dashboard de cumplimiento para el director. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Evidencia para CONEAU
+  & Esfuerzo concentrado al inicio del proceso de acreditación;
+    recuperación de documentos dispersa e incompleta.
+  & Registro continuo de evidencias con clasificación
+    automática por dimensión CONEAU, versionado
+    e historial de auditoría disponible en todo momento. \\
+\end{longtable}
+\arrayrulecolor{black}
+
+La Figura~\ref{fig:flujo_tobe} ilustra el flujo \textit{TO-BE} del ciclo de gestión
+de propuestas de asignatura.
+Cabe señalar que este diagrama cubre exclusivamente ese proceso;
+los flujos de instrumentos evaluativos, notificaciones institucionales y seguimiento
+del plan de acreditación CONEAU son procesos diferenciados que se describen
+en las secciones correspondientes de este capítulo.
+
+Respecto al modelo \textit{AS-IS} (Figura~\ref{fig:flujo_asis}), el diagrama
+incorpora tres aspectos que no existían en el proceso manual:
+(i)~las dos vías de incorporación de una propuesta ---el director puede crearla
+desde cero definiendo el encabezado institucional (nombre de la asignatura, equipo
+docente, carga horaria, competencias) y el docente la completa desde la plataforma;
+o bien la dirección o secretaría puede importar un DOCX existente o vincular
+directamente un Google Doc---;
+(ii)~el paso de edición con asistencia del agente LLM, que apoya al docente
+con corrección ortográfica y gramatical, reformulación de secciones y generación
+asistida de contenido desde el contexto de la asignatura; y
+(iii)~la formalización del bucle de revisión: cada iteración tiene un estado
+explícito, queda registrada en el log de auditoría y está asistida inteligentemente
+tanto en la corrección del docente como en el proceso de validación de la CC.
+
+\begin{figure}[H]
+\centering
+\scalebox{0.85}{%
+\begin{tikzpicture}[
+  node distance=0.5cm and 1.6cm,
+  %% Estilo base (idéntico al de fig:llm_ciclo_vida): draw=#1!70, fill=#1!6
+  mbox/.style={rectangle, rounded corners=6pt,
+               draw=#1!70, fill=#1!6,
+               text width=6.4cm, align=left, inner sep=8pt,
+               font=\small},
+  sbox/.style={rectangle, rounded corners=6pt,
+               draw=#1!70, fill=#1!6,
+               text width=3.4cm, align=center, inner sep=7pt,
+               font=\small},
+  dec/.style={diamond, draw=Micolor1!70, fill=Micolor1!6,
+              font=\small\bfseries, text width=2.0cm, align=center,
+              aspect=2.4, inner sep=2pt},
+  arr/.style={-{Stealth[length=5pt]}, very thick, color=gray!50},
+  lbl/.style={font=\scriptsize\bfseries, fill=white, inner sep=1pt}
+]
+
+%% ── Columna principal ────────────────────────────────────────────────────
+\node[mbox=Micolor1] (entrada) {%
+  \textbf{Incorporaci\'on de la propuesta}\\[3pt]
+  \textbullet\ Director crea encabezado: asignatura, equipo, carga~hor., competencias\\[1pt]
+  \textbullet\ Direcci\'on/Secr.\ importa DOCX o vincula Google Doc existente%
+};
+
+\node[mbox=teal, below=of entrada] (edita) {%
+  \textbf{Edici\'on con asistencia LLM}\\[2pt]
+  Redacci\'on \textbullet\ gram\'atica \textbullet\ reformulaci\'on \textbullet\ generaci\'on asistida%
+};
+
+\node[mbox=teal, below=of edita] (ctrl) {%
+  \textbf{Controles normativos autom\'aticos}\\[2pt]
+  Verificaci\'on campo a campo (criterios de acreditaci\'on CONEAU) \textbullet\ reporte de conformidad%
+};
+
+\node[dec, below=of ctrl] (ok1) {¿Cumple controles?};
+
+\node[mbox=gray, below=of ok1] (envrev) {%
+  \textbf{Propuesta enviada a revisi\'on CC}\\[2pt]
+  Estado: \textit{En revisi\'on} \textbullet\ notificaci\'on autom\'atica%
+};
+
+\node[dec, below=of envrev] (ok2) {¿CC valida?};
+
+\node[mbox=Micolor1, below=of ok2] (aprov) {%
+  \textbf{Director aprueba}\\[2pt]
+  Estado: \textit{Aprobada} \textbullet\ log de auditor\'ia inmutable%
+};
+
+%% ── Columna derecha — bucle de corrección ────────────────────────────────
+\node[sbox=gray, right=1.6cm of ok1] (corr) {%
+  \textbf{Docente corrige}\\[3pt]
+  con asistente LLM\\[2pt]
+  {\scriptsize sugerencias \textbullet\ reformulaci\'on}%
+};
+
+\node[sbox=teal, right=1.6cm of ok2] (obs) {%
+  \textbf{CC registra\\observaciones}\\[2pt]
+  {\scriptsize estructuradas\\en la plataforma}%
+};
+
+%% ── Flechas flujo principal ──────────────────────────────────────────────
+\draw[arr] (entrada) -- (edita);
+\draw[arr] (edita)   -- (ctrl);
+\draw[arr] (ctrl)    -- (ok1);
+\draw[arr] (ok1)     -- node[lbl,left]{S\'i} (envrev);
+\draw[arr] (envrev)  -- (ok2);
+\draw[arr] (ok2)     -- node[lbl,left]{S\'i} (aprov);
+
+%% ── Bucle de corrección ──────────────────────────────────────────────────
+\draw[arr] (ok1)       -- node[lbl,above]{No} (corr);
+\draw[arr] (ok2)       -- node[lbl,above]{No} (obs);
+\draw[arr] (obs.north) -- (corr.south);
+\draw[arr] (corr.west) -- ++(-0.5,0) |- node[lbl,right,pos=0.25]{nueva versi\'on} (ctrl.east);
+
+\end{tikzpicture}%
+}% end scalebox
+\caption{Flujo \textit{TO-BE} del ciclo de propuestas de asignatura en \textsc{macau}.
+  A diferencia del modelo \textit{AS-IS} (Figura~\ref{fig:flujo_asis}), la plataforma
+  incorpora dos v\'ias de entrada y asistencia LLM en la edici\'on y correcci\'on.
+  \textit{Fuente: elaboraci\'on propia.}}
+\label{fig:flujo_tobe}
+\end{figure}
+
+%% =============================================================================
+\section{Visión general de la solución}
+\label{sec:vision_general}
+%% =============================================================================
+
+\textsc{macau} es una plataforma web de gestión académico-administrativa asistida por inteligencia
+artificial, orientada a centralizar, trazar y automatizar los procesos institucionales
+vinculados a la calidad académica y a la acreditación universitaria.
+Su alcance abarca desde el ciclo de vida de las propuestas de asignatura ---incluyendo
+su elaboración, revisión, validación normativa y aprobación--- hasta la administración
+de los trabajos prácticos e instrumentos de evaluación, el seguimiento del plan de
+estudios y del catálogo de competencias, la documentación continua de evidencias para
+la acreditación CONEAU, y la gestión de notificaciones institucionales con asistencia LLM.
+No se trata de una herramienta de digitalización parcial, sino de un sistema que cubre
+el ciclo documental completo de una unidad académica de ingeniería, desde el inicio
+del ciclo lectivo hasta la presentación ante los organismos de acreditación.
+
+La plataforma nació como respuesta al diagnóstico presentado en la
+Sección~\ref{sec:proceso_asis}: un proceso disperso en correos electrónicos,
+planillas Excel y versiones de documentos sin control de cambios que demanda
+un esfuerzo operativo desproporcionado y deja escasa evidencia sistematizada.
+Fue dise\~{n}ada, implementada y validada en el contexto de la
+\textbf{Universidad Nacional de Chilecito (UNdeC)}, tomando como referencia normativa
+la Ordenanza N\textdegree{}~75/23 de la CONEAU~\cite{ordenanza75}, que regula los
+procedimientos para la acreditaci\'on de carreras de grado en funcionamiento,
+y la reglamentaci\'on interna de la universidad sobre la presentaci\'on de programas
+anal\'iticos ante los organismos competentes.
+
+\subsection{Actores del sistema}
+
+\textsc{macau} está concebido para cinco perfiles de usuario, que corresponden a los
+actores identificados en la Sección~\ref{sec:proceso_asis}:
+
+\begin{description}
+  \item[Administrador] Gestiona la configuración global de la plataforma: crea y
+    administra carreras, docentes y usuarios; configura integraciones externas
+    (Google Workspace, OpenAI); y tiene acceso irrestricto a todos los módulos
+    con fines de mantenimiento y auditoría del sistema.
+
+  \item[Director de carrera] Supervisa el flujo completo del ciclo lectivo y el estado de
+    todas las propuestas de su carrera mediante un \textit{dashboard} centralizado.
+    Ejecuta o delega la revisión normativa, aprueba propuestas, gestiona la Comisión
+    Curricular, envía notificaciones, configura controles inteligentes y tiene visibilidad agregada sobre
+    el cumplimiento del programa académico (instrumentos entregados vs.\ pendientes), además de gestionar el proceso de acreditación generando y controlando el plan de trabajo.
+
+  \item[Secretario de carrera] Apoya la gestión documental de la carrera: exporta
+    propuestas en el formato oficial, administra el módulo de instrumentos evaluativos,
+    coordina el registro de evidencias de acreditación CONEAU y hace seguimiento
+    del plan de trabajo de la comisión de autoevaluación.
+
+  \item[Docente] Elabora y entrega la propuesta de asignatura, asistido por el agente LLM
+    para redacción, reformulación y verificación de cumplimiento normativo.
+    Registra y sube los instrumentos de evaluación (trabajos prácticos, parciales y finales)
+    de las asignaturas a su cargo.
+
+  \item[Miembro de la Comisión Curricular (CC)] Accede a las propuestas en estado
+    ``En revisión'', ejecuta los controles normativos automáticos como así también los controles inteligentes asistidos por LLM sobre los controles definidos por la carrera, agrega observaciones
+    estructuradas y valida las propuestas para su aprobación final.
+\end{description}
+
+\subsection{Módulos funcionales}
+
+\textsc{macau} integra siete módulos funcionales que cubren de extremo a extremo
+los procesos de la unidad académica (véase la Tabla~\ref{tab:modulos_macau}).
+
+\setlength{\extrarowheight}{4pt}
+\arrayrulecolor{black}
+\begin{longtable}{p{3.6cm} p{10.8cm}}
+\caption{Módulos funcionales de \textsc{macau} y su correspondencia con los objetivos del sistema.}
+\label{tab:modulos_macau} \\
+\toprule
+\textbf{Módulo} & \textbf{Capacidades principales} \\
+\midrule
+\endfirsthead
+\multicolumn{2}{r}{\small\textit{(continúa\ldots)}} \\[2pt]
+\toprule
+\textbf{Módulo} & \textbf{Capacidades principales} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Propuestas de asignatura
+  & Creación, importación desde DOCX o Google Docs, edición por estados formales
+    (Borrador / En revisión / Observada / Aprobada / Archivada), exportación
+    en DOCX, PDF, XML y JSON, historial de versiones e historial de auditoría inmutable. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Asistencia inteligente (LLM)
+  & Generación asistida de secciones a partir del contexto de la propuesta,
+    reformulación de texto con adecuación normativa, sugerencias de mejora campo
+    a campo, controles de cumplimiento configurables mediante \textit{prompts} en
+    lenguaje natural, y búsqueda semántica enriquecida con RAG sobre el corpus
+    de propuestas y normativa vigente. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Instrumentos de evaluación
+  & Registro centralizado de trabajos prácticos, parciales, recuperatorios y finales
+    por asignatura y carrera; seguimiento del estado de entrega por docente;
+    vinculación a carpetas de Google Drive; \textit{dashboard} de cumplimiento
+    del programa para el director; notificación automática a docentes con
+    entregas pendientes. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Plan de estudios, competencias y Matríz de Tributación
+  & Gestión de la estructura jerárquica del plan (año $\to$ cuatrimestre $\to$ asignatura)
+    con correlatividades; catálogo de competencias
+    genéricas y específicas alineado con estándares CONFEDI/CONEAU; vinculación
+    de competencias a propuestas y visualización de cobertura a nivel carrera; gestión de la Matríz de Tributación. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Docentes y carreras
+  & Gestión del catálogo institucional de docentes y carreras; asignación de roles
+    diferenciados por carrera (Directivo / Docente / Secretario / Miembro\,CC);
+    control de acceso granular por recurso y por estado del documento, con
+    validación en cada operación de la API. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Notificaciones institucionales
+  & Envío de notificaciones por correo electrónico desde la cuenta institucional
+    real vía Gmail OAuth~2.0: alertas sobre propuestas incompletas, instrumentos
+    pendientes y vencimientos del plan de trabajo; generación del cuerpo del mail
+    con asistencia LLM incluyendo contexto específico de asignatura y docente. \\
+\arrayrulecolor{gray!35}\hline\arrayrulecolor{black}
+Acreditación CONEAU
+  & Registro, versionado y auditoría de evidencias documentales clasificadas por
+    dimensión CONEAU; ingesta masiva desde Google Drive con clasificación automática
+    por LLM; plan de trabajo de la comisión de autoevaluación con seguimiento de
+    actividades y tareas; configuración del ciclo y estándar de acreditación vigente. \\
+\end{longtable}
+\arrayrulecolor{black}
+
+La integración bidireccional con \textbf{Google Workspace} ---Google Docs para
+la edición colaborativa de propuestas y Google Drive para el almacenamiento
+documental--- atraviesa varios de estos módulos: el docente puede editar su propuesta
+indistintamente desde la plataforma o desde el documento compartido, y el sistema
+sincroniza los cambios campo a campo en ambas direcciones.
+Esta integración elimina la duplicidad de herramientas que caracterizaba el proceso AS-IS
+y garantiza coherencia permanente entre la versión colaborativa y el registro en la base
+de datos institucional.
+
+\subsection{Pilares tecnológicos}
+
+La arquitectura de \textsc{macau} descansa en cuatro pilares tecnológicos
+que se articulan entre sí (véase la Figura~\ref{fig:pilares_macau}):
+
+\begin{description}
+  \item[Sistema multi-agente (MAS).] Agentes especializados colaboran para
+    cubrir funciones diferenciadas: extracción de documentos, asistencia de
+    redacción, búsqueda semántica y notificación.
+    La coordinación entre agentes se realiza desde la capa de negocio del backend.
+
+  \item[Modelo de lenguaje grande (LLM).] La familia GPT-4o de OpenAI provee
+    capacidade de generación, reformulación y evaluación en lenguaje natural.
+    El contexto institucional ---carrera, perfil de egreso, normativa vigente---
+    es inyectado en el \textit{system prompt} de cada interacción para mantener
+    coherencia con el dominio.
+
+  \item[Generación aumentada por recuperación (RAG).] Un índice vectorial
+    (\textit{HNSW} sobre \texttt{hnswlib}) permite recuperar fragmentos
+    relevantes de propuestas anteriores y documentos normativos antes de
+    responder una consulta, reduciendo alucinaciones y enriqueciendo
+    las respuestas con contexto específico del dominio.
+
+  \item[Model Context Protocol (MCP).] Los agentes interactúan con los recursos
+    del sistema a través de servidores MCP, que exponen herramientas y recursos
+    normalizados. Este protocolo garantiza trazabilidad nativa: cada invocación
+    de una herramienta queda registrada como evento auditable con identificador
+    de agente, usuario, acción y \textit{timestamp} UTC.
+\end{description}
+
+\begin{figure}[H]
+\centering
+\scalebox{0.85}{%
+\begin{tikzpicture}[
+  pilar/.style={
+    rectangle, rounded corners=6pt,
+    draw=#1!70, fill=#1!6,
+    font=\small\bfseries,
+    text width=3.2cm, align=center,
+    inner sep=8pt, minimum height=1.6cm
+  },
+  center/.style={
+    rectangle, rounded corners=6pt,
+    draw=Micolor1, line width=1.5pt,
+    fill=Micolor1, text=white,
+    font=\normalsize\bfseries,
+    text width=2.6cm, align=center,
+    minimum height=1.6cm
+  },
+  connarr/.style={
+    -{Stealth[length=5pt]}, very thick, color=gray!50
+  }
+]
+\node[center] (macau) {\textsc{macau}};
+\node[pilar=Micolor1, above left=1.1cm and 2.0cm of macau]  (mas)  {MAS\\{\footnotesize Agentes especializados}};
+\node[pilar=teal,     above right=1.1cm and 2.0cm of macau] (llm)  {LLM\\{\footnotesize GPT · asistencia}};
+\node[pilar=teal,     below left=1.1cm and 2.0cm of macau]  (rag)  {RAG\\{\footnotesize Búsqueda semántica}};
+\node[pilar=gray,     below right=1.1cm and 2.0cm of macau] (mcp)  {MCP\\{\footnotesize Trazabilidad · herramientas}};
+
+\draw[connarr] (mas.east)  -- (macau.north west);
+\draw[connarr] (llm.west)  -- (macau.north east);
+\draw[connarr] (rag.east)  -- (macau.south west);
+\draw[connarr] (mcp.west)  -- (macau.south east);
+\end{tikzpicture}
+}
+\caption{Los cuatro pilares tecnológicos de \textsc{macau}.
+  El sistema multi-agente (MAS), el modelo de lenguaje grande (LLM),
+  la generación aumentada por recuperación (RAG) y el protocolo MCP
+  se articulan en torno al núcleo de la plataforma.
+  \textit{Fuente: elaboración propia.}}
+\label{fig:pilares_macau}
+\end{figure}
+
+\subsection{Organización del capítulo}
+
+Las secciones siguientes desarrollan en detalle cada uno de estos componentes.
+La Sección~\ref{sec:arquitectura} describe la arquitectura en capas y el entorno
+de despliegue. Las Secciones~\ref{sec:modelo_datos} a~\ref{sec:acreditacion}
+cubren el modelo de datos y los módulos funcionales de la plataforma.
+Las Secciones~\ref{sec:backend} y~\ref{sec:frontend} describen la implementación
+del \textit{backend} REST y la interfaz web, respectivamente.
+La Sección~\ref{sec:seguridad} analiza los mecanismos de seguridad y auditoría,
+y la Sección~\ref{sec:decisiones_disenio} documenta las decisiones de diseño
+más relevantes con sus justificaciones y compromisos.
+
+%% =============================================================================
+\section{Arquitectura general del sistema}
+\label{sec:arquitectura}
+%% =============================================================================
+
+\textsc{macau} se estructura en cuatro capas lógicas que se comunican
+mediante interfaces bien definidas (véase la
+Figura~\ref{fig:arquitectura_capas}).
+Esta separación permite reemplazar cualquier capa —por ejemplo, el cliente
+web por una interfaz de línea de comandos— sin modificar el núcleo del
+sistema.
+
+\subsection{Capas de la arquitectura}
+\label{subsec:capas}
+
+\begin{description}
+
+  \item[\textbf{Capa de presentación.}]
+  La interfaz de usuario es una aplicación de página única
+  (\textit{single-page application}, SPA) construida con
+  \textbf{React} y \textbf{Vite}.
+  El enrutamiento entre vistas se gestiona mediante renderizado condicional
+  en el componente raíz \texttt{App.jsx}, sin dependencia de un enrutador
+  externo.
+  Los componentes consumen la API REST del \textit{backend} a través de la
+  función nativa \texttt{fetch}, y el servidor de desarrollo de Vite escucha
+  en el puerto~5173.
+
+  \item[\textbf{Capa de lógica de negocio.}]
+  El \textit{backend} es una aplicación \textbf{FastAPI} servida por
+  \textbf{Uvicorn}, expuesta en el puerto~8011.
+  La lógica de negocio se centraliza en \texttt{app/main.py}, que define los \textit{endpoints} REST organizados por
+  recurso funcional: propuestas, docentes, carreras, controles inteligentes,
+  exportación e importación.
+  El middleware \texttt{CORSMiddleware} autoriza peticiones originadas en el
+  cliente web.
+  La autenticación se implementa con tokens \textbf{JWT} —biblioteca
+  \texttt{PyJWT}, contraseñas protegidas con \texttt{bcrypt}—
+  emitidos al iniciar sesión y verificados mediante inyección de dependencias
+  en cada \textit{endpoint} protegido.
+
+  \item[\textbf{Capa de agentes e integración.}]
+  La plataforma incorpora múltiples componentes especializados que operan de
+  forma autónoma o semi-autónoma sobre los datos del sistema.
+  Formalmente, el directorio \texttt{agents/} aloja el módulo
+  \texttt{extract.py}; sin embargo, el conjunto de responsabilidades
+  agentivas es más amplio e incluye:
+
+  \begin{itemize}[leftmargin=1.5em, itemsep=2pt]
+    \item \textbf{Extracción de propuestas (DOCX/GDoc):}
+          \texttt{agents/extract.py} en combinación con
+          \texttt{app/docx\_import.py} analizan el documento subido e
+          identifican automáticamente todos los campos curriculares
+          (contenidos mínimos, resultados de aprendizaje, unidades
+          temáticas, equipo docente, etc.) para poblar la base de datos.
+
+    \item \textbf{Evaluación inteligente con LLM:}
+          el módulo de controles inteligentes (\texttt{evaluate\_control\-\_with\_llm},
+          \texttt{run\_intelligent\_controls}) aplica rúbricas configurables
+          sobre cada propuesta consultando la API de OpenAI y devuelve
+          retroalimentación estructurada con puntaje y observaciones.
+
+    \item \textbf{Asistencia y reformulación LLM:}
+          los \textit{endpoints} \texttt{ai\_generate}, \texttt{ai\_reformulate}
+          y \texttt{suggest\_for\_proposal} permiten generar texto acad\'emico,
+          reformular secciones y sugerir mejoras a partir de un contexto
+          proporcionado por el usuario.
+
+    \item \textbf{Búsqueda semántica (RAG):}
+          \texttt{semantic\_search} localiza fragmentos normativos relevantes
+          consultando el índice vectorial hnswlib y enriqueciéndolos con una
+          respuesta generada por el LLM.
+
+    \item \textbf{Gestor de instrumentos de evaluación:}
+          \texttt{upload\_instruments} e \texttt{instruments\_notify}
+          gestionan la carga de archivos a Google Drive y el envío
+          automático de notificaciones por correo electrónico a los docentes
+          correspondientes.
+
+    \item \textbf{Sincronización con Google Workspace:}
+          \texttt{sync\_proposal\_gdoc}, \texttt{import\_proposal\_gdoc\_url}
+          e \texttt{ingest\_accreditation\_evidences} mantienen
+          sincronizados los documentos entre la base de datos local y
+          Google Drive / Docs, y realizan la ingesta de evidencias de
+          acreditación desde carpetas compartidas.
+  \end{itemize}
+
+  \item[\textbf{Capa de persistencia.}]
+  La base de datos relacional es \textbf{SQLite}, gestionada mediante el ORM
+  \textbf{SQLAlchemy} con el patrón \textit{session-per-request}.
+  Los modelos principales definidos en \texttt{app/models.py} son
+  \texttt{Proposal} (propuesta curricular con todas sus secciones
+  académicas), \texttt{Teacher} (docente), \texttt{Career} (carrera) y las
+  tablas de asociación que registran la asignación de docentes y
+  competencias a cada propuesta.
+  Para la búsqueda semántica de fragmentos normativos, el sistema emplea
+  \textbf{hnswlib}~\cite{malkov2018efficient}, una implementación
+  eficiente de grafos jerárquicos de mundo pequeño
+  (\textit{Hierarchical Navigable Small World}, HNSW) que permite consultas
+  de vecinos más próximos sobre los vectores de incrustación generados por
+  la API de OpenAI.
+
+\end{description}
+
+\begin{figure}[H]
+\centering
+
+\begin{tikzpicture}[
+  layer/.style={
+    rectangle, rounded corners=7pt,
+    draw=#1!70, fill=#1!6,
+    font=\small\bfseries,
+    text width=13.0cm, align=center,
+    inner sep=10pt, minimum height=1.7cm
+  },
+  %% agentes sin LLM directo
+  subnode/.style={
+    rectangle, rounded corners=5pt,
+    draw=#1!60, fill=#1!10,
+    font=\scriptsize,
+    text width=2.1cm, align=center,
+    inner sep=4pt, minimum height=1.0cm
+  },
+  extbox/.style={
+    rectangle, rounded corners=6pt,
+    draw=gray!50, fill=gray!5, dashed,
+    font=\small\bfseries,
+    text width=3.2cm, align=center,
+    inner sep=8pt, minimum height=1.5cm
+  },
+  subcap/.style={
+    rectangle, rounded corners=4pt,
+    draw=gray!45, fill=gray!9,
+    font=\scriptsize,
+    text width=1.3cm, align=center,
+    inner sep=3pt, minimum height=0.9cm
+  },
+  %% Navegador — violeta
+  client/.style={
+    rectangle, rounded corners=6pt,
+    draw=violet!65, fill=violet!8,
+    font=\small\bfseries,
+    text width=2.2cm, align=center,
+    inner sep=7pt, minimum height=1.4cm
+  },
+  arr/.style={
+    {Stealth[length=5pt]}-{Stealth[length=5pt]}, thick, color=gray!60
+  },
+  %% flechas con dependencias externas — bidireccionales
+  arrdash/.style={
+    {Stealth[length=4pt]}-{Stealth[length=4pt]}, thick, dashed, color=gray!55
+  }
+]
+
+%% ── Cliente (navegador) — arriba, centrado ─────────────────────────────────
+\node[client] (client) at (0, 19.8)
+  {Navegador\\[-1pt]{\normalfont\scriptsize(usuario)}};
+
+%% ── Nivel 1: Presentación ──────────────────────────────────────────────────
+\node[layer=teal] (ui) at (0, 17.8)
+  {\textsc{Presentación}\\[3pt]%
+   {\normalfont\footnotesize React\;/\;Vite }};
+
+%% ── Nivel 2: Lógica de negocio ─────────────────────────────────────────────
+\node[layer=Micolor1] (api) at (0, 15.3)
+  {\textsc{Lógica de negocio — FastAPI}\\[3pt]%
+   {\normalfont\footnotesize
+    Uvicorn\;|\;CORSMiddleware\;|\;
+    PyJWT\;+\;bcrypt}};
+
+%% ── Nivel 3: Bloque de Agentes ─────────────────────────────────────────────
+\draw[rounded corners=8pt, draw=teal!50, fill=teal!3,
+      dashed, line width=1pt]
+  (-6.6, 9.5) rectangle (6.6, 13.5);
+\node[font=\scriptsize\bfseries\color{teal!70}] at (0, 13.85)
+  {Capa de agentes\,/\,LLM\,/\,RAG};
+
+%% Fila superior — agentes sin llamada directa a LLM (teal)
+\node[subnode=teal] (ag1) at (-4.4, 12.6)
+  {Extracción\\DOCX\,/\,GDoc};
+\node[subnode=teal] (ag5) at (0, 12.6)
+  {Gestor de\\instrumentos};
+\node[subnode=teal] (ag6) at (4.4, 12.6)
+  {Sincronización\\GWorkspace};
+
+%% Fila inferior — agentes que usan LLM (naranja)
+\node[subnode=orange] (ag2) at (-2.2, 10.6)
+  {Evaluación\\inteligente};
+\node[subnode=orange] (ag3) at (0, 10.6)
+  {Asistencia\\LLM};
+\node[subnode=orange] (ag4) at (2.2, 10.6)
+  {Búsqueda\\semántica\,(RAG)};
+
+%% ── Fila inferior: Persistencia | OpenAI | Google ─────────────────────────
+
+%% Persistencia — izquierda (azul)
+\node[extbox, draw=blue!55, fill=blue!5,
+      text width=3.0cm, minimum height=2.2cm] (db) at (-4.5, 7.5)
+  {\textsc{Persistencia}\\[4pt]%
+   {\normalfont\footnotesize
+    SQLAlchemy\,2.0\\SQLite\;·\;hnswlib\,0.8}};
+
+%% OpenAI API — centro (naranja)
+\node[extbox, draw=orange!65, fill=orange!5,
+      text width=3.2cm, minimum height=2.2cm] (openai) at (0, 7.5)
+  {\textsc{OpenAI API}\\[5pt]%
+   {\normalfont\footnotesize
+    GPT\;·\;completions\\text-embed\;·\;embeddings}};
+
+%% Google Workspace — derecha
+\draw[rounded corners=6pt, draw=gray!40, fill=gray!3,
+      dashed, line width=0.8pt]
+  (2.5, 6.2) rectangle (7.7, 9.0);
+\node[font=\scriptsize\bfseries\color{gray!65}] at (5.1, 9.32)
+  {Google Workspace};
+\node[subcap] (gdrive) at (3.4, 8.2)  {Google\\Drive};
+\node[subcap] (gdocs)  at (5.1, 8.2)  {Google\\Docs};
+\node[subcap] (gmail)  at (6.8, 8.2)  {Gmail};
+\node[font=\scriptsize\color{gray!55}, align=center] at (5.1, 6.8)
+  {\texttt{google-api-python-client}};
+
+%% ────────────────── FLECHAS ────────────────────────────────────────────────
+
+%% Cliente ↔ Presentación
+\draw[arr] (client.south) --
+  node[right, font=\scriptsize\color{gray}, xshift=4pt] {HTTP}
+  (ui.north);
+
+%% Presentación ↔ API
+\draw[arr] (ui.south) --
+  node[right, font=\scriptsize\color{gray}, xshift=4pt] {REST\,/\,JSON}
+  (api.north);
+
+%% API ↔ Capa agentes
+\draw[arr] (api.south) -- (0, 13.5);
+
+%% API ↔ Persistencia
+\draw[arr] (api.south west) to[out=250, in=90] (db.north);
+
+%% Agentes LLM ↔ OpenAI — flechas casi verticales, limpias
+\draw[arrdash] (ag2.south) to[out=270, in=125] (openai.north west);
+\draw[arrdash] (ag3.south) -- (openai.north);
+\draw[arrdash] (ag4.south) to[out=270, in=55] (openai.north east);
+
+%% RAG ↔ Persistencia (hnswlib)
+\draw[arrdash] (ag4.south west) to[out=240, in=55] (db.north east);
+
+%% Agentes ↔ Google Workspace
+\draw[arrdash] (ag1.south east) to[out=300, in=130] (gdocs.north);
+\draw[arrdash] (ag6.south) to[out=270, in=105] (gdrive.north west);
+
+\end{tikzpicture}
+
+\caption{Arquitectura en capas de \textsc{macau}.
+  \textit{Fuente: elaboración propia.}}
+\label{fig:arquitectura_capas}
+\end{figure}
+
+\subsection{Diagrama de despliegue}
+\label{subsec:despliegue}
+
+La figura~\ref{fig:despliegue} muestra el diagrama de despliegue de
+\textsc{macau}. La arquitectura distingue dos nodos principales: el
+\textbf{cliente} (navegador web del usuario) y el \textbf{servidor}, que
+aloja simultáneamente el \textit{frontend} y el \textit{backend}.
+
+\begin{figure}[H]
+\centering
+\scalebox{0.85}{%
+\begin{tikzpicture}[
+  proc/.style={
+    rectangle, rounded corners=5pt,
+    draw=#1!70, fill=#1!8, line width=1.2pt,
+    font=\small\bfseries, text width=4.6cm,
+    align=center, inner sep=10pt, minimum height=2.4cm
+  },
+  store/.style={
+    rectangle, rounded corners=4pt,
+    draw=blue!45, fill=blue!5, line width=0.9pt,
+    font=\scriptsize, text width=13.0cm,
+    align=center, inner sep=8pt
+  },
+  cloud/.style={
+    rectangle, rounded corners=9pt,
+    draw=gray!50, fill=gray!5, dashed, line width=0.9pt,
+    font=\small\bfseries, text width=4.2cm,
+    align=center, inner sep=9pt, minimum height=2.4cm
+  },
+  arr/.style={
+    {Stealth[length=5pt]}-{Stealth[length=5pt]},
+    thick, color=gray!65
+  },
+  extarr/.style={
+    {Stealth[length=4pt]}-{Stealth[length=4pt]},
+    thick, dashed, color=gray!70
+  },
+  zonelabel/.style={font=\tiny\bfseries\color{black!55}, anchor=north west,
+    fill=white, inner sep=1.5pt}
+]
+
+%% ═══════════════════════════════════════════════
+%% ZONA 1 — Cliente
+%% ═══════════════════════════════════════════════
+\draw[rounded corners=8pt, draw=violet!40, fill=violet!5, line width=1.0pt]
+  (-3.8, 18.7) rectangle (3.8, 20.8);
+\node[zonelabel] at (-3.7, 20.8) {ZONA\,1\;—\;Cliente};
+\node[proc=violet, text width=3.2cm, minimum height=1.6cm]
+  (browser) at (0, 19.8)
+  {Navegador\\[-2pt]{\normalfont\scriptsize (usuario)}};
+
+%% ═══════════════════════════════════════════════
+%% ZONA 2 — Máquina local
+%% ═══════════════════════════════════════════════
+\draw[rounded corners=8pt, draw=black!35, fill=black!2, line width=1.1pt]
+  (-7.4, 11.0) rectangle (7.4, 17.8);
+\node[zonelabel] at (-7.3, 17.8) {ZONA\,2\;—\;Máquina local (servidor)};
+
+%% Proceso: Frontend
+\node[proc=teal] (vite) at (-3.5, 15.5)
+  {Frontend\\[4pt]
+   {\normalfont\ttfamily\small Puerto\;5173}};
+
+%% Proceso: Backend
+\node[proc=Micolor1] (uvicorn) at (3.5, 15.5)
+  {Backend\\[4pt]
+   {\normalfont\ttfamily\small Puerto\;8011}};
+
+%% Almacenamiento local en disco
+\node[store] (storage) at (0, 12.9)
+  {\textbf{Disco local}\\[5pt]
+   \texttt{macau.db}\qquad
+   \texttt{vector\_index/}\qquad
+   \texttt{uploads/}\qquad
+   \texttt{.env}};
+
+%% ═══════════════════════════════════════════════
+%% ZONA 3 — Servicios en la nube (externos)
+%% ═══════════════════════════════════════════════
+\draw[rounded corners=8pt, draw=orange!45, fill=orange!5, line width=1.0pt]
+  (-7.4, 6.5) rectangle (7.4, 10.0);
+\node[zonelabel] at (-7.3, 10.0) {ZONA\,3\;—\;Servicios en la nube (externos)};
+\node[cloud] (openai) at (-4.0, 8.5)
+  {OpenAI API\\[5pt]
+   {\normalfont\scriptsize
+    GPT-4o\;·\;text-embedding-3\\
+    \texttt{api.openai.com}}};
+
+\node[cloud] (google) at (4.0, 8.5)
+  {Google Workspace\\[5pt]
+   {\normalfont\scriptsize
+    Drive\;·\;Docs\;·\;Gmail\\
+    OAuth\,2.0}};
+
+%% ── Flechas ────────────────────────────────────────────────────────────────
+
+%% Navegador ↔ Vite (carga de la SPA)
+\draw[arr] (browser.south west) to[out=218, in=98]
+  node[left, font=\scriptsize\color{gray!80}, xshift=-4pt]
+    {\normalfont\texttt{HTTP :5173}}
+  (vite.north);
+
+%% Navegador ↔ Uvicorn (llamadas REST)
+\draw[arr] (browser.south east) to[out=322, in=82]
+  node[right, font=\scriptsize\color{gray!80}, xshift=4pt]
+    {\normalfont\texttt{HTTP :8011}}
+  (uvicorn.north);
+
+%% Vite ↔ Uvicorn (proxy interno)
+\draw[arr] (vite.east) --
+  node[above, font=\scriptsize\color{gray!80}, yshift=3pt]
+    {proxy\;\texttt{/api}}
+  (uvicorn.west);
+
+%% Uvicorn ↔ Disco local
+\draw[arr] (uvicorn.south) to[out=260, in=65]
+  node[right, font=\scriptsize\color{gray!80}, xshift=3pt]
+    {R/W}
+  (storage.north);
+
+%% Uvicorn → OpenAI
+\draw[extarr] (uvicorn.south)
+  to[out=235, in=80]
+  node[near end, left, font=\scriptsize\color{gray!70}, xshift=-3pt] {HTTPS/TLS}
+  (openai.north);
+
+%% Uvicorn → Google
+\draw[extarr] (uvicorn.south)
+  to[out=270, in=90]
+  node[near end, right, font=\scriptsize\color{gray!70}, xshift=3pt] {HTTPS+OAuth\,2}
+  (google.north);
+
+\end{tikzpicture}
+}% end scalebox
+\caption{Diagrama de despliegue de \textsc{macau}. \textit{Fuente: elaboración propia.}}
+\label{fig:despliegue}
+\end{figure}
+
+El diagrama organiza el sistema en tres zonas. 
+
+\begin{itemize}
+  \item \textbf{Zona\,1: Cliente.} El navegador del usuario, que accede a la
+    interfaz web y genera todas las interacciones.
+  \item \textbf{Zona\,2: Máquina local.} El servidor que agrupa los procesos que corren en la máquina
+local: el \textit{frontend} (puerto 5173) sirve la interfaz;
+el \textit{backend} (puerto 8011) expone la API REST, ejecuta los
+agentes y gestiona la lógica de negocio; el disco local almacena la
+base de datos, el índice vectorial, los archivos subidos y las
+variables de entorno. 
+  \item \textbf{Zona\,3: Servicios en la nube.} Los servicios externos con los que se comunica el backend: la API de OpenAI (modelos de lenguaje e incrustaciones) y Google Workspace (Drive, Docs y Gmail), ambos accedidos mediante HTTPS.
+\end{itemize}
+
+
+La siguiente estructura de directorios resume la organización del
+repositorio:
+
+\begin{quote}
+\begin{lstlisting}[basicstyle=\fontsize{9pt}{11pt}\selectfont\ttfamily, frame=none,
+    aboveskip=0pt, belowskip=0pt]
+TesisMCD/
+  backend/
+    app/
+      main.py          <- enrutador principal (FastAPI)
+      models.py        <- entidades SQLAlchemy (ORM)
+      schemas.py       <- esquemas de validacion (Pydantic)
+      auth.py          <- autenticacion JWT + bcrypt
+      database.py      <- sesion y motor SQLAlchemy
+      docx_import.py   <- importacion de propuestas DOCX
+      docx_export.py   <- exportacion de propuestas DOCX
+    agents/
+      extract.py       <- extraccion de propuestas DOCX/GDoc
+      evaluation.py    <- evaluacion inteligente con LLM
+      assistance.py    <- asistencia y reformulacion LLM
+      search.py        <- busqueda semantica RAG (hnswlib)
+      instruments.py   <- gestion de instrumentos evaluativos
+      gsync.py         <- sincronizacion con Google Workspace
+    data/
+      macau.db         <- base de datos SQLite principal
+      uploads/         <- archivos subidos (propuestas, evidencias)
+      vector_index/    <- indice hnswlib (embeddings semanticos)
+  frontend/
+    src/
+      App.jsx          <- componente raiz y enrutamiento
+      main.jsx         <- punto de entrada React
+      styles.css       <- estilos globales
+    index.html         <- shell HTML
+  docs/
+    ARCHITECTURE.md    <- descripcion de la arquitectura
+    DECISIONS.md       <- registro de decisiones tecnicas
+  .env                 <- claves de API y variables de entorno
+\end{lstlisting}
+\end{quote}
+
+%% =============================================================================
+\section{Modelo de datos}
+\label{sec:modelo_datos}
+%% =============================================================================
+
+El modelo de datos de \textsc{macau} se implementa con SQLAlchemy~2.0 sobre
+SQLite, declarado en \texttt{app/models.py} mediante el patrón ORM declarativo.
+La elección de SQLite responde a los requisitos concretos de despliegue: el
+sistema opera en una única máquina institucional sin infraestructura de base de
+datos dedicada, con concurrencia baja y volumen de datos acotado. SQLAlchemy
+abstrae el motor subyacente, de modo que una eventual migración a PostgreSQL
+requeriría únicamente modificar la cadena de conexión en \texttt{database.py},
+sin cambios en el código de negocio.
+
+El esquema se organiza en seis grupos funcionales con responsabilidades claramente
+delimitadas, que se ilustran en la figura~\ref{fig:er_grupos}.
+
+%% Layout circular: Propuestas al centro, 5 grupos en corona a radio=5.4cm
+%% Ángulos (sentido horario desde arriba):
+%%   Plan de estudios   →  72°  → ( 5.13,  1.67)
+%%   Controles          →  144° → (-3.17,  4.37)  (NO: usamos sentido antihorario)
+%% Convención antihoraria desde las 12h:
+%%   doc   →  -126° = 234°  → (-4.37, -3.17)  NO
+%% Usamos ángulos en grados desde eje +x, antihorario:
+%%   plan:  18°   → (5.13,  1.67)   derecha-arriba
+%%   instr: -54°  → (3.17, -4.37)   derecha-abajo
+%%   acc:  -126°  → (-3.17,-4.37)   izquierda-abajo
+%%   doc:   162°  → (-5.13, 1.67)   izquierda-arriba
+%%   ctrl:   90°  → (0,     5.40)   arriba
+\begin{figure}[H]
+\centering
+\scalebox{0.82}{%
+\begin{tikzpicture}[
+  grp/.style={
+    rectangle, rounded corners=6pt,
+    line width=1.1pt,
+    font=\small\bfseries, text width=4.4cm,
+    align=center, inner sep=10pt, minimum height=1.9cm
+  },
+  brel/.style={
+    {Stealth[length=4.5pt]}-{Stealth[length=4.5pt]},
+    thick, color=gray!50
+  },
+  rel/.style={
+    -{Stealth[length=4.5pt]},
+    thick, color=gray!50
+  },
+  rlabel/.style={
+    font=\scriptsize\color{gray!65},
+    fill=white, inner sep=2pt, rounded corners=2pt
+  }
+]
+
+%% ── Radio de la corona ───────────────────────────────────────────────────
+%% r = 5.4;  pos en (r·cos θ, r·sin θ)
+%% ctrl:  90°  → (0,      5.40)
+%% plan:  18°  → (5.130,  1.669)
+%% instr:-54°  → (3.173, -4.369)
+%% acc: -126°  → (-3.173,-4.369)
+%% doc:  162°  → (-5.130, 1.669)
+
+%% ── Nodo central ─────────────────────────────────────────────────────────
+\node[grp, draw=Micolor1!70, fill=Micolor1!8] (prop) at (0, 0)
+  {\textsc{Propuestas}\\[4pt]
+   {\normalfont\scriptsize
+    \texttt{Proposal}\\
+    \texttt{ProposalTeacher}\\
+    \texttt{ProposalCompetency}\\
+    \texttt{Proposal...ControlResult}}};
+
+%% ── Nodos periféricos ────────────────────────────────────────────────────
+\node[grp, draw=orange!70, fill=orange!8] (ctrl) at (0, 5.40)
+  {\textsc{Controles inteligentes}\\[4pt]
+   {\normalfont\scriptsize
+    \texttt{IntelligentControl}\\
+    \texttt{IntelligentCtrlSettings}}};
+
+\node[grp, draw=blue!70, fill=blue!8] (plan) at (6.2, 0)
+  {\textsc{Plan de estudios}\\[4pt]
+   {\normalfont\scriptsize
+    \texttt{StudyPlan/Year/Term}\\
+    \texttt{StudySubject}\\
+    \texttt{StudySubjectPrereq.}\\
+    \texttt{CompetencyCatalog}}};
+
+\node[grp, draw=violet!70, fill=violet!8] (instr) at (3.2, -4.6)
+  {\textsc{Instrumentos evaluativos}\\[4pt]
+   {\normalfont\scriptsize
+    \texttt{EvaluativeInstrument}\\
+    \texttt{EvaluativeInstrumentFolder}}};
+
+\node[grp, draw=green!60!black, fill=green!10] (acc) at (-3.2, -4.6)
+  {\textsc{Acreditación}\\[4pt]
+   {\normalfont\scriptsize
+    \texttt{AccreditationSettings}\\
+    \texttt{EvidenceRegistry}\\
+    \texttt{EvidenceVersion/AuditLog}\\
+    \texttt{WorkPlanActivity/Task}}};
+
+\node[grp, draw=teal!70, fill=teal!8] (doc) at (-6.2, 0)
+  {\textsc{Docentes}\\[4pt]
+   {\normalfont\scriptsize
+    \texttt{Teacher}\\
+    \texttt{TeacherCareer}\\
+    \texttt{Career}\\
+    \texttt{CareerCommitteeMember}}};
+
+%% ── Relaciones radiales (prop ↔ periferia) ───────────────────────────────
+%% Cada arista va del centro al nodo periférico: sin cruces garantizados.
+
+\draw[rel] (prop) -- node[rlabel, pos=0.52, sloped, above=1pt] {resultados LLM} (ctrl);
+\draw[rel] (prop) -- node[rlabel, pos=0.52, sloped, above=1pt] {FK asignatura}  (plan);
+\draw[brel](prop) -- node[rlabel, pos=0.52, sloped, above=1pt] {evidencia RA}    (instr);
+\draw[brel](prop) -- node[rlabel, pos=0.52, sloped, above=1pt] {marco}           (acc);
+\draw[brel](prop) -- node[rlabel, pos=0.52, sloped, above=1pt] {N:M docentes}    (doc);
+
+%% ── Relaciones periféricas ────────────────────────────────────────────────
+%% plan → instr: arco corto entre nodos adyacentes (72° de separación)
+\draw[rel]  (plan.south) to[out=270, in=30]
+  node[rlabel, pos=0.45, right=2pt] {asignatura} (instr.north east);
+
+%% doc ↔ instr: arco largo entre nodos opuestos (216° de separación)
+\draw[brel] (doc.south) to[out=270, in=210]
+  node[rlabel, pos=0.5, below=3pt] {autoría} (instr.west);
+
+%% doc ↔ acc: arco corto entre nodos adyacentes
+\draw[brel] (doc.south east) to[out=310, in=150]
+  node[rlabel, pos=0.5, below=2pt] {participación} (acc.north west);
+
+%% plan ↔ acc: arco largo por la parte exterior inferior
+\draw[brel] (plan.south) to[out=250, in=30]
+  node[rlabel, pos=0.5, right=2pt] {marco} (acc.north east);
+
+\end{tikzpicture}}% end scalebox
+\caption{Grupos funcionales del modelo de datos. \textit{Fuente: elaboración propia.}}
+\label{fig:er_grupos}
+\end{figure}
+
+\subsubsection*{Grupo 1 — Núcleo de propuestas}
+
+La entidad central del sistema es \texttt{Proposal}. Su diseño consolida en una
+única tabla todos los campos que conforman una propuesta de asignatura, organizados
+en cuatro categorías funcionales: \textit{identificación académica},
+\textit{carga horaria}, \textit{contenido pedagógico} y
+\textit{control e integración externa}. El cuadro~\ref{tab:proposal} detalla los
+atributos principales de la entidad.
+
+\begin{longtable}{@{}p{4.2cm} p{2.0cm} p{7.6cm}@{}}
+\caption{Atributos principales de la entidad \texttt{Proposal}.}
+\label{tab:proposal}\\
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\textit{(continuación de la tabla~\ref{tab:proposal})}}\\[4pt]
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endhead
+\midrule
+\multicolumn{3}{r@{}}{\small\textit{continúa en la página siguiente}}\\
+\endfoot
+\bottomrule
+\endlastfoot
+\multicolumn{3}{@{}l}{\textit{Identificación académica}} \\[2pt]
+\texttt{title}            & String  & Denominación oficial de la asignatura. \\
+\texttt{career}           & String  & Carrera a la que pertenece la propuesta. \\
+\texttt{subject}          & String  & Nombre normalizado de la asignatura. \\
+\texttt{study\_plan}      & String  & Plan de estudios de referencia. \\
+\texttt{quarter}          & String  & Cuatrimestre o período lectivo. \\
+\texttt{character}        & String  & Carácter: obligatoria u optativa. \\
+\texttt{regime}           & String  & Régimen: cuatrimestral o anual. \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Carga horaria}} \\[2pt]
+\texttt{theoretical\_hours} & Integer & Horas teóricas semanales. \\
+\texttt{practical\_hours}   & Integer & Horas prácticas semanales. \\
+\texttt{total\_hours}       & Integer & Total de horas de la asignatura. \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Contenido pedagógico}} \\[2pt]
+\texttt{minimum\_content}   & Text    & Contenidos mínimos según plan. \\
+\texttt{fundamentals\_part1}& Text    & Fundamentación: importancia de la asignatura. \\
+\texttt{fundamentals\_part2}& Text    & Fundamentación: perfil profesional. \\
+\texttt{methodology}        & Text    & Metodología de enseñanza. \\
+\texttt{evaluation}         & Text    & Sistema de evaluación. \\
+\texttt{bibliography}       & Text    & Bibliografía básica y complementaria. \\
+\texttt{learning\_outcomes} & JSON    & Lista estructurada de resultados de aprendizaje. \\
+\texttt{units}              & JSON    & Unidades temáticas con horas por unidad. \\
+\texttt{practicals}         & JSON    & Trabajos prácticos de la asignatura. \\
+\texttt{teaching\_team}     & JSON    & Equipo docente con roles y titulación. \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Control e integración externa}} \\[2pt]
+\texttt{status}             & String  & Estado del ciclo de vida de la propuesta. \\
+\texttt{editing\_locked}    & Boolean & Bloqueo de edición activado por el directivo. \\
+\texttt{gdoc\_url}          & String  & URL del Google Doc vinculado. \\
+\texttt{gdoc\_last\_synced} & DateTime& Marca temporal de la última sincronización. \\
+\texttt{gdoc\_status}       & String  & Estado de la sincronización (\textit{synced}, \textit{outdated}, etc.). \\
+\texttt{source\_type}       & String  & Origen: \texttt{docx}, \texttt{gdoc} o \texttt{manual}. \\
+\texttt{created\_at}        & DateTime& Fecha y hora de creación del registro. \\
+\texttt{updated\_at}        & DateTime& Fecha y hora de la última modificación. \\
+\end{longtable}
+
+Las secciones de contenido de estructura variable ---resultados de aprendizaje,
+unidades temáticas, trabajos prácticos y equipo docente--- se almacenan como
+columnas de tipo \texttt{JSON}. Esta decisión permite representar colecciones de
+longitud arbitraria sin normalizar en tablas adicionales, a costa de renunciar a
+consultas relacionales sobre esos campos; dado que el acceso a dichas secciones
+siempre se realiza de forma completa (lectura y escritura de la propuesta entera),
+el enfoque es apropiado en este contexto.
+
+\textbf{\textit{Entidades satélite del grupo:}} \texttt{ProposalTeacher} materializa la relación N:M entre propuestas y docentes,
+permitiendo que múltiples docentes participen en una misma propuesta con roles
+diferenciados. \texttt{ProposalCompetency} vincula cada propuesta con las
+competencias CONEAU que declara cubrir, tomadas del catálogo institucional.
+\texttt{ProposalIntelligentControlResult} persiste el diagnóstico producido por
+cada control normativo automático: registra si la verificación fue superada,
+qué aspecto falló, por qué razón y qué texto alternativo propuso el modelo de
+lenguaje; estos datos alimentan la vista de retroalimentación del docente y el
+panel de auditoría del directivo.
+
+La especificación detallada de este grupo figura en \textbf{\textit{Anexo~\ref{anexo:modelo_datos} — Especificación del modelo de datos, Grupo 1}} (véase pág.~\pageref{anexo:grupo1_modelo_datos}).
+
+\subsubsection*{Grupo 2 — Gestión docente}
+
+La entidad central de este grupo es \texttt{Teacher}, que consolida en una
+sola tabla la identidad institucional del docente y sus credenciales de
+autenticación. Este diseño evita tablas \texttt{User} separadas: cada docente
+es simultáneamente un actor del sistema con sus propios permisos. La
+tabla~\ref{tab:teacher} recoge sus atributos completos.
+
+\begin{longtable}{@{}p{4.0cm} p{2.0cm} p{7.6cm}@{}}
+\caption{Entidad \texttt{teachers} — perfil e identidad docente.}
+\label{tab:teacher}\\
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\textit{(continuación — \texttt{teachers})}}\\[3pt]
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endhead
+\midrule\multicolumn{3}{r@{}}{\small\textit{continúa en la página siguiente}}\\
+\endfoot
+\bottomrule
+\endlastfoot
+%% ── Identificación y perfil ────────────────────────
+\multicolumn{3}{@{}l}{\textit{Identificación y perfil}} \\
+\midrule
+\texttt{id}             & Integer  & Identificador interno autoincremental (PK). \\
+\texttt{name}           & String   & Nombre completo del docente. \\
+\texttt{normalized\_key}& String   & Clave normalizada para búsqueda sin diferencias
+                                      tipográficas (tildes, mayúsculas, espacios). \\
+\texttt{email}          & String   & Correo electrónico institucional. \\
+\texttt{category}       & String   & Categoría docente (p.\,ej.\ titular, adjunto, JTP). \\
+\texttt{dedication}     & String   & Régimen de dedicación (exclusiva, semi, simple). \\
+\midrule
+%% ── Autenticación y acceso ─────────────────────────
+\multicolumn{3}{@{}l}{\textit{Autenticación y acceso}} \\
+\midrule
+\texttt{password\_hash}        & String   & Hash bcrypt de la contraseña local.
+                                            Nulo si el docente no activó
+                                            autenticación por credencial. \\
+\texttt{last\_login}           & DateTime & Marca temporal del último acceso al sistema. \\
+\texttt{password\_reset\_at}   & DateTime & Marca temporal de la última solicitud de
+                                            restablecimiento de contraseña. \\
+\texttt{gmail\_refresh\_token} & Text     & Token de refresco OAuth~2.0 para la integración
+                                            con Google Drive del docente. \\
+\texttt{is\_admin}            & Boolean  & Indica si el docente posee privilegios de
+                                            administración global del sistema. \\
+\midrule
+%% ── Control temporal ───────────────────────────────
+\multicolumn{3}{@{}l}{\textit{Control temporal}} \\
+\midrule
+\texttt{created\_at} & DateTime & Fecha y hora de creación (valor por defecto: ahora). \\
+\texttt{updated\_at} & DateTime & Fecha y hora de última modificación (auto actualizado). \\
+\end{longtable}
+
+\textit{\textbf{Entidades satélite del grupo:}} \texttt{TeacherCareer} registra la pertenencia
+de un docente a una carrera mediante un par \texttt{teacher\_id}
+$\times$~\texttt{career} (nombre de carrera como cadena). \texttt{Career}
+centraliza el catálogo de carreras activas con referencias opcionales a los
+docentes que ejercen como director (\texttt{director\_id}) y secretario
+(\texttt{secretario\_id}). \texttt{CareerCommitteeMember} materializa la
+comisión curricular como una relación N:M entre \texttt{Career} y
+\texttt{Teacher} con eliminación en cascada cuando se elimina la carrera o
+el docente.
+
+La especificación detallada de este grupo figura en \textbf{\textit{Anexo~\ref{anexo:modelo_datos} — Especificación del modelo de datos, Grupo 2}} (véase pág.~\pageref{anexo:grupo2_modelo_datos}).
+
+\subsubsection*{Grupo 3 — Plan de estudios}
+
+El modelo curricular se organiza como una jerarquía de cuatro niveles:
+\texttt{StudyPlan} $\to$ \texttt{StudyYear} $\to$ \texttt{StudyTerm} $\to$
+\texttt{StudySubject}. Esta estructura replica fielmente el esquema formal de
+la carrera y permite que cada asignatura quede unívocamente ubicada en su año
+y cuatrimestre dentro de un plan vigente. La entidad hoja de la jerarquía,
+\texttt{StudySubject}, actúa como ancla para las propuestas pedagógicas
+mediante la clave foránea \texttt{study\_subject\_id} de \texttt{Proposal};
+sus atributos se detallan en la tabla~\ref{tab:study_subject}.
+
+\begin{longtable}{@{}p{4.0cm} p{2.0cm} p{7.6cm}@{}}
+\caption{Entidad \texttt{study\_subjects} — asignatura del plan de estudios.}
+\label{tab:study_subject}\\
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\textit{(continuación — \texttt{study\_subjects})}}\\[3pt]
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endhead
+\midrule\multicolumn{3}{r@{}}{\small\textit{continúa en la página siguiente}}\\
+\endfoot
+\bottomrule
+\endlastfoot
+\multicolumn{3}{@{}l}{\textit{Identificación}} \\
+\midrule
+\texttt{id}                   & Integer & Identificador interno autoincremental (PK). \\
+\texttt{term\_id}             & Integer & FK a \texttt{study\_terms.id}; ubica la asignatura en su cuatrimestre. \\
+\texttt{code}                 & String  & Código oficial de la asignatura en el plan. \\
+\texttt{name}                 & String  & Denominación oficial de la asignatura. \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Carga horaria y régimen}} \\
+\midrule
+\texttt{character}            & String  & Carácter: \textit{Obligatoria} u \textit{Optativa}. \\
+\texttt{regime}               & String  & Régimen: \textit{Cuatrimestral} o \textit{Anual}. \\
+\texttt{theoretical\_hours}  & Integer & Horas teóricas semanales. \\
+\texttt{practical\_hours}    & Integer & Horas prácticas semanales. \\
+\texttt{total\_hours}        & Integer & Total de horas de la asignatura. \\
+\texttt{weekly\_hours}       & Integer & Carga horaria semanal combinada. \\
+\texttt{practice\_scope}     & Text    & Alcance del trabajo práctico según el plan. \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Contenido curricular}} \\
+\midrule
+\texttt{minimum\_content}       & Text & Contenidos mínimos establecidos por el plan. \\
+\texttt{generic\_competencies}  & Text & Competencias genéricas CONEAU referenciadas. \\
+\texttt{specific\_competencies} & Text & Competencias específicas CONEAU referenciadas. \\
+\texttt{blocks}                 & JSON & Bloques temáticos con horas asignadas por bloque. \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Control temporal}} \\
+\midrule
+\texttt{created\_at} & DateTime & Fecha y hora de creación (\textit{server default}: ahora). \\
+\texttt{updated\_at} & DateTime & Fecha y hora de última modificación (auto actualizado). \\
+\end{longtable}
+
+\textbf{\textit{Entidades complementarias del grupo:}} \texttt{StudyPlan} encabeza la jerarquía
+con el nombre del plan y un campo \texttt{payload} (JSON) para metadatos
+extensos sin esquema fijo. \texttt{StudyYear} y \texttt{StudyTerm} son nodos
+intermedios de ordenamiento con campos \texttt{sort\_order} que permiten
+respetar el orden oficial sin depender del valor numérico del \texttt{id}.
+\texttt{StudySubjectPrerequisite} expresa las correlatividades como una
+autorreferencia sobre \texttt{study\_subjects}: cada fila indica que
+\texttt{subject\_id} requiere aprobar \texttt{prerequisite\_id}.
+\texttt{CompetencyCatalog} centraliza el catálogo de competencias CONEAU por
+carrera y plan, clasificadas como genéricas o específicas mediante
+\texttt{competency\_type}; sirve como fuente de verdad para poblar las
+competencias de nuevas propuestas.
+
+La especificación detallada de este grupo figura en \textbf{\textit{Anexo~\ref{anexo:modelo_datos} — Especificación del modelo de datos, Grupo 3}} (véase pág.~\pageref{anexo:grupo3_modelo_datos}).
+
+\subsubsection*{Grupo 4 — Controles inteligentes}
+
+Este grupo implementa el motor de verificación normativa automática.
+\texttt{IntelligentControl} define cada regla verificable: un \texttt{topic}
+categorizador, un \texttt{name} descriptivo y el campo \texttt{instruction},
+que contiene el prompt completo que se envía al LLM junto con el texto de la
+propuesta. El campo \texttt{associated\_topics} (JSON) permite agrupar
+controles relacionados para ejecuciones consolidadas. La
+tabla~\ref{tab:intelligent_control} recoge sus atributos.
+
+\begin{longtable}{@{}p{4.0cm} p{2.0cm} p{7.6cm}@{}}
+\caption{Entidad \texttt{intelligent\_controls} — definición de controles LLM.}
+\label{tab:intelligent_control}\\
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\textit{(continuación — \texttt{intelligent\_controls})}}\\[3pt]
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{id}                 & Integer & Identificador interno autoincremental (PK). \\
+\texttt{topic}              & String  & Categoría temática del control (p.\,ej.\ \textit{competencias}, \textit{bibliografía}). \\
+\texttt{name}               & String  & Nombre descriptivo del control. \\
+\texttt{instruction}        & Text    & Prompt completo enviado al LLM junto con el texto de la propuesta. \\
+\texttt{is\_active}        & Boolean & Indica si el control participa en las ejecuciones (defecto: verdadero). \\
+\texttt{sort\_order}       & Integer & Orden de presentación en la interfaz. \\
+\texttt{associated\_topics}& JSON    & Lista de tópicos relacionados para ejecuciones consolidadas. \\
+\texttt{created\_at}       & DateTime& Fecha y hora de creación (\textit{server default}: ahora). \\
+\texttt{updated\_at}       & DateTime& Fecha y hora de última modificación (auto actualizado). \\
+\end{longtable}
+
+\medskip
+\noindent\textbf{Configuración de modos de ejecución.}
+La entidad \texttt{IntelligentControlSettings} centraliza los par\'{a}metros
+de los tres perfiles disponibles. Cada modo tiene su propio modelo de
+lenguaje, temperatura y l\'{i}mite de \textit{tokens}, todos configurables
+de forma independiente sin tocar el c\'{o}digo:
+
+\begin{description}[noitemsep, leftmargin=1.4cm, labelwidth=1.2cm]
+  \item[\textit{Guepardo}] R\'{a}pido y de bajo costo.
+    Modelo por defecto: \texttt{gpt-4o-mini}, temperatura~0{,}15,
+    m\'{a}x.\ 420~\textit{tokens}.
+    Perfil asignado por defecto a \textbf{docentes}
+    (\texttt{docente\_mode}).
+  \item[\textit{Delf\'{i}n}] Equilibrado entre velocidad y profundidad.
+    Modelo por defecto: \texttt{gpt-4o-mini}, temperatura~0{,}10,
+    m\'{a}x.\ 500~\textit{tokens}.
+    Perfil asignado por defecto a \textbf{directivos}
+    (\texttt{director\_last\_mode}).
+  \item[\textit{Ballena}] M\'{a}xima profundidad de an\'{a}lisis.
+    Modelo por defecto: \texttt{gpt-4o}, temperatura~0{,}10,
+    m\'{a}x.\ 700~\textit{tokens}.
+    
+\end{description}
+
+\noindent La selecci\'{o}n activa se persiste por rol:
+\texttt{director\_last\_mode} para directivos y
+\texttt{docente\_mode} para docentes, de modo que cada usuario retoma
+el \'{u}ltimo perfil utilizado en su pr\'{o}xima sesi\'{o}n.
+Un perfil no v\'{a}lido se normaliza autom\'{a}ticamente a
+\textit{Delf\'{i}n}.
+
+Los valores indicados son los \textbf{par\'{a}metros por defecto}.
+Un perfil con rol directivo puede modificarlos en cualquier momento a
+trav\'{e}s del endpoint \texttt{PATCH /intelligent-controls/settings}:
+modelo de lenguaje, temperatura y l\'{i}mite de \textit{tokens} se
+pueden ajustar de forma independiente para cada uno de los tres modos,
+sin necesidad de intervenci\'{o}n técnica en el servidor.
+Esto permite, por ejemplo, migrar \textit{Ballena} a un modelo más
+reciente cuando est\'{e} disponible, o subir el l\'{i}mite de
+\textit{tokens} de \textit{Guepardo} durante períodos de mayor
+exigencia de an\'{a}lisis, sin tocar el c\'{o}digo fuente.
+
+La especificación detallada de este grupo figura en \textbf{\textit{Anexo~\ref{anexo:modelo_datos} — Especificación del modelo de datos, Grupo 4}} (véase pág.~\pageref{anexo:grupo4_modelo_datos}).
+
+\subsubsection*{Grupo 5 — Instrumentos evaluativos}
+
+La gestión de evaluaciones se organiza en dos entidades. \texttt{EvaluativeInstrument}
+registra trabajos prácticos, parciales, finales y recuperatorios de una
+asignatura, discriminados por \texttt{instrument\_type}. Soporta dos modalidades
+de almacenamiento: (a) local (\texttt{stored\_filename}, \texttt{file\_path})
+o (b) en Google Drive (\texttt{gdrive\_url}, \texttt{gdrive\_file\_id}), lo que
+permite tanto la carga directa de archivos como la vinculación con documentos
+ya existentes en el espacio Drive institucional. La tabla~\ref{tab:evaluative_instrument}
+detalla sus atributos.
+
+\begin{longtable}{@{}p{4.0cm} p{2.0cm} p{7.6cm}@{}}
+\caption{Entidad \texttt{evaluative\_instruments} — registro de evaluaciones.}
+\label{tab:evaluative_instrument}\\
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\textit{(continuación — \texttt{evaluative\_instruments})}}\\[3pt]
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\multicolumn{3}{@{}l}{\textit{Identificación y contexto}} \\
+\midrule
+\texttt{id}                & Integer & Identificador interno autoincremental (PK). \\
+\texttt{career}            & String  & Carrera a la que pertenece la evaluación. \\
+\texttt{study\_plan}       & String  & Plan de estudios de referencia. \\
+\texttt{subject}           & String  & Asignatura a la que pertenece la evaluación. \\
+\texttt{instrument\_type}  & String  & Tipo: \textit{TP} \textbar{} \textit{Parcial} \textbar{} \textit{Final} \textbar{} \textit{Recuperatorio}. \\
+\texttt{title}             & String  & Denominación descriptiva del instrumento (opcional). \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Almacenamiento local}} \\
+\midrule
+\texttt{original\_filename} & String  & Nombre original del archivo subido por el usuario. \\
+\texttt{stored\_filename}   & String  & Nombre del archivo almacenado en el servidor. \\
+\texttt{file\_path}        & String  & Ruta del archivo en el servidor (ruta relativa o absoluta). \\
+\texttt{file\_size}        & Integer & Tamaño del archivo en bytes. \\
+\texttt{mime\_type}        & String  & Tipo MIME del archivo (p.\,ej.\ \texttt{application/pdf}). \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Almacenamiento en Drive}} \\
+\midrule
+\texttt{gdrive\_url}       & String  & URL pública o compartida del archivo en Google Drive. \\
+\texttt{gdrive\_file\_id}  & String  & Identificador único del archivo en Google Drive API. \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Metadata y auditoría}} \\
+\midrule
+\texttt{uploaded\_by}      & String  & Usuario o email que cargó el documento. \\
+\texttt{created\_at}       & DateTime& Fecha y hora de subida (\textit{server default}: ahora). \\
+\texttt{updated\_at}       & DateTime& Fecha y hora de última modificación (auto actualizado). \\
+\end{longtable}
+
+\textbf{\textit{Carpetas de Drive centralizado:}} \texttt{EvaluativeInstrumentFolder}
+asocia una carpeta de Google Drive a una determinada combinación
+carrera~+~plan~+~asignatura. Esta estructura permite consolidar todos los
+instrumentos de una asignatura bajo un único directorio en Drive, facilitando
+la descarga y sincronización programada.
+
+La especificación detallada de este grupo figura en \textbf{\textit{Anexo~\ref{anexo:modelo_datos} — Especificación del modelo de datos, Grupo 5}} (véase pág.~\pageref{anexo:grupo5_modelo_datos}).
+
+\subsubsection*{Grupo 6 — Acreditación}
+
+Este grupo concentra seis entidades de soporte al proceso CONEAU.
+\texttt{AccreditationSettings} actúa como entidad cabecera de configuración por
+carrera y plan: define carpetas de origen y destino en Drive, modo de
+procesamiento, alcance del escaneo y listas JSON de tipos de evidencia y
+actores habilitados. La tabla~\ref{tab:accreditation_settings} resume su
+estructura.
+
+\begin{longtable}{@{}p{4.0cm} p{2.0cm} p{7.6cm}@{}}
+\caption{Entidad \texttt{accreditation\_settings} — parámetros del proceso de acreditación.}
+\label{tab:accreditation_settings}\\
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\textit{(continuación — \texttt{accreditation\_settings})}}\\[3pt]
+\toprule
+\textbf{Atributo} & \textbf{Tipo} & \textbf{Descripción} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\multicolumn{3}{@{}l}{\textit{Identificación y alcance}} \\
+\midrule
+\texttt{id}                  & Integer  & Identificador interno autoincremental (PK). \\
+\texttt{career}              & String   & Carrera sobre la que aplica la configuración (índice). \\
+\texttt{study\_plan}         & String   & Plan de estudios de referencia (opcional, indexado). \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Conectividad y procesamiento}} \\
+\midrule
+\texttt{source\_folder\_url}      & String   & URL de carpeta de origen para relevamiento de evidencias. \\
+\texttt{destination\_folder\_url} & String   & URL de carpeta de destino para consolidación documental. \\
+\texttt{process\_mode}            & String   & Estrategia de procesamiento: \textit{move} o \textit{copy}. \\
+\texttt{recursive\_scan}          & Boolean  & Indica si el relevamiento recorre subcarpetas de forma recursiva. \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Parámetros dinámicos}} \\
+\midrule
+\texttt{evidence\_types} & JSON & Tipos de evidencia habilitados para el proceso acreditador. \\
+\texttt{actor\_roles}    & JSON & Roles institucionales admitidos en el flujo de trabajo. \\
+\texttt{actors}          & JSON & Actores concretos participantes (equipo operativo). \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Control temporal}} \\
+\midrule
+\texttt{created\_at} & DateTime & Fecha y hora de creación (\textit{server default}: ahora). \\
+\texttt{updated\_at} & DateTime & Fecha y hora de última modificación (auto actualizado). \\
+\end{longtable}
+
+\textbf{\textit{Entidades complementarias del grupo:}} \texttt{AccreditationEvidenceRegistry}
+es el registro principal de evidencias (origen local, URL de Drive o carpeta de
+Drive), con trazabilidad de integridad mediante \texttt{checksum\_sha256} y
+metadatos JSON. \texttt{AccreditationEvidenceVersion} preserva el historial de
+versionado por evidencia, mientras \texttt{AccreditationEvidenceAuditLog}
+registra acciones inmutables de creación, actualización y versionado junto con
+actor y campos modificados. \texttt{AccreditationWorkPlanActivity} y
+\texttt{AccreditationWorkPlanTask} modelan el plan operativo del proceso:
+etapas, sub-etapas, responsables, fechas de compromiso, estado y observaciones,
+con desagregación en tareas de seguimiento.
+
+La especificación detallada de este grupo figura en \textbf{\textit{Anexo~\ref{anexo:modelo_datos} — Especificación del modelo de datos, Grupo 6}} (véase pág.~\pageref{anexo:grupo6_modelo_datos}).
+
+%% =============================================================================
+\section{Módulo de gestión del ciclo de vida de propuestas}
+\label{sec:propuestas}
+%% =============================================================================
+
+La propuesta de asignatura es la unidad documental central de \textsc{macau}:
+agrupa en un solo objeto persistente toda la información exigida —desde los datos de identificación de la asignatura hasta la
+bibliografía, la metodología y los resultados de aprendizaje— y la expone a
+flujos de validación normativa, revisión colaborativa y exportación
+institucional.
+
+El ciclo de vida de una propuesta está gobernado por cinco estados formales
+con transiciones explícitas y controladas por rol:
+\begin{description}[noitemsep, topsep=3pt]
+    \item[\textit{Borrador}:] la propuesta fue creada o importada por el directivo; el docente asignado puede editarla libremente y agregar toda la información requerida, ya que todos sus campos son modificables.
+    \item[\textit{En revisión}:] fue enviada a la Comisión Curricular; puede
+          quedar bloqueada para edición según la configuración del proceso.
+    \item[\textit{Observada}:] la Comisión Curricular detectó no conformidades;
+          el docente recibe las observaciones y debe subsanarlas antes de
+          volver a enviarla.
+    \item[\textit{Aprobada}:] el director aprobó formalmente la propuesta;
+          la edición queda bloqueada para preservar la integridad del documento
+          de referencia.
+    \item[\textit{Archivada}:] cierre de ciclo; la propuesta queda como
+          evidencia documental accesible al proceso de acreditación CONEAU.
+\end{description}
+
+La Figura~\ref{fig:flujo_estados_propuesta} resume las transiciones válidas
+entre estados, incluyendo el ciclo de observación y corrección previo a la
+aprobación final.
+
+\begin{figure}[H]
+\centering
+\shorthandoff{<>}
+\begin{tikzpicture}[
+  every node/.style={font=\small},
+  estado/.style={
+    rectangle, rounded corners=4pt,
+    draw=Micolor1, line width=0.8pt,
+    minimum width=3.4cm, minimum height=0.9cm,
+    align=center, fill=Micolor1!12
+  },
+  decision/.style={
+    diamond, aspect=2.4,
+    draw=Micolor1, line width=0.8pt,
+    minimum height=1.0cm,
+    align=center, fill=Micolor1!6,
+    font=\small
+  },
+  actor/.style={font=\scriptsize\itshape, text=gray!70!black},
+  etiq/.style={font=\scriptsize\bfseries, fill=white, inner sep=1pt}
+]
+  % --- Nodos del eje principal ---
+  \node[estado]                           (borrador)  {Borrador};
+  \node[estado,  below=1.0cm of borrador] (revision)  {En revisi\'{o}n};
+  \node[decision, below=1.3cm of revision] (dec)      {¿Conforme?};
+  \node[estado,  below=1.4cm of dec]      (aprobada)  {Aprobada};
+  \node[estado,  below=1.0cm of aprobada] (archivada) {Archivada};
+
+  % --- Nodo lateral Observada, alineado con el rombo ---
+  \node[estado, right=3.6cm of dec]       (observada) {Observada};
+
+  % --- Eje principal ---
+  \draw[->, thick, color=Micolor1]
+    (borrador) -- node[etiq, right=2pt]{env\'ia}
+                  node[actor, left=2pt]{\textit{(Director)}} (revision);
+
+  \draw[->, thick, color=Micolor1]
+    (revision) -- node[etiq, right=2pt]{revisa}
+                  node[actor, left=2pt]{\textit{(Com.\,Curricular)}} (dec);
+
+  \draw[->, thick, color=Micolor1]
+    (dec) -- node[etiq, right=2pt]{S\'i --- aprueba}
+              node[actor, left=2pt]{\textit{(Director)}} (aprobada);
+
+  \draw[->, thick, color=Micolor1]
+    (aprobada) -- node[etiq, right=2pt]{archiva}
+                  node[actor, left=2pt]{\textit{(Sistema)}} (archivada);
+
+  % --- Rama observaci\'{o}n (salida derecha del rombo) ---
+  \draw[->, thick, color=Micolor1!80]
+    (dec.east) -- node[etiq, above=2pt]{No --- observa}
+                  node[actor, below=2pt]{\textit{(Com.\,Curricular)}} (observada.west);
+
+  % --- Retorno: observada sube y vuelve a En revisi\'{o}n ---
+  \draw[->, thick, color=Micolor1!80]
+    (observada.north) to[out=90, in=0]
+      node[etiq, pos=0.45, right=3pt]{corrige y reenv\'ia}
+      node[actor, pos=0.72, right=3pt]{\textit{(Docente)}}
+      (revision.east);
+\end{tikzpicture}
+\shorthandon{<>}
+\caption{Diagrama de flujo del ciclo de vida de propuestas en \textsc{macau}.\\
+\footnotesize\textit{Fuente: Elaboraci\'{o}n propia.}}
+\label{fig:flujo_estados_propuesta}
+\end{figure}
+
+\subsection{Campos de una propuesta de asignatura}
+\label{subsec:campos_propuesta}
+
+Toda propuesta almacenada en \textsc{macau} se estructura en seis bloques
+temáticos que replican la plantilla institucional vigente.
+
+\textbf{Identificación y régimen académico.} Nombre oficial de la asignatura,
+carrera, plan de estudios de referencia, año
+lectivo, año en la carrera, cuatrimestre, carácter (obligatoria - optativa) y
+régimen de cursada (cuatrimestral - anual). Estos atributos ubican la propuesta
+dentro de la estructura curricular y permiten verificar su coherencia con el
+plan vigente.
+
+\textbf{Carga horaria.} Horas semanales y totales, diferenciadas entre teoría y práctica. Estos valores se utilizan en los controles normativos del módulo de revisión, que verifica la consistencia de la carga horaria declarada con lo establecido en la resolución de la carrera.
+
+\textbf{Equipo docente.} Relación de docentes vinculados con rol en la Asignatura
+(Titular, Asociado, Adjunto, Jefe de Trabajos Prácticos, Ayudante). Se almacenan como registros independientes en
+\texttt{ProposalTeacher}, lo que permite armar equipos multi-carrera sin
+duplicar la propuesta.
+
+\textbf{Fundamentación, Contenidos y Competencias} Se incluyen campos de texto libre para la fundamentación —orientada a la relevancia de la asignatura y su vinculación con el perfil del egresado— y para los contenidos mínimos establecidos en la Resolución de la carrera. Asimismo, se incorporan las competencias genéricas y específicas.
+
+\textbf{Secciones dinámicas.} Tres colecciones almacenadas como JSON
+estructurado que modelan el contenido pedagógico variable:
+\begin{itemize}[noitemsep, topsep=2pt]
+    \item \textit{Unidades temáticas}: identificador, título, descripción de contenidos por unidad, bibliografía básica y complementaria;
+    \item \textit{Trabajos prácticos}: Objetivos y Resultados de Aprendizaje a los que aporta, Actividades a desarrollar, Materiales, Ámbito de Práctica;
+    \item \textit{Resultados de aprendizaje} (RA): descripción de los resultados de aprendizaje esperados.
+\end{itemize}
+
+\textbf{Secciones metodológicas.} Metodología de enseñanza, sistema de
+evaluación, bibliografía básica y complementaria, y un campo libre de
+observaciones; todos en texto plano editable en la interfaz o importable
+desde el documento fuente.
+
+
+\subsection{Importaci\'{o}n de propuestas existentes}
+\label{sec:extraccion}
+
+Uno de los requisitos de adopci\'{o}n cr\'{i}ticos para cualquier plataforma
+institucional es la capacidad de incorporar el acervo documental preexistente
+sin obligar a la re-ingesta manual. En el contexto de \textsc{macau}, esto
+significa que las propuestas de asignatura elaboradas hist\'oricamente con la
+plantilla institucional de la universidad o en Google~Docs deben poder migrarse al
+sistema conservando la estructura y el contenido original. Para ello se
+implement\'{o} un m\'{o}dulo de importaci\'{o}n con dos canales de entrada
+que convergen en un pipeline de extracci\'{o}n \'{u}nico.
+
+\subsubsection{Pipeline de extracci\'{o}n desde DOCX}
+\label{subsubsec:import_docx}
+
+El canal primario de importaci\'{o}n opera sobre el archivo DOCX generado con
+la plantilla institucional. El flujo, iniciado mediante
+\texttt{POST /proposals/import-docx}, comprende las siguientes etapas:
+
+\begin{enumerate}[noitemsep, topsep=3pt]
+    \item \textbf{Recepci\'{o}n y almacenamiento temporal.} El archivo se
+          recibe como \textit{multipart upload}, se persiste en un directorio
+          temporal del servidor y se referencia por su ruta absoluta para el
+          procesamiento posterior.
+
+    \item \textbf{Detecci\'{o}n de estructura.} El m\'{o}dulo
+          \texttt{docx\_import.py} abre el documento con \textit{python-docx}
+          y aplica una estrategia de detecci\'{o}n en dos capas: primero
+          recorre los p\'{a}rrafos buscando encabezados normalizados que
+          coincidan con palabras clave predefinidas
+          (\textit{Contenidos M\'{i}nimos}, \textit{Fundamentos},
+          \textit{Metodolog\'{i}a}, \textit{Bibliograf\'{i}a}, etc.); luego,
+          en los casos en que el contenido se encuentre dentro de tablas en
+          lugar de p\'{a}rrafos libres, aplica una segunda b\'{u}squeda sobre
+          las celdas de la tabla. Esta dualidad cubre las variantes de formato
+          que coexisten en el corpus institucional.
+
+    \item \textbf{Normalizaci\'{o}n.} Para lograr robustez ante variantes
+          de escritura, los t\'{e}rminos clave se normalizan eliminando
+          acentos, convirtiendo a min\'{u}sculas y colapsando espacios
+          m\'{u}ltiples antes de toda comparaci\'{o}n. Esto permite reconocer,
+          por ejemplo, \textit{``Metodolog\'{i}a:''}, \textit{``METODOLOGIA''}
+          y \textit{``Metodolog\'{i}a de Ense\~{n}anza''} como la misma
+          secci\'{o}n objetivo.
+
+    \item \textbf{Mapeo al modelo.} Los bloques de texto extra\'{i}dos se
+          asignan a los campos del modelo relacional \texttt{Proposal}:
+          secciones de texto libre (\texttt{minimum\_content},
+          \texttt{methodology}, \texttt{evaluation}, \texttt{bibliography}),
+          colecciones estructuradas en JSON (\texttt{units},
+          \texttt{practicals}, \texttt{learning\_outcomes}) y metadatos de
+          identificaci\'{o}n (\texttt{career}, \texttt{subject},
+          \texttt{year\_of\_career}, \texttt{theoretical\_hours}, etc.).
+
+    \item \textbf{Respuesta de previsualizaci\'{o}n.} El endpoint no persiste
+          directamente en la base de datos: devuelve un objeto JSON con los
+          datos extra\'{i}dos y un resumen de previsualizaci\'{o}n (conteo de
+          unidades, trabajos pr\'{a}cticos, resultados de aprendizaje y
+          competencias) para confirmaci\'{o}n por parte del usuario antes del
+          guardado definitivo.
+\end{enumerate}
+
+\subsubsection{Canal alternativo: importaci\'{o}n desde Google~Docs}
+\label{subsubsec:import_gdoc}
+
+El segundo canal, accesible mediante \texttt{POST /proposals/import-gdoc-url},
+permite importar documentos alojados en Google~Drive sin necesidad de
+descargarlos manualmente. El mecanismo extrae el identificador \'{u}nico del
+documento desde la URL recibida (soportando tanto el formato
+\texttt{/d/\{id\}/edit} de Google~Docs como el formato
+\texttt{?id=\{id\}} de Google~Drive), construye la URL de exportaci\'{o}n
+est\'{a}ndar de la API de Google
+(\texttt{/export?format=docx}) y descarga el archivo resultante como flujo de
+bytes. A partir de ese punto, el contenido binario se canaliza al mismo extractor
+\texttt{import\_proposal\_from\_docx} empleado por el canal DOCX, garantizando
+un tratamiento homog\'{e}neo de ambas fuentes. Como condici\'{o}n previa, el
+documento debe tener visibilidad p\'{u}blica o compartida mediante enlace, dado
+que la descarga se realiza sin credenciales OAuth en esta modalidad.
+
+La Figura~\ref{fig:pipeline_importacion} ilustra ambos canales y su
+convergencia en el pipeline com\'{u}n de extracci\'{o}n.
+
+\begin{figure}[H]
+\centering
+\shorthandoff{<>}
+\begin{tikzpicture}[
+  every node/.style={font=\small},
+  fuente/.style={
+    rectangle, rounded corners=4pt,
+    draw=Micolor1, line width=0.8pt,
+    minimum width=3.0cm, minimum height=0.85cm,
+    align=center, fill=Micolor1!12
+  },
+  proceso/.style={
+    rectangle, rounded corners=2pt,
+    draw=gray!60, line width=0.7pt,
+    minimum width=3.2cm, minimum height=0.85cm,
+    align=center, fill=gray!8
+  },
+  salida/.style={
+    rectangle, rounded corners=4pt,
+    draw=Micolor1, line width=0.8pt,
+    minimum width=3.2cm, minimum height=0.85cm,
+    align=center, fill=Micolor1!20
+  },
+  etiq/.style={font=\scriptsize\bfseries},
+  actor/.style={font=\scriptsize\itshape, text=gray!70!black}
+]
+  % --- Fuentes de entrada ---
+  \node[fuente] (docx)  at (0, 0)    {Archivo DOCX\\{\scriptsize plantilla institucional}};
+  \node[fuente] (gdoc)  at (5.5, 0)  {Google Docs URL\\{\scriptsize documento p\'{u}blico}};
+
+  % --- Paso intermedio GDoc ---
+  \node[proceso] (export) at (5.5, -1.8) {Exportar a DOCX\\{\scriptsize Google Drive API}};
+
+  % --- Extractor com\'{u}n ---
+  \node[proceso] (extractor) at (2.75, -3.6)
+    {Extractor \texttt{docx\_import.py}\\
+     {\scriptsize detecci\'{o}n $\cdot$ normalizaci\'{o}n $\cdot$ mapeo}};
+
+  % --- Salida ---
+  \node[salida] (preview) at (2.75, -5.4)
+    {JSON de previsualizaci\'{o}n\\{\scriptsize + campos modelo \texttt{Proposal}}};
+
+  % --- Flechas ---
+  \draw[->, thick, color=Micolor1]
+    (docx.south) -- ++(0,-0.6) -| node[etiq, pos=0.25, above]{\texttt{POST /proposals/import-docx}} (extractor.north west);
+
+  \draw[->, thick, color=Micolor1]
+    (gdoc.south) -- ++(0,-0.6) -| node[etiq,pos=0.25, above]{\texttt{POST /proposals/import-gdoc-url}} (export.north);
+
+  \draw[->, thick, color=gray!70]
+    (export.south) -- ++(0,-0.5) -| (extractor.north east);
+
+  \draw[->, thick, color=Micolor1]
+    (extractor) -- node[etiq, right=2pt]{datos extra\'{i}dos} (preview);
+\end{tikzpicture}
+\shorthandon{<>}
+\caption{Pipeline de importaci\'{o}n de propuestas: canales DOCX y Google~Docs con
+extractor com\'{u}n. \footnotesize\textit{Fuente: Elaboraci\'{o}n propia.}}
+\label{fig:pipeline_importacion}
+\end{figure}
+
+La arquitectura de canal \'{u}nico de extracci\'{o}n persigue dos objetivos
+complementarios: simplificar el mantenimiento (cualquier mejora al extractor
+beneficia autom\'{a}ticamente a ambas v\'{i}as de ingesta) y garantizar que la
+calidad del reconocimiento sea homog\'{e}nea independientemente del origen del
+documento. La evaluaci\'{o}n cuantitativa del m\'{o}dulo sobre el corpus
+documental real se presenta en la Secci\'{o}n~\ref{sec:resultados_extraccion}.
+
+\subsection{Integraci\'{o}n bidireccional con Google Workspace}
+\label{subsec:gdocs_sync}
+
+El dise\~{n}o de \textsc{macau} reconoce que, en la pr\'{a}ctica, Google~Docs se ha consolidado como el entorno de edici\'{o}n
+colaborativa m\'{a}s difundido. Por ello se implement\'{o} una capa de
+integraci\'{o}n bidireccional con Google~Workspace que permite que el documento
+en la nube y el registro estructurado en la base de datos coexistan y se
+mantengan sincronizados a lo largo del ciclo lectivo, sin obligar al docente a
+elegir entre el confort de la edici\'{o}n en l\'{i}nea y los mecanismos de
+control y validaci\'{o}n de la plataforma.
+
+\subsubsection{Vinculaci\'{o}n y creaci\'{o}n de documentos}
+\label{subsubsec:gdoc_link}
+
+La integraci\'{o}n puede iniciarse en cualquiera de las dos direcciones.
+Si el docente dispone de un borrador preexistente en Google~Docs, puede
+vincularse mediante el endpoint \texttt{POST /propo\-sals/\{id\}/link-gdoc}:
+el sistema extrae el identificador del documento de la URL, descarga y procesa el DOCX
+resultante vía la API de exportaci\'{o}n de Google, y verifica que la
+asignatura mencionada en el documento coincida con la propuesta en la base
+de datos antes de persistir la vinculaci\'{o}n (\texttt{gdoc\_url},
+\texttt{gdoc\_hash}, \texttt{gdoc\_last\_synced}). Esta validaci\'{o}n
+impide asociar documentos ajenos a la asignatura y deja un registro de
+auditor\'{i}a de la operaci\'{o}n.
+
+El flujo inverso se cubre con el endpoint
+\texttt{POST /propo\-sals/\{id\}/create-gdoc}: el sistema genera un DOCX a
+partir del estado actual de la propuesta en la base de datos, lo sube a la
+carpeta de Google~Drive configurada para la carrera (\texttt{DriveSettings})
+y convierte el archivo en un Google~Doc editable. El docente obtiene
+inmediatamente un enlace de edici\'{o}n en l\'{i}nea con el contenido ya
+estructurado. Este flujo requiere credenciales OAuth v\'{a}lidas configuradas
+por el administrador (variables \texttt{GOOGLE\_OAUTH\_*}).
+
+\subsubsection{Ciclo de sincronizaci\'{o}n}
+\label{subsubsec:gdoc_sync_cycle}
+
+Una vez establecido el v\'{i}nculo, la plataforma expone tres acciones
+complementarias para gestionar la divergencia entre ambas copias del
+documento:
+
+\begin{description}[noitemsep, topsep=4pt, leftmargin=0pt]
+  \item[\texttt{GET /proposals/\{id\}/gdoc-diff} --- Vista previa de cambios
+    entrantes.] Descarga el Google~Doc actual, construye un
+    \textit{snapshot} estructurado campo a campo y lo compara con el
+    \textit{snapshot} local mediante hash de contenido. Retorna un objeto
+    \texttt{changes} con los campos que divergen, sus valores actuales y la
+    versi\'{o}n del GDoc, e indica qu\'{e} campos requieren revisi\'{o}n
+    editorial (por ejemplo, \texttt{minimum\_content} y
+    \texttt{teaching\_team}). El usuario puede inspeccionar las diferencias
+    antes de comprometerse con el cambio.
+
+  \item[\texttt{POST /proposals/\{id\}/sync-gdoc} --- Ingesta desde el GDoc.]
+    Aplica los campos extra\'{i}dos del Google~Doc a la propuesta local,
+    actualiza \texttt{gdoc\_hash} y \texttt{gdoc\_last\_synced} y retorna la
+    propuesta actualizada. La misma validaci\'{o}n de coincidencia de asignatura
+    que en la vinculaci\'{o}n impide sobrescrituras accidentales.
+
+  \item[\texttt{POST /proposals/\{id\}/push-to-gdoc-direct} --- Publicaci\'{o}n
+    hacia el GDoc.] El operador selecciona qu\'{e} campos de la plataforma deben
+    propagarse al documento en la nube. El sistema genera un DOCX actualizado a
+    partir de la plantilla institucional, lo sube a Google~Drive reemplazando el
+    contenido del archivo original y actualiza el hash en la base de datos. Esta
+    operaci\'{o}n es selectiva: los campos no marcados permanecen con los
+    valores presentes en el GDoc.
+\end{description}
+
+Adicionalmente, \texttt{gdoc-accept-latest} aplica todos los cambios
+detectados en el GDoc de una sola vez (sin revisi\'{o}n campo a campo), y
+\texttt{unlink-gdoc} desvincula el documento sin eliminarlo de Drive. Un
+endpoint auxiliar, \texttt{gdoc-status}, permite al frontend consultar en
+lote el estado de vinculaci\'{o}n de una colecci\'{o}n de propuestas
+(\textit{Sincronizado}, \textit{Sin vincular}, \textit{Link perdido},
+\textit{Actualizado}, \textit{Cambios sin enviar}).
+
+La Figura~\ref{fig:gdoc_sync} sintetiza los flujos de ambas direcciones de
+sincronizaci\'{o}n.
+
+\begin{figure}[H]
+\centering
+\shorthandoff{<>}
+\resizebox{0.5\linewidth}{!}{%
+\begin{tikzpicture}[
+  x=1cm, y=1cm,
+  caja/.style={
+    rectangle, rounded corners=4pt,
+    minimum width=3.2cm, minimum height=0.9cm,
+    align=center, font=\small
+  },
+  sistema/.style={caja, draw=Micolor1, line width=0.9pt, fill=Micolor1!10},
+  externo/.style={caja, draw=gray!55, line width=0.8pt, fill=gray!7},
+  proc/.style={caja, draw=Micolor1!45, line width=0.7pt, fill=Micolor1!4},
+  flecha/.style={->, thick},
+  fbd/.style={flecha, color=Micolor1},
+  fgd/.style={flecha, color=gray!60},
+  lbl/.style={font=\footnotesize, fill=white, inner sep=1.5pt, align=center},
+  sec/.style={font=\small\bfseries, text=Micolor1!75!black},
+  lin/.style={gray!30, dashed, line width=0.6pt}
+]
+
+%% ─────────────────────────────────────────────────────────
+%% Columnas: izq=0  centro=5  der=10
+%% Cada sección ocupa al menos 4 cm de alto
+%% ─────────────────────────────────────────────────────────
+
+%% SECCIÓN 0 ─ VINCULAR
+\node[sec] at (5, 0.55) {0.\enspace Vinculaci\'{o}n};
+
+\node[sistema] (BD0) at (0,   -0.9) {\textsc{macau} BD};
+\node[externo] (GD0) at (10,  -0.9) {Google Docs};
+
+% flecha derecha→izquierda (link-gdoc)
+\draw[fbd]
+  ([yshift= 6pt]GD0.west) -- ([yshift= 6pt]BD0.east)
+  node[lbl, midway, above=3pt] {\texttt{link-gdoc}};
+\node[lbl, gray] at (5, -1.55) {\footnotesize el usuario aporta la URL; el sistema valida};
+
+% flecha izquierda→derecha (create-gdoc)
+\draw[fgd]
+  ([yshift=-6pt]BD0.east) -- ([yshift=-6pt]GD0.west)
+  node[lbl, midway, below=3pt] {\texttt{create-gdoc}};
+\node[lbl, gray] at (5, -2.4) {\footnotesize genera DOCX en BD, sube a Drive, retorna enlace};
+
+%% línea separadora
+\draw[lin] (-1.5, -3.2) -- (11.5, -3.2);
+
+%% SECCIÓN 1 ─ PULL
+\node[sec] at (5, -3.75) {1.\enspace PULL \enspace GDoc $\longrightarrow$ BD};
+
+\node[externo] (GD1)  at (10,  -5.1) {Google Docs};
+\node[externo] (API1) at (10,  -7.1) {Drive API\\{\scriptsize \texttt{export?format=docx}}};
+\node[proc]    (EXT)  at (5,   -7.1) {Extractor\\{\scriptsize \texttt{docx\_import.py}}};
+\node[proc]    (DIF)  at (5,   -9.2) {\texttt{gdoc-diff}\\{\scriptsize diff campo a campo}};
+\node[sistema] (BD1)  at (0,   -9.2) {\textsc{macau} BD\\{\scriptsize actualizada}};
+
+\draw[fgd] (GD1.south) -- (API1.north)
+  node[lbl, right=5pt, midway] {exporta DOCX};
+
+\draw[fgd] (API1.west) -- (EXT.east)
+  node[lbl, above=3pt, midway] {DOCX};
+
+\draw[fbd] (EXT.south) -- (DIF.north)
+  node[lbl, right=5pt, midway] {snapshot};
+
+\draw[fbd] (DIF.west) -- (BD1.east)
+  node[lbl, above=3pt, midway] {\texttt{sync-gdoc}};
+
+% bypass accept-latest
+\draw[->, Micolor1!30, thick, dashed]
+  (EXT.west) to[out=200, in=30, looseness=0.5]
+  node[lbl, pos=0.5, left=2pt] {\scriptsize \texttt{accept-latest}}
+  (BD1.north);
+
+%% línea separadora
+\draw[lin] (-1.5, -10.6) -- (11.5, -10.6);
+
+%% SECCIÓN 2 ─ PUSH
+\node[sec] at (5, -11.15) {2.\enspace PUSH \enspace BD $\longrightarrow$ GDoc};
+
+\node[sistema] (BD2) at (0,   -12.4) {\textsc{macau} BD\\{\scriptsize campos seleccionados}};
+\node[proc]    (GEN) at (0,   -14.3) {Generador\\{\scriptsize \texttt{docx\_export.py}}};
+\node[externo] (DRV) at (5,   -14.3) {Drive API\\{\scriptsize \texttt{files().update()}}};
+\node[externo] (GD2) at (10,  -14.3) {Google Docs\\{\scriptsize contenido actualizado}};
+
+\draw[fbd] (BD2.south) -- (GEN.north)
+  node[lbl, right=5pt, midway] {\texttt{push-to-gdoc}};
+
+\draw[fgd] (GEN.east) -- (DRV.west)
+  node[lbl, above=3pt, midway] {DOCX};
+
+\draw[fgd] (DRV.east) -- (GD2.west)
+  node[lbl, above=3pt, midway] {reemplaza};
+
+\end{tikzpicture}
+}% end resizebox
+\shorthandon{<>}
+\caption{Integraci\'{o}n bidireccional con Google~Workspace: vinculaci\'{o}n inicial,
+flujo \textit{pull} (GDoc $\rightarrow$ BD) y flujo \textit{push}
+(BD $\rightarrow$ GDoc).
+\footnotesize\textit{Fuente: Elaboraci\'{o}n propia.}}
+\label{fig:gdoc_sync}
+\end{figure}
+
+El estado de la vinculaci\'{o}n se persiste en tres campos del modelo
+\texttt{Proposal}:
+
+\begin{description}[noitemsep, topsep=3pt]
+  \item[\texttt{gdoc\_url}] URL can\'{o}nica del documento vinculado.
+    Se almacena al ejecutar \texttt{link-gdoc} o \texttt{create-gdoc} y es
+    la referencia utilizada por todos los endpoints de sincronizaci\'{o}n.
+
+  \item[\texttt{gdoc\_hash}] Hash del contenido del documento en la \'{u}ltima
+    sincronizaci\'{o}n exitosa. Permite detectar si el GDoc fue modificado
+    desde la \'{u}ltima operaci\'{o}n sin necesidad de descargarlo: si el hash
+    actual coincide con el almacenado, no hay cambios pendientes.
+
+  \item[\texttt{gdoc\_status}] Estado de vinculaci\'{o}n visible en la
+    interfaz. Puede tomar cinco valores:
+    \textit{Sincronizado} (doc vinculado y al d\'{i}a),
+    \textit{Sin vincular} (propuesta sin GDoc asociado),
+    \textit{Link perdido} (URL registrada pero documento inaccesible),
+    \textit{Actualizado} (el GDoc tiene cambios no incorporados a la BD) e
+    \textit{Cambios sin enviar} (la BD tiene cambios no propagados al GDoc).
+\end{description}
+
+Este esquema permite que el frontend muestre el indicador de estado sin
+consultar la API de Google en cada carga de p\'{a}gina: el valor se actualiza
+\'{u}nicamente cuando el usuario o el sistema ejecuta una operaci\'{o}n de
+sincronizaci\'{o}n expl\'{i}cita.
+
+\subsection{Exportaci\'{o}n de propuestas}
+\label{subsec:exportacion}
+
+El ciclo de vida de una propuesta culmina, en t\'{e}rminos documentales,
+con la generaci\'{o}n del archivo que se entregar\'{a} a la Comisi\'{o}n
+Curricular o se archivar\'{a} en el expediente de acreditaci\'{o}n.
+\textsc{macau} expone dos rutas para esta operaci\'{o}n.
+La primera, \texttt{GET /proposals/\{id\}/docx}, es un atajo de conveniencia
+que delega internamente en la segunda, la ruta gen\'{e}rica
+\texttt{GET /proposals/\{id\}/export?format=\textit{fmt}}, la cual soporta
+cuatro formatos: \texttt{docx}, \texttt{pdf}, \texttt{json} y \texttt{xml}.
+El par\'{a}metro \texttt{format} por defecto es \texttt{docx}, de modo que
+ambas rutas son equivalentes cuando no se especifica otro valor.
+
+\medskip
+\noindent\textbf{Formatos de documento (DOCX y PDF).}
+Para cualquiera de estos dos formatos el sistema carga la plantilla
+institucional (reproducida en el Anexo~\ref{anexo:plantilla_docx},
+p\'{a}g.~\pageref{anexo:plantilla_docx})\footnote{La plantilla es el archivo
+\texttt{Template\,Propuestas.docx} ubicado en el directorio de datos del
+servidor; contiene marcadores de la forma \texttt{\{\{campo\}\}} que el
+motor reemplaza por los valores de la base de datos.}
+e invoca \texttt{generate\_proposal\_\allowbreak docx()} del m\'{o}dulo
+\texttt{docx\_export.py}.
+La funci\'{o}n recorre todos los bloques del documento (p\'{a}rrafos y
+tablas) mediante \texttt{\_iter\_block\_\allowbreak items()}, localiza cada marcador
+\texttt{\{\{campo\}\}} con una expresi\'{o}n regular, preserva el formato
+del \textit{run} original y lo sustituye por el valor almacenado en la
+base de datos.
+El resultado es un DOCX que refleja con exactitud el estado en que la propuesta fue
+aprobada, descargado con nombre autom\'{a}tico del tipo
+\mbox{\texttt{<carrera>\_<asignatura>\_<a\~{n}o>.docx}}.
+
+Si el formato solicitado es PDF, el DOCX generado se convierte mediante
+LibreOffice en modo \textit{headless} (\texttt{soffice --headless
+--convert-to pdf}); si LibreOffice no est\'{a} disponible, un mecanismo de
+\textit{fallback} alternativo (\texttt{convert\_docx\_to\_pdf}) retoma la
+conversi\'{o}n.
+La cabecera \texttt{X-PDF-Renderer} de la respuesta HTTP informa qu\'{e}
+motor se utiliz\'{o}, facilitando el diagn\'{o}stico ante diferencias de
+estilo entre entornos de ejecuci\'{o}n.
+
+\medskip
+\noindent\textbf{Formatos de datos estructurados (JSON y XML).}
+Los formatos \texttt{json} y \texttt{xml} serializan la propuesta completa:
+todos los campos, colecciones anidadas (resultados de aprendizaje,
+competencias, unidades) y metadatos de estado.
+El primero se construye con \texttt{json.dumps(\ldots,\allowbreak~ensure\_ascii=False)},
+preservando caracteres Unicode y produciendo salida legible e
+indentada.
+El segundo emplea \texttt{xml.etree.ElementTree}, recorriendo
+recursivamente el dict de la propuesta y convirtiendo cada clave en
+un elemento XML v\'{a}lido.
+Ninguno de los dos requiere la plantilla DOCX, por lo que son accesibles
+incluso si la versi\'{o}n de plantilla no coincide.
+Estos formatos est\'{a}n orientados a integraciones con sistemas
+institucionales externos (SIU~Guar\'{a}n\'{i}, repositorios de planes de
+estudio) sin necesidad de re-extracci\'{o}n desde documentos.
+
+\medskip
+La Figura~\ref{fig:exportacion} resume la arquitectura de exportaci\'{o}n:
+una \'{u}nica ruta gen\'{e}rica bifurca en cuatro caminos seg\'{u}n el formato
+solicitado.
+
+\begin{figure}[H]
+\centering
+\shorthandoff{<>}
+\begin{tikzpicture}[x=1cm, y=1cm,
+  cjt/.style={rectangle, rounded corners=4pt, draw=Micolor1, line width=0.9pt,
+    minimum width=10.8cm, minimum height=1.05cm,
+    align=center, fill=Micolor1!10, font=\small},
+  fmt/.style={rectangle, rounded corners=3pt, draw=Micolor1!70, line width=0.8pt,
+    minimum width=2.35cm, minimum height=0.75cm,
+    align=center, fill=Micolor1!15, font=\small\bfseries},
+  mot/.style={rectangle, rounded corners=2pt, draw=gray!50, line width=0.7pt,
+    minimum width=2.35cm, minimum height=1.55cm,
+    align=center, fill=gray!5, font=\scriptsize},
+  sal/.style={rectangle, rounded corners=3pt, draw=Micolor1!35, line width=0.7pt,
+    minimum width=2.35cm, minimum height=0.75cm,
+    align=center, fill=Micolor1!5, font=\scriptsize\itshape},
+  fa/.style={->, gray!60, thick},
+  fb/.style={->, Micolor1!55, thick}
+]
+
+%% ── Ruta genérica (top) ──────────────────────────────────────────────
+\node[cjt] (EP) at (5.4, 0) {
+  \texttt{GET /proposals/\{id\}/export\,?\,format=\textit{fmt}}\\[1pt]
+  {\scriptsize alias: \texttt{GET /proposals/\{id\}/docx}
+    $\;\equiv\;$ \texttt{format=docx}}
+};
+
+%% ── Formato (fila 1) ─────────────────────────────────────────────────
+\node[fmt] (FD) at (0.5,  -1.9) {docx};
+\node[fmt] (FP) at (3.2,  -1.9) {pdf};
+\node[fmt] (FJ) at (7.4,  -1.9) {json};
+\node[fmt] (FX) at (10.2, -1.9) {xml};
+
+\draw[fb] (EP.south -| FD.north) -- (FD.north);
+\draw[fb] (EP.south -| FP.north) -- (FP.north);
+\draw[fb] (EP.south -| FJ.north) -- (FJ.north);
+\draw[fb] (EP.south -| FX.north) -- (FX.north);
+
+%% ── Motor (fila 2) ───────────────────────────────────────────────────
+\node[mot] (MD) at (0.5,  -4.1) {
+  \texttt{docx\_export.py}\\[3pt]
+  rellena plantilla\\institucional\\campo a campo
+};
+\node[mot] (MP) at (3.2,  -4.1) {
+  \texttt{docx\_export.py}\\[3pt]
+  + LibreOffice\\
+  \texttt{-{}-headless}\\
+  {\tiny cab.~\texttt{X-PDF-Renderer}}
+};
+\node[mot] (MJ) at (7.4,  -4.1) {
+  \texttt{json.dumps}\\[3pt]
+  todos los campos\\+ metadatos,\\Unicode preservado
+};
+\node[mot] (MX) at (10.2, -4.1) {
+  \texttt{xml.etree}\\[3pt]
+  todos los campos\\+ metadatos,\\UTF-8
+};
+
+\draw[fa] (FD.south) -- (MD.north);
+\draw[fa] (FP.south) -- (MP.north);
+\draw[fa] (FJ.south) -- (MJ.north);
+\draw[fa] (FX.south) -- (MX.north);
+
+%% ── Salida (fila 3) ──────────────────────────────────────────────────
+\node[sal] (OD) at (0.5,  -5.85) {.docx\\{\tiny revisi\'{o}n curricular}};
+\node[sal] (OP) at (3.2,  -5.85) {.pdf\\{\tiny archivo / acreditaci\'{o}n}};
+\node[sal] (OJ) at (7.4,  -5.85) {.json\\{\tiny SIU~Guar\'{a}n\'{i} / API}};
+\node[sal] (OX) at (10.2, -5.85) {.xml\\{\tiny integraci\'{o}n externa}};
+
+\draw[fa] (MD.south) -- (OD.north);
+\draw[fa] (MP.south) -- (OP.north);
+\draw[fa] (MJ.south) -- (OJ.north);
+\draw[fa] (MX.south) -- (OX.north);
+
+\end{tikzpicture}
+\shorthandon{<>}
+\caption{Arquitectura de exportaci\'{o}n: la ruta gen\'{e}rica
+  \texttt{/export?format=} bifurca en cuatro caminos seg\'{u}n el formato
+  solicitado.
+  \footnotesize\textit{Fuente: Elaboraci\'{o}n propia.}}
+\label{fig:exportacion}
+\end{figure}
+
+La simetr\'{i}a entre importaci\'{o}n y exportaci\'{o}n --- ambas operando
+sobre la misma plantilla y el mismo modelo relacional --- asegura que una
+propuesta importada desde un DOCX institucional y luego exportada de vuelta
+a DOCX produzca un documento estructuralmente equivalente al original, con la
+\'{u}nica diferencia del contenido que haya sido editado o enriquecido por la
+plataforma.
+
+%% =============================================================================
+\section{Controles normativos e inteligentes sobre propuestas de Asignatura}
+\label{sec:controles}
+%% =============================================================================
+
+El proceso de revisi\'on en \textsc{macau} combina dos capas complementarias.
+La primera capa define \textbf{controles normativos fijos}, derivados de los
+crite\-rios de consistencia curricular y los est\'andares de acreditaci\'on
+exigidos por la ~\cite{ordenanza75} para las carreras de ingenier\'ia. La segunda capa incorpora \textbf{controles
+inteligentes configurables}, cuyo comportamiento se ajusta por carrera mediante
+prompts administrables por perfiles directivos. En conjunto, este esquema evita
+que la validación dependa exclusivamente del criterio individual del revisor y
+produce un resultado comparable entre asignaturas y entre ciclos lectivos.
+
+Operativamente, ambos mecanismos convergen en un flujo único de ejecución y
+registro: el backend corre la batería de controles, persiste cada resultado por
+propuesta y control en \texttt{ProposalIntelligentControlResult}, y consolida la
+salida en un resumen tipado
+(\texttt{ProposalIntelligentControlsSummary}) consumido por la interfaz.
+El panel de revisión, por lo tanto, no solo indica si una propuesta cumple o
+no cumple, sino que preserva evidencia textual de qué falló, por qué falló y
+qué corrección se sugirió en cada caso. Las capturas de interfaz se incluyen en
+el Anexo~\ref{anexo:capturas}.
+
+\subsection{Controles normativos fijos}
+\label{subsec:controles_normativos}
+
+Los controles normativos fijos implementan validaciones estructurales de base,
+con especial foco en completitud, trazabilidad y coherencia interna. Entre las
+comprobaciones más relevantes se incluyen: presencia de secciones obligatorias,
+consistencia mínima de carga horaria, equipo docente formado al menos por un Profesor, existencia de resultados de
+aprendizaje, y alineación entre competencias declaradas y estructura de la
+propuesta. Aunque la ejecución técnica comparte la misma infraestructura de los
+controles inteligentes, su propósito metodológico es distinto: establecen el
+\textit{piso de cumplimiento} que toda propuesta debe satisfacer antes de
+avanzar a revisión cualitativa.
+
+En términos de API, el ciclo de revisión expone tres operaciones principales:
+\begin{itemize}[noitemsep, topsep=2pt]
+    \item \texttt{POST .../run}: lanza la corrida de controles activos sobre
+      la propuesta;
+    \item \texttt{GET .../results}: recupera el estado consolidado de todos
+      los resultados;
+    \item \texttt{PATCH .../results/\{result\_id\}}: permite la revisión manual
+      de un resultado puntual por parte de perfiles con atribuciones de
+      supervisión.
+\end{itemize}
+donde \texttt{.../} abrevia el prefijo
+\texttt{/proposals/}\allowbreak\texttt{\{id\}/intelligent-controls}.
+
+Esta última operación no elimina trazabilidad: al actualizar un resultado, el
+sistema conserva el registro histórico y actualiza la marca temporal de
+verificación, lo que permite auditar excepciones justificadas sin perder el
+comportamiento de base del esquema normativo.
+
+\subsection{Controles inteligentes configurables}
+\label{subsec:controles_inteligentes}
+
+Los controles inteligentes configurables se modelan con la entidad
+\texttt{IntelligentControl}. Cada instancia define un tópico temático
+(\textit{p.\,ej.}\ competencias, bibliografía, equipo docente), un nombre
+operativo, una instrucción en lenguaje natural que actúa como
+\textit{prompt de control}, y parámetros de orden y activación.
+Esta separación entre lógica de negocio y código fuente permite que
+la carrera evolucione sus criterios de revisión sin modificar la
+arquitectura del \textit{backend}.
+
+La gestión del catálogo de controles se resuelve mediante endpoints CRUD
+explícitos:
+\begin{itemize}[noitemsep, topsep=2pt]
+    \item \texttt{GET} y \texttt{POST /intelligent-controls}: listado y alta;
+    \item \texttt{PATCH} y \texttt{DELETE /intelligent-controls/\{id\}}:
+      actualización y baja;
+    \item \texttt{GET} y \texttt{PATCH /intelligent-controls/settings}:
+      lectura y escritura de la configuración global de ejecución.
+\end{itemize}
+
+\medskip
+\noindent\textbf{Integración con el modelo de lenguaje.}
+
+En tiempo de ejecución, el endpoint
+\texttt{POST .../intelligent-controls/run} itera sobre los controles activos
+de la propuesta, construye el contexto relevante por tópico mediante
+\texttt{build\_topic\_payload()} e invoca la función
+\texttt{evaluate\_control\_\allowbreak with\_llm()}, que se comunica con la
+API de OpenAI a través del cliente configurado con la clave de entorno
+\texttt{OPENAI\_API\_KEY}.
+
+Para cada control se ensamblan dos mensajes:
+un \textit{system prompt} que instruye al modelo a actuar como evaluador
+académico estricto y a devolver exclusivamente JSON con los campos
+\texttt{pass}, \texttt{what\_failed}, \texttt{why\_failed},
+\texttt{suggestion}, \texttt{proposed\_text} y \texttt{summary};
+y un \textit{user prompt} que incluye la regla del control, los datos
+del tópico serializado en JSON y, cuando corresponde, contexto asociado
+de otros tópicos.
+La respuesta se parsea y se persiste en
+\texttt{ProposalIntelligentControlResult}, preservando tanto el veredicto
+binario (\texttt{pass}) como la justificación textual completa.
+
+\medskip
+\noindent\textbf{Modos de ejecución.}
+La configuración global (\texttt{IntelligentControlSettings}) define tres
+perfiles de ejecución, denominados con nombres de animales como convención
+interna del sistema:
+
+\begin{description}[noitemsep, leftmargin=1.4cm, labelwidth=1.2cm]
+  \item[\textit{Guepardo}] Perfil rápido y de bajo costo.
+    Usa por defecto \texttt{gpt-4o-mini} con temperatura~0{,}15 y límite de
+    420~\textit{tokens}.
+    Es el modo por defecto asignado a docentes.
+  \item[\textit{Delfín}]  Perfil equilibrado entre velocidad y profundidad.
+    Usa por defecto \texttt{gpt-4o-mini} con temperatura~0{,}10 y límite de
+    500~\textit{tokens}.
+    Es el modo por defecto asignado a directivos.
+  \item[\textit{Ballena}] Perfil de máxima profundidad de análisis.
+    Usa por defecto \texttt{gpt-4o} con temperatura~0{,}10 y límite de
+    700~\textit{tokens}.
+
+\end{description}
+
+Cada modo expone su propio modelo, temperatura y límite de tokens como
+parámetros configurables de forma independiente en
+\texttt{IntelligentControlSettings}, lo que permite ajustar la relación
+costo\,/\,calidad según el perfil de usuario activo sin intervención en el
+código.
+Si el modo indicado no es válido, el sistema normaliza a \textit{Delfín}
+como valor de retorno seguro.
+
+El valor agregado de esta capa no reside en una etiqueta binaria, sino en
+la devolución estructurada: cada resultado incluye estado de aprobación,
+descripción del incumplimiento, justificación textual y sugerencia de
+mejora. De este modo, el control inteligente cumple simultáneamente dos
+funciones: verificación técnica y asistencia de redacción orientada a
+norma.
+
+%% =============================================================================
+\section{Arquitectura de agentes (MAS)}
+\label{sec:agentes}
+%% =============================================================================
+
+La plataforma organiza las capacidades de inteligencia artificial en cuatro
+agentes especializados que operan de forma coordinada bajo el backend FastAPI.
+Cada agente encapsula una responsabilidad bien delimitada y expone su
+funcionalidad a través de la API REST; el frontend actúa como orquestador
+de la interacción del usuario, invocando al agente adecuado según la acción
+solicitada.
+La Figura~\ref{fig:mas_agentes} muestra la arquitectura global del sistema
+multi-agente.
+
+\shorthandoff{<>}
+\begin{figure}[ht]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  x=1cm, y=1cm,
+  font=\normalsize,
+  box/.style={draw, rounded corners=5pt, minimum width=3.8cm,
+              minimum height=1.1cm, align=center, fill=gray!10, line width=0.6pt},
+  agent/.style={draw, rounded corners=5pt, minimum width=3.2cm,
+                minimum height=1.8cm, align=center, text width=2.8cm,
+                fill=Micolor1!12, draw=Micolor1, line width=0.8pt},
+  api/.style={draw, rounded corners=5pt, minimum width=3.2cm,
+              minimum height=1.1cm, align=center,
+              fill=blue!8, draw=blue!60, line width=0.6pt},
+  arr/.style={->, >=stealth, line width=1.2pt},
+  dasharr/.style={<->, >=stealth, dashed, draw=blue!60, line width=1.0pt},
+  lbl/.style={font=\small, inner sep=3pt, fill=white}
+]
+
+%% ——— Capa 1: Usuario ———
+\node[box] (user) at (8.0, 10.0) {Usuario};
+
+%% ——— Capa 2: Frontend ———
+\node[box, minimum width=5.0cm] (fe) at (8.0, 8.2) {Frontend\\(React / Vite)};
+
+%% ——— Capa 3: Backend + OpenAI ———
+\node[box, minimum width=7.0cm] (be)  at (8.0,  6.2) {Backend FastAPI\\(MCP Host)};
+\node[api, minimum width=3.6cm] (oai) at (16.5, 6.2) {OpenAI API};
+
+%% ——— Capa 4: Cuatro agentes en fila (más separados) ———
+\node[agent] (aext) at ( 1.5, 3.2) {Agente\\de\\Extracción};
+\node[agent] (allm) at ( 6.0, 3.2) {Agente\\de\\Asistencia LLM};
+\node[agent] (asem) at (10.5, 3.2) {Agente\\de\\Búsqueda\\Semántica};
+\node[agent] (anot) at (15.0, 3.2) {Agente\\de\\Notificación};
+
+%% ——— Capa 5: Gmail ———
+\node[api] (gmail) at (15.0, 1.0) {Gmail API};
+
+%% ——— Flechas verticales principales ———
+\draw[arr] (user.south) -- node[lbl, right]{HTTP} (fe.north);
+\draw[arr] (fe.south)   -- node[lbl, right]{REST} (be.north);
+
+%% ——— Backend ↔ OpenAI ———
+\draw[dasharr] (be.east) -- node[lbl, above]{Llamadas LLM} (oai.west);
+
+%% ——— Backend → agentes ———
+\draw[arr] (be.south) -- ++(0,-0.6) -| (aext.north);
+\draw[arr] (be.south) -- ++(0,-0.6) -| (allm.north);
+\draw[arr] (be.south) -- ++(0,-0.6) -| (asem.north);
+\draw[arr] (be.south) -- ++(0,-0.6) -| (anot.north);
+
+%% ——— Notificación → Gmail ———
+\draw[arr] (anot.south) -- (gmail.north);
+
+\end{tikzpicture}%
+}
+\caption{Arquitectura del sistema multiagente. \footnotesize\textit{Fuente: Elaboraci\'{o}n propia.}}
+\label{fig:mas_agentes}
+\end{figure}
+\shorthandon{<>}
+
+\subsection{Agente de Extracción}
+\label{subsec:agente_extraccion}
+
+El Agente de Extracción, implementado en \texttt{agents/extract.py}, es
+responsable de transformar documentos institucionales en datos estructurados
+listos para ser almacenados en la base de datos.
+Su función principal es \texttt{process\_file()}: recibe la ruta de un archivo
+DOCX importado y lo procesa mediante el módulo \texttt{docx\_import}, que
+aplica las reglas de extracción definidas para el formato de plantilla
+institucional (identificación de secciones, tablas de trabajos prácticos,
+bloques de contenidos mínimos y equipo docente).
+Los prácticos extraídos se vinculan directamente a la propuesta
+correspondiente actualizando la columna JSON \texttt{practicals} del modelo
+\texttt{Proposal}.
+
+La invocación del agente se integra en el flujo de importación de la API:
+cuando el endpoint \texttt{POST /proposals/import-docx} recibe un archivo,
+lanza \texttt{extract\_agent.process\_file()} como tarea en segundo plano
+(\texttt{BackgroundTasks} de FastAPI), de modo que la respuesta HTTP al
+cliente no bloquea el procesamiento.
+Este diseño desacopla la carga del documento del tiempo de respuesta
+percibido por el usuario.
+
+El agente también expone \texttt{query\_local()}, interfaz de búsqueda sobre
+la base de conocimiento local que el Agente de Búsqueda Semántica y el de
+Asistencia LLM invocan para recuperar evidencia contextual relevante antes de
+construir sus prompts (detalle en §\ref{sec:rag}).
+
+\subsection{Agente de Asistencia LLM}
+\label{subsec:agente_llm}
+
+El Agente de Asistencia LLM provee tres funciones de redacción asistida que
+el usuario puede activar en cualquier campo de texto de la propuesta.
+En todos los casos, el agente inyecta el contexto institucional disponible
+en el \emph{system prompt}: nombre de la carrera, perfil de egreso, lista
+de competencias del plan vigente y política de terminología institucional
+(\texttt{TERMINOLOGY\_POLICY\_PROMPT}).
+Este contexto garantiza que las respuestas generadas estén alineadas con los
+estándares CONEAU y el modelo educativo de la institución, no con respuestas
+de propósito general.
+
+\begin{description}[noitemsep, leftmargin=1.6cm, labelwidth=1.4cm]
+  \item[Generación (\texttt{/ai-generate})]
+    Genera el contenido de un campo desde cero a partir de una instrucción
+    del usuario.
+    Es el único modo aplicable cuando el campo está vacío: los tres modos
+    restantes requieren texto previo sobre el que operar.
+    El docente describe su intención (por ejemplo:
+    \textit{«redactá los objetivos para una asignatura de estructuras de
+    datos de primer año de Ingeniería Mecatrónica»}) y el agente devuelve
+    el texto listo para insertar o ajustar.
+
+  \item[Corrección ortográfica]
+    Corrige únicamente los errores ortográficos del texto existente sin
+    alterar el estilo, el tono ni la estructura de las oraciones.
+    Es el modo menos invasivo: el contenido y la redacción original se
+    conservan íntegramente.
+
+  \item[Corrección gramatical]
+    Corrige errores gramaticales y de puntuación y mejora la cohesión
+    cuando es necesario, respetando el sentido original.
+    A diferencia del modo ortográfico, puede reorganizar levemente las
+    oraciones para ganar fluidez.
+
+  \item[Reformulación (\texttt{/ai-reformulate})]
+    Reescribe el texto de forma notablemente más clara, profesional y
+    fluida, preservando el contenido semántico del original.
+    Es el modo más transformador: puede estructurar las ideas en párrafos
+    diferenciados e introducir listas cuando corresponde.
+    La política de terminología evita que el modelo introduzca expresiones
+    ajenas al vocabulario institucional.
+\end{description}
+
+Un quinto endpoint, \texttt{POST /notifications/email/ai-assist}, aplica
+los mismos tres modos operativos sobre texto (ortografía, gramática y
+reformulación) al módulo de notificaciones: permite al director corregir
+o reformular el borrador de un correo institucional y recibir el resultado
+en HTML listo para enviar por Gmail.
+La respuesta incluye marcado semántico (\texttt{<strong>}, \texttt{<em>},
+\texttt{<p>}) para que el cliente de correo lo renderice correctamente.
+
+\subsection{Agente de Notificación}
+\label{subsec:agente_notificacion}
+
+El Agente de Notificación integra la plataforma con la cuenta de Gmail del
+director mediante el flujo OAuth 2.0 estándar de Google.
+Una vez autorizado, el backend almacena el token de acceso y lo renueva
+automáticamente; el endpoint \texttt{GET /notifications/gmail/status}
+permite verificar el estado de la conexión en cualquier momento.
+
+El envío se realiza a través de \texttt{POST /notifications/gmail/send},
+que acepta destinatario, asunto y cuerpo HTML.
+Los casos de uso principales son: docentes con propuestas incompletas fuera
+de término, instrumentos evaluativos pendientes de entrega, y actividades
+del plan de trabajo de autoevaluación próximas a vencer.
+En todos estos escenarios el sistema puede generar el contenido del correo
+mediante el Agente de Asistencia LLM (\texttt{/notifications/email/ai-assist})
+antes de enviarlo, produciendo mensajes contextualizados con el nombre del
+destinatario, la asignatura involucrada y la lista de ítems faltantes, sin
+intervención de redacción manual por parte del director.
+
+\subsection{Agente de Búsqueda Semántica}
+\label{subsec:agente_busqueda}
+
+La búsqueda semántica se expone a través del endpoint
+\texttt{POST /search} y constituye la interfaz unificada para consultas
+en lenguaje natural sobre todo el corpus institucional indexado.
+A diferencia de una búsqueda por palabras clave, el agente comprende el
+\emph{significado} de la consulta y devuelve resultados aunque no haya
+coincidencia lexical exacta.
+
+Las consultas típicas incluyen:
+\begin{itemize}[noitemsep]
+  \item \textit{«¿En qué asignaturas se trabaja aprendizaje basado en
+    proyectos?»} — el agente cruza propuestas indexadas y devuelve los
+    fragmentos de metodología o fundamentación que contienen ese concepto,
+    indicando asignatura, año y cuatrimestre.
+  \item \textit{«Mostrame todo lo que involucra al docente García»} —
+    recupera propuestas donde ese docente figura como responsable o adjunto,
+    proyectos de investigación vinculados e instrumentos evaluativos
+    asociados.
+  \item \textit{«Estándares CONEAU relacionados con formación práctica»} —
+    recupera fragmentos del documento de estándares subidos al módulo de
+    acreditación, junto con las evidencias institucionales que los
+    satisfacen.
+\end{itemize}
+
+El pipeline completo de indexación y consulta se describe en
+§\ref{sec:rag}; en esta capa de agente el resultado recuperado puede
+inyectarse como contexto al Agente de Asistencia LLM, cerrando el ciclo
+de generación aumentada por recuperación (RAG).
+
+%% =============================================================================
+\section{Integración MCP — capa de interoperabilidad}
+\label{sec:mcp_implementacion}
+%% =============================================================================
+
+El \emph{Model Context Protocol} (MCP) es el mecanismo que permite
+al modelo de lenguaje operar sobre datos institucionales de forma estructurada
+y auditable~\cite{hou2025model}.
+El backend FastAPI actúa como \textbf{MCP Host}: instancia procesos Python
+independientes (servidores MCP) y les envía mensajes JSON-RPC 2.0 por
+\emph{stdio} cuando el modelo necesita leer o escribir datos.
+Cada servidor encapsula un dominio específico y accede a la base de datos
+SQLite; el modelo nunca escribe directamente sobre los datos, sino que invoca
+herramientas (\emph{Tools}) con parámetros validados.
+La Figura~\ref{fig:mcp_topologia} muestra la topología resultante.
+
+\shorthandoff{<>}
+\begin{figure}[H]
+\centering
+\resizebox{0.8\linewidth}{!}{%
+\begin{tikzpicture}[
+  x=1cm, y=1cm,
+  font=\normalsize,
+  host/.style={draw, rounded corners=5pt, minimum width=5.2cm,
+               minimum height=1.1cm, align=center, fill=gray!10, line width=0.7pt},
+  srv/.style={draw, rounded corners=5pt, minimum width=4.6cm,
+              minimum height=1.1cm, align=center,
+              fill=Micolor1!12, draw=Micolor1, line width=0.8pt},
+  arr/.style={->, >=stealth, line width=1.2pt},
+  dasharr/.style={->, >=stealth, dashed, gray, line width=0.9pt}
+]
+
+%% ——— Fila 1: Backend (Host) ———
+\node[host] (host) at (9.0, 7.0) {Backend FastAPI (MCP Host)};
+
+%% ——— Fila 2: Tres servidores MCP ———
+\node[srv] (sprop) at (2.0, 4.5) {Server Propuestas};
+\node[srv] (snorm) at (9.0, 4.5) {Server Normativa};
+\node[srv] (saud)  at (16.0, 4.5) {Server Auditoría};
+
+%% Host → Servers
+\draw[arr] (host.south) -- ++(0,-0.6) -| (sprop.north);
+\draw[arr] (host.south) -- ++(0,-0.6)  -- (snorm.north);
+\draw[arr] (host.south) -- ++(0,-0.6) -| (saud.north);
+
+%% ——— Fila 3: Base de datos ———
+\node[host, minimum width=5.4cm] (db) at (9.0, 2.0) {Base de datos (SQLite)};
+
+\draw[dasharr] (sprop.south) |- (db.west);
+\draw[dasharr] (snorm.south) -- (db.north);
+\draw[dasharr] (saud.south)  |- (db.east);
+
+\end{tikzpicture}%
+}
+\caption{Topología MCP de la plataforma. \textit{Fuente: elaboración propia.}}
+\label{fig:mcp_topologia}
+\end{figure}
+\shorthandon{<>}
+
+\subsection{Servidor de Propuestas}
+\label{subsec:mcp_propuestas}
+
+Expone las operaciones sobre el modelo \texttt{Proposal}.
+Sus Tools principales son \texttt{leer\_propuesta} (devuelve todos los campos
+de una propuesta dado su \texttt{id}) y \texttt{actualizar\_propuesta}
+(modifica campos específicos sin sobrescribir el resto), lo que permite al
+modelo aplicar sugerencias de redacción de forma quirúrgica sin perder
+el estado previo del documento.
+
+\subsection{Servidor de Normativa}
+\label{subsec:mcp_normativa}
+
+Indexa los documentos regulatorios vigentes: Ordenanza 75/23, estándares
+CONEAU para Ingeniería en Informática y catálogo de competencias CONFEDI.
+La Tool \texttt{buscar\_estandar} realiza búsqueda semántica sobre ese corpus
+y devuelve los fragmentos más relevantes para una consulta dada.
+El corpus puede actualizarse sin reiniciar el backend.
+
+\subsection{Servidor de Auditoría}
+\label{subsec:mcp_auditoria}
+
+Registra toda acción que involucra al modelo de lenguaje.
+La Tool \texttt{registrar\_evento} escribe un log inmutable con: agente
+invocante, acción, \texttt{id} de propuesta, usuario, marca temporal UTC y
+\emph{hash} del payload.
+La Tool \texttt{historial\_propuesta} devuelve la secuencia de eventos de una
+propuesta, permitiendo reconstruir qué generó el sistema, cuándo y con qué
+parámetros~\cite{iso_iec_42001_2023}.
+
+\subsection{Transporte y protocolo}
+\label{subsec:mcp_transporte}
+
+En desarrollo, cada servidor MCP corre como proceso Python independiente
+instanciado vía \texttt{subprocess}; el intercambio es JSON-RPC 2.0 por
+entrada/salida estándar (\emph{stdio}).
+Para despliegue distribuido el protocolo soporta HTTP+SSE, permitiendo
+ejecutar los servidores en instancias separadas sin modificar la lógica
+de los agentes.
+
+
+
+%% =============================================================================
+\section{Módulo RAG — búsqueda semántica sobre documentación}
+\label{sec:rag}
+%% =============================================================================
+
+La búsqueda por palabras clave devuelve resultados solo cuando la consulta
+coincide lexicalmente con el texto almacenado.
+Un usuario que busca \textit{«resolución de problemas en contexto real»}
+no obtiene resultados si las propuestas hablan de \textit{«situaciones
+problemáticas auténticas»}.
+El módulo de \emph{Retrieval-Augmented Generation} (RAG) soluciona esta
+limitación representando tanto las consultas como los documentos como
+vectores en un espacio semántico de alta dimensión, y midiendo la similitud
+de coseno entre ellos para encontrar los fragmentos más relevantes
+independientemente de la formulación exacta.
+
+\subsection{Corpus indexado}
+\label{subsec:rag_corpus}
+
+El sistema mantiene un índice vectorial sobre cuatro tipos de contenido
+institucional:
+
+\begin{description}[noitemsep, leftmargin=1.6cm, labelwidth=1.4cm]
+  \item[Propuestas] Todos los campos de texto libre de las propuestas de
+    asignatura almacenadas: fundamentación, objetivos, contenidos mínimos,
+    metodología y bibliografía.
+    Cada fragmento conserva metadatos de asignatura, carrera, año y
+    cuatrimestre, lo que permite filtrar los resultados por dimensión
+    institucional.
+
+  \item[Normativa] Documentos regulatorios subidos al módulo de
+    acreditación: Ordenanza 75/23, resoluciones ministeriales,
+    estándares CONEAU, criterios de evaluación CONFEDI.
+    El índice permite responder consultas como \textit{«¿qué dice la
+    normativa sobre carga horaría de
+     práctica mínima?»} sin abrir el documento original.
+
+  \item[Competencias] Las descripciones textuales del catálogo de
+    competencias (genéricas y específicas por carrera) se indexan para
+    que el sistema pueda sugerir qué competencias trabaja una propuesta
+    a partir de su contenido, o qué propuestas desarrollan una
+    competencia específica.
+
+  \item[Evidencias de acreditación] Los documentos subidos al registro
+    de evidencias (informes institucionales, memorias de gestión,
+    certificaciones) se incorporan al índice para que una búsqueda
+    pueda cruzar propuestas con la documentación de respaldo que las
+    sustenta.
+\end{description}
+
+\subsection{Pipeline de indexación}
+\label{subsec:rag_indexacion}
+
+La Figura~\ref{fig:rag_pipeline} ilustra el flujo completo desde el
+documento fuente hasta el índice vectorial y la respuesta al usuario.
+
+\shorthandoff{<>}
+\begin{figure}[H]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  x=1cm, y=1cm,
+  font=\normalsize,
+  pstep/.style={draw, rounded corners=4pt, minimum width=3.8cm,
+                minimum height=1.1cm, align=center, fill=gray!10, line width=0.7pt},
+  rag/.style={draw, rounded corners=4pt, minimum width=3.8cm,
+              minimum height=1.1cm, align=center,
+              fill=Micolor1!12, draw=Micolor1, line width=0.8pt},
+  arr/.style={->, >=stealth, line width=1.2pt},
+  lbl/.style={font=\small\itshape, fill=white, inner sep=2pt}
+]
+
+%% ---- FILA SUPERIOR: indexación (offline) ----
+\node[font=\small\bfseries] at (-0.5, 5.8) {Indexación (offline)};
+\node[pstep] (doc)   at ( 1.5, 5.0) {Documento\\fuente};
+\node[pstep] (chunk) at ( 6.5, 5.0) {Chunking\\(512 tok., solapam. 64)};
+\node[rag]   (embed) at (11.5, 5.0) {Embedding\\text-embedding-3-small};
+\node[rag]   (store) at (16.5, 5.0) {Vector Store\\(HNSW, $d=1536$)};
+
+\draw[arr] (doc)   -- (chunk);
+\draw[arr] (chunk) -- (embed);
+\draw[arr] (embed) -- (store);
+
+%% ---- FILA INFERIOR: consulta (online) ----
+\node[font=\small\bfseries] at (-0.5, 2.2) {Consulta (online)};
+\node[pstep] (query)  at ( 1.5, 1.5) {Consulta\\del usuario};
+\node[rag]   (qembed) at ( 6.5, 1.5) {Embedding\\consulta};
+\node[rag]   (ann)    at (11.5, 1.5) {ANN Search\\(top-$k=5$)};
+\node[pstep] (frags)  at (16.5, 1.5) {Fragmentos\\recuperados};
+\node[pstep] (llm)    at (16.5,-0.5) {LLM + contexto\\(respuesta)};
+
+\draw[arr] (query)  -- (qembed);
+\draw[arr] (qembed) -- (ann);
+\draw[arr] (ann)    -- node[lbl, above]{similitud coseno} (frags);
+\draw[arr] (frags)  -- (llm);
+
+%% ---- Conexión índice → búsqueda ----
+\draw[arr, dashed, gray, line width=0.9pt]
+  (store.south) -- ++(0,-0.8) -| node[lbl, below right]{índice vectorial} (ann.north);
+
+\end{tikzpicture}%
+}
+\caption{Pipeline RAG de la plataforma. \textit{Fuente: elaboración propia.}}
+\label{fig:rag_pipeline}
+\end{figure}
+\shorthandon{<>}
+
+El proceso de indexación opera en segundo plano cada vez que se incorpora
+un nuevo documento.
+El texto completo se divide en fragmentos de 512~\emph{tokens} con
+superposición de 64~\emph{tokens} para no perder contexto en los bordes
+de los cortes.
+Cada fragmento se convierte en un vector de 1536 dimensiones con el modelo
+\texttt{text-embedding-3-small} de OpenAI y se inserta en el índice
+HNSW (Hierarchical Navigable Small World), una estructura de datos diseñada
+para búsqueda aproximada de vecinos más cercanos con complejidad
+$O(\log n)$ en consulta~\cite{malkov2018efficient}.
+Junto al vector se almacenan los metadatos del fragmento: tipo de corpus
+(propuesta / normativa / competencia / evidencia), identificador del
+documento origen, posición dentro del documento y texto plano del fragmento.
+
+\subsection{Pipeline de consulta y casos de uso}
+\label{subsec:rag_consulta}
+
+Cuando el usuario envía una consulta al endpoint \texttt{POST /search},
+el sistema aplica el mismo modelo de embedding sobre el texto de la
+consulta y ejecuta una búsqueda ANN sobre el índice, recuperando los
+cinco fragmentos con mayor similitud de coseno.
+Los resultados se ordenan por score e incluyen el fragmento de texto,
+el documento de origen y los metadatos asociados.
+
+
+Cuando la consulta requiere una respuesta elaborada y no solo la lista de
+fragmentos (por ejemplo, \textit{«redactá un resumen de cómo se trabaja la
+competencia CG1 a lo largo del plan de estudios»}), los fragmentos
+recuperados se inyectan como contexto en el prompt del Agente de Asistencia
+LLM, cerrando el ciclo RAG: el modelo genera texto fundamentado en evidencia
+real del corpus institucional, no en conocimiento genérico externo.
+
+%% =============================================================================
+\section{Gestión del plan de estudios y competencias}
+\label{sec:plan_estudios}
+%% =============================================================================
+
+Los procesos de acreditación ante la CONEAU exigen que la institución
+demuestre, con evidencia documental, que el perfil de egreso declarado
+en el plan de estudios es efectivamente alcanzado por el conjunto de
+asignaturas que lo conforman.
+Sin embargo, en el contexto observado ese análisis se realizaba de forma
+reactiva: solo cuando se iniciaba un ciclo de acreditación se intentaba
+reconstruir la estructura curricular a partir de documentos dispersos
+—planillas Excel sin control de versiones, actas de Comisión Curricular
+y propuestas de cátedra no correlacionadas entre sí.
+Este módulo centraliza esa información y la hace consultable en tiempo
+real, constituyendo el eje estructural sobre el que se apoyan los demás
+módulos de la plataforma.
+
+\subsection{Modelo de datos y estructura jerárquica}
+\label{subsec:modelo_plan}
+
+El plan de estudios se representa mediante una jerarquía de cuatro
+entidades relacionadas en cascada:
+
+\begin{enumerate}
+  \item \textbf{\texttt{StudyPlan}}: unidad raíz que identifica la carrera,
+  la resolución de aprobación y el año de vigencia.
+  \item \textbf{\texttt{StudyYear}}: año académico dentro del plan
+  (1.º, 2.º, \ldots, N años según la carrera).
+  \item \textbf{\texttt{StudyTerm}}: período lectivo dentro del año
+  (cuatrimestre, trimestre o anual según la modalidad institucional).
+  \item \textbf{\texttt{StudySubject}}: asignatura con carga horaria
+  teórica, práctica y de laboratorio expresadas en horas semanales.
+  Las correlatividades entre asignaturas se registran en la entidad
+  \texttt{StudySubjectPrerequisite}, que modela la dependencia curricular
+  como un grafo dirigido acíclico.
+\end{enumerate}
+
+Esta estructura permite representar fielmente cualquier plan vigente en
+la institución sin imponer restricciones sobre la cantidad de años,
+períodos o asignaturas por período.
+
+\subsection{Gestión de versiones del plan}
+\label{subsec:versiones_plan}
+
+Un aspecto crítico en contextos de acreditación es la necesidad de
+mantener simultáneamente el plan vigente y las versiones anteriores,
+dado que las propuestas de cátedra aprobadas en un ciclo permanecen
+asociadas al plan que les dio origen.
+La entidad \texttt{StudyPlanStorage} implementa un mecanismo de
+versionado: cada carga genera una nueva instancia del plan completo
+que queda almacenada con su marca temporal, y la operación
+\texttt{POST /study-plans-storage/\{id\}/activate} designa cuál
+es la versión vigente sin eliminar las anteriores.
+Esto permite comparar planes entre ciclos de acreditación,
+identificar qué asignaturas se incorporaron o modificaron y mantener
+la trazabilidad histórica que exige la documentación CONEAU.
+
+La vinculación entre una propuesta de cátedra existente y la asignatura
+correspondiente en el plan activo se realiza mediante
+\texttt{POST /proposals/\{id\}/sync-to-study-plan}, operación que
+actualiza la referencia sin modificar el contenido de la propuesta.
+
+\subsection{API del módulo}
+\label{subsec:api_plan}
+
+La Tabla~\ref{tab:api_plan} detalla los endpoints del módulo de plan
+de estudios, organizados por sub-recurso.
+
+\begin{table}[ht]
+\centering
+\caption{Endpoints del módulo de plan de estudios.}
+\label{tab:api_plan}
+\small
+\begin{tabular}{llp{5.8cm}}
+\toprule
+\textbf{Método} & \textbf{Ruta} & \textbf{Descripción} \\
+\midrule
+\texttt{GET}    & \texttt{/study-plans}                              & Lista todos los planes de la carrera \\
+\texttt{POST}   & \texttt{/study-plans}                              & Crea un nuevo plan \\
+\texttt{GET}    & \texttt{/study-plans/\{id\}}                       & Recupera el plan completo con su jerarquía \\
+\texttt{POST}   & \texttt{/study-plans/\{id\}/years}                 & Agrega un año al plan \\
+\texttt{POST}   & \texttt{/study-years/\{id\}/terms}                 & Agrega un período a un año \\
+\texttt{POST}   & \texttt{/study-terms/\{id\}/subjects}              & Agrega una asignatura a un período \\
+\texttt{PATCH}  & \texttt{/study-subjects/\{id\}}                    & Modifica datos de una asignatura \\
+\texttt{DELETE} & \texttt{/study-subjects/\{id\}}                    & Elimina una asignatura \\
+\texttt{GET}    & \texttt{/study-subjects}                           & Lista asignaturas con filtros \\
+\texttt{GET}    & \texttt{/study-plans-storage}                      & Lista versiones almacenadas \\
+\texttt{POST}   & \texttt{/study-plans-storage}                      & Guarda una nueva versión \\
+\texttt{POST}   & \texttt{/study-plans-storage/\{id\}/activate}      & Designa la versión vigente \\
+\texttt{DELETE} & \texttt{/study-plans-storage/\{id\}}               & Elimina una versión archivada \\
+\texttt{POST}   & \texttt{/proposals/\{id\}/sync-to-study-plan}      & Vincula propuesta con asignatura del plan activo \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+El endpoint \texttt{GET /study-plans/\{id\}} devuelve el árbol completo
+del plan (años, períodos y asignaturas con correlatividades) en una
+única respuesta, lo que evita que el frontend realice múltiples llamadas
+para construir la vista jerárquica.
+
+\subsection{Catálogo de competencias y matriz de tributación}
+\label{subsec:competencias}
+
+Los procesos de acreditación de carreras de ingeniería requieren que la
+institución demuestre, a través de sus propuestas de cátedra, de qué manera
+el perfil de egreso se alcanza a lo largo del plan de estudios.
+En la práctica, esto implica que cada asignatura debe declarar las
+competencias que desarrolla y en qué nivel lo hace, lo que da lugar
+a la \emph{matriz de tributación}: una representación que, para cada
+competencia del catálogo, muestra en qué asignaturas y con qué grado
+de profundidad se trabaja
+a lo largo del plan.
+
+El módulo implementa el catálogo de competencias mediante la entidad
+\texttt{CompetencyCatalog}, que distingue dos tipos conforme al marco
+CONFEDI:
+
+\begin{itemize}
+  \item \textbf{Competencias genéricas}: comunes a todas las carreras de
+  ingeniería, independientemente de la especialidad, y orientadas al
+  ejercicio profesional en sentido amplio.
+  \item \textbf{Competencias específicas}: propias de cada disciplina
+  de ingeniería y vinculadas
+  al dominio técnico particular de la carrera.
+\end{itemize}
+
+La relación \texttt{ProposalCompetency} implementa la asociación muchos-a-muchos
+entre competencias y propuestas de cátedra, registrando el nivel de
+desarrollo declarado por el docente.
+Esta información, consolidada a nivel de carrera, constituye la
+matriz de tributación que permite verificar:
+
+\begin{enumerate}
+  \item Que todas las competencias del perfil de egreso sean trabajadas
+  en al menos una asignatura (cobertura completa).
+  \item Que la progresión a lo largo del plan sea coherente: las
+  competencias deben introducirse en años inferiores y consolidarse
+  en los superiores.
+  \item Que no existan asignaturas que declaren competencias sin relación
+  evidente con su contenido, lo que podría señalar errores de carga
+  o inconsistencias en la propuesta.
+\end{enumerate}
+
+El endpoint \texttt{GET /competencies/\{id\}/usage} devuelve el conjunto
+de propuestas que trabajan una competencia determinada, con el nivel
+declarado en cada una, lo que permite al director o a la Comisión
+Curricular visualizar la distribución real antes de una visita de
+acreditación.
+La operación \texttt{POST /competencies/map-plans} ejecuta el mapeo
+masivo entre el catálogo de competencias activo y el plan de estudios
+vigente, generando o actualizando las asociaciones existentes en una
+sola operación en lugar de requerir una vinculación manual asignatura
+por asignatura.
+
+%% =============================================================================
+\section{Gestión de docentes y carreras}
+\label{sec:docentes_carreras}
+%% =============================================================================
+
+\subsection{Docentes}
+\label{subsec:docentes}
+
+El \textbf{Directivo} es el único rol autorizado para dar de alta a los
+docentes en el sistema.
+Al registrar a un docente (\texttt{POST /teachers}), se crea
+simultáneamente su cuenta de usuario: el correo electrónico
+institucional se asigna como nombre de usuario y, por defecto,
+también como contraseña inicial.
+El sistema exige el cambio de contraseña en el primer inicio de sesión,
+de modo que ninguna cuenta quede indefinidamente con credenciales
+triviales.
+
+El modelo \texttt{Teacher} almacena nombre, apellido, correo electrónico,
+cargo docente y dedicación.
+La actualización de estos datos también recae en el Directivo, quien
+puede modificarlos en cualquier momento mediante \texttt{PUT /teachers/\{id\}}.
+La relación \texttt{ProposalTeacher} vincula docentes a propuestas;
+\texttt{TeacherCareer} los vincula a cada carrera con un rol institucional.
+
+El endpoint \texttt{GET /teachers/\{id\}/usage} devuelve las asignaturas
+asignadas al docente.
+La eliminación está restringida: si el docente tiene propuestas activas,
+el backend responde con \texttt{HTTP 409 Conflict}.
+
+El restablecimiento de contraseña puede iniciarse de dos formas:
+el propio docente mediante el flujo de recuperación por correo
+electrónico (\texttt{POST /auth/forgot-password}),
+o el administrador del sistema de manera directa desde el panel
+de administración (\texttt{POST /admin/users/\{id\}/reset-password}).
+
+\subsection{Carreras y roles RBAC}
+\label{subsec:carreras_rbac}
+
+El modelo \texttt{Career} registra nombre, unidad académica, estado de
+acreditación (booleano) y ciclo vigente.
+Toda la lógica de propuestas, controles y evidencias está segmentada por
+carrera; el rol \texttt{TeacherCareer.role} determina qué puede hacer
+cada actor en la plataforma, tal como se resume en la
+Tabla~\ref{tab:rbac}:
+
+\begin{table}[ht]
+\centering
+\caption{Roles y principales permisos por módulo.}
+\label{tab:rbac}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Acción} & \textbf{Directivo} & \textbf{Docente} & \textbf{Secretario} & \textbf{MiembroCC} \\
+\midrule
+Crear propuesta               & \checkmark &            & \checkmark & \\
+Editar propuesta              & \checkmark & \checkmark & \checkmark & \\
+Eliminar propuesta              & \checkmark &  & & \\
+Habilitar / deshabilitar edición de propuesta              & \checkmark &  & \checkmark & \\
+Aprobar propuesta             & \checkmark &            &            & \\
+Ejecutar controles rápidos    & \checkmark & \checkmark & \checkmark & \checkmark \\
+Ejecutar controles inteligentes & \checkmark & \checkmark & \checkmark & \checkmark \\
+Exportar documentación        & \checkmark & \checkmark & \checkmark & \checkmark \\
+Gestionar instrumentos        & \checkmark & \checkmark & \checkmark & \checkmark \\
+Gestionar Comisión Curricular & \checkmark &            &  & \\
+Enviar notificaciones         & \checkmark &            & \checkmark & \checkmark \\
+Agregar observaciones         & \checkmark &            & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+%% =============================================================================
+\section{Módulo de instrumentos evaluativos}
+\label{sec:instrumentos}
+%% =============================================================================
+
+Antes de implementar este módulo, el seguimiento de los instrumentos
+evaluativos —trabajos prácticos, parciales, finales y recuperatorios—
+se realizaba por correo electrónico, sin registro consolidado ni
+visibilidad del estado por asignatura.
+El módulo centraliza ese seguimiento en la entidad
+\texttt{EvaluativeInstrument}, que registra tipo, asignatura,
+fecha de entrega, referencia al archivo y estado
+(\texttt{pendiente} / \texttt{entregado}).
+La Figura~\ref{fig:instrumentos_ciclo} ilustra el ciclo operativo.
+
+\shorthandoff{<>}
+\begin{figure}[H]
+\centering
+\resizebox{0.95\linewidth}{!}{%
+\begin{tikzpicture}[
+  x=1cm, y=1cm,
+  font=\normalsize,
+  blk/.style={draw, rounded corners=4pt, minimum width=3.4cm,
+               minimum height=1.1cm, align=center,
+               fill=gray!10, line width=0.7pt},
+  dstep/.style={draw, rounded corners=4pt, minimum width=3.4cm,
+                minimum height=1.1cm, align=center,
+                fill=Micolor1!12, draw=Micolor1, line width=0.8pt},
+  arr/.style={->, >=stealth, line width=1.2pt},
+  rol/.style={font=\small\itshape, align=center, text=gray}
+]
+\node[dstep] (drive) at ( 1.5, 2.5) {Vincular\\carpeta Drive};
+\node[blk]  (sube)  at ( 8.5, 2.5) {Subir instrumento/s\\(archivo)};
+\node[blk]  (notif) at (15.5, 2.5) {Notificar\\pendientes};
+
+\node[rol] at ( 1.5, 1.2) {Directivo};
+\node[rol] at ( 8.5, 1.2) {Docente};
+\node[rol] at (15.5, 1.2) {Directivo / Miembro CC};
+
+\draw[arr] (drive) -- (sube);
+\draw[arr] (sube)  -- (notif);
+\end{tikzpicture}%
+}
+\caption{Ciclo operativo del módulo de instrumentos evaluativos.
+\textit{Fuente: elaboración propia.}}
+\label{fig:instrumentos_ciclo}
+\end{figure}
+\shorthandon{<>}
+
+El Directivo vincula una carpeta de Google Drive a cada asignatura
+como paso previo obligatorio para centralizar la entrega de archivos.
+Las operaciones de gestión de carpeta son:
+\begin{itemize}[noitemsep, topsep=2pt]
+  \item \texttt{POST /instruments/folder/link}: asocia una carpeta Drive
+    existente a la asignatura;
+  \item \texttt{POST /instruments/folder/create}: crea la carpeta
+    automáticamente en Drive;
+  \item \texttt{DELETE /instruments/folder}: desvincula la asociación.
+\end{itemize}
+Una vez configurada la carpeta, el Docente sube sus instrumentos mediante
+\texttt{POST /instruments/upload}: el archivo queda depositado en la
+carpeta Drive de la asignatura y el registro \texttt{EvaluativeInstrument}
+queda vinculado tanto a la asignatura como a esa carpeta.
+
+\texttt{GET /instruments} lista los instrumentos con filtros por carrera,
+asignatura, tipo y estado.
+\texttt{GET /instruments/summary} devuelve la vista agregada para el
+director: porcentaje de entrega por asignatura, sin necesidad de consultar
+a cada docente por separado.
+Cuando quedan instrumentos pendientes, \texttt{POST /instruments/notify}
+envía un correo (vía Gmail OAuth) con nombre del docente, asignatura y
+plazo, opcionalmente redactado con asistencia LLM.
+
+%% =============================================================================
+\section{Módulo de acreditación CONEAU}
+\label{sec:acreditacion}
+%% =============================================================================
+
+La acreditación ante la CONEAU requiere que la institución presente
+evidencia documental organizada según cinco dimensiones: contexto
+institucional, plan de estudios, cuerpo académico, alumnos y graduados,
+e infraestructura.   Este módulo centraliza esa evidencia y gestiona
+el plan de trabajo de la comisión de autoevaluación.
+
+La configuración inicial (\texttt{PUT /accreditation/settings}) establece
+el estándar vigente, el ciclo de acreditación, la institución evaluadora
+y las fechas del proceso.
+
+\subsection{Registro de evidencias}
+\label{subsec:evidencias}
+
+El modelo \texttt{AccreditationEvidenceRegistry} almacena tipo de evidencia,
+descripción, dimensión CONEAU, estado y referencia al archivo.
+La API expone operaciones \texttt{GET}, \texttt{POST}, \texttt{PATCH} y
+\texttt{DELETE} sobre \texttt{/accreditation/evidences}.
+
+El flujo de ingesta masiva opera en dos pasos: primero se escanea una
+carpeta de Drive o del filesystem y el modelo de lenguaje propone la
+clasificación automática de cada documento por dimensión CONEAU; el usuario
+revisa el resultado y confirma.
+Las dos variantes del primer paso son:
+\begin{itemize}[noitemsep, topsep=2pt]
+  \item \texttt{POST /accreditation/ingest-preview}: carpeta de Google Drive;
+  \item \texttt{POST /accreditation/ingest-local-preview}: carpeta local.
+\end{itemize}
+La confirmación se realiza con \texttt{POST /accreditation/ingest},
+que crea los registros definitivos en la base de datos.
+Este diseño evita incorporar documentos con clasificación incorrecta.
+
+Cada evidencia mantiene:
+\begin{itemize}[noitemsep, topsep=2pt]
+  \item historial de versiones
+    (\texttt{GET /accreditation/evidences/\{id\}/versions});
+  \item log de auditoría inmutable
+    (\texttt{GET /accreditation/evidences/\{id\}/audit}),
+    que registra quién subió, modificó o aprobó el documento y cuándo.
+\end{itemize}
+
+\subsection{Plan de trabajo de la autoevaluación}
+\label{subsec:plan_trabajo}
+
+Un proceso de autoevaluación institucional no es un evento puntual sino
+una secuencia estructurada de responsabilidades distribuidas en el tiempo
+entre múltiples actores.
+Sin una herramienta que lo gestione, el seguimiento queda fragmentado en
+planillas sin visibilidad compartida y el avance de cada actividad solo
+se conoce cuando alguien lo pregunta.
+Este módulo formaliza esa estructura y la hace observable en tiempo real.
+
+\subsubsection*{Jerarquía del plan de trabajo}
+
+El plan se organiza en cuatro niveles, representados en la
+Figura~\ref{fig:workplan_jerarquia}:
+
+\begin{enumerate}
+  \item \textbf{Etapa} (\texttt{AccreditationWorkPlanStage}): agrupa fases
+    de alto nivel del proceso de autoevaluación
+    (\textit{p.\,ej.}\ recolección de evidencias, análisis institucional,
+    redacción del informe, visita de pares).
+  \item \textbf{Sub-etapa} (\texttt{AccreditationWorkPlanSubStage}): división
+    funcional dentro de cada etapa, alineada a las dimensiones CONEAU
+    (\textit{p.\,ej.}\ dimensión cuerpo académico, dimensión plan de estudios).
+  \item \textbf{Actividad} (\texttt{AccreditationWorkPlanActivity}): unidad
+    ejecutable asignada a un responsable principal, con fechas de inicio
+    y fin, descripción y lista de colaboradores opcionales.
+  \item \textbf{Tarea} (\texttt{AccreditationWorkPlanTask}): ítem atómico
+    dentro de una actividad, con su propio responsable, fecha límite
+    y estado independiente.
+\end{enumerate}
+
+\shorthandoff{<>}
+\begin{figure}[H]
+\centering
+\resizebox{0.50\linewidth}{!}{%
+\begin{tikzpicture}[
+  x=1cm, y=1cm,
+  font=\normalsize,
+  lvl/.style={draw, rounded corners=4pt, minimum width=4.0cm,
+              minimum height=1.0cm, align=center,
+              fill=gray!10, line width=0.7pt},
+  sublvl/.style={draw, rounded corners=4pt, minimum width=4.0cm,
+                 minimum height=1.0cm, align=center,
+                 fill=Micolor1!12, draw=Micolor1, line width=0.8pt},
+  arr/.style={->, >=stealth, line width=1.2pt},
+  lbl/.style={font=\small\itshape, text=gray}
+]
+\node[lvl]    (etapa)    at (0, 6.0) {Etapa};
+\node[lvl]    (subetapa) at (0, 4.2) {Sub-etapa};
+\node[sublvl] (activ)    at (0, 2.4) {Actividad};
+\node[sublvl] (tarea)    at (0, 0.6) {Tarea};
+
+\draw[arr] (etapa)    -- (subetapa);
+\draw[arr] (subetapa) -- (activ);
+\draw[arr] (activ)    -- (tarea);
+
+\node[lbl, right=0.7cm of etapa]    {Responsable, fechas del período};
+\node[lbl, right=0.7cm of subetapa] {Dimensión CONEAU, descripción};
+\node[lbl, right=0.7cm of activ]    {Responsable, colaboradores, fechas, estado};
+\node[lbl, right=0.7cm of tarea]    {Responsable, fecha límite, estado};
+\end{tikzpicture}%
+}
+\caption{Jerarquía del plan de trabajo de autoevaluación.
+\textit{Fuente: elaboración propia.}}
+\label{fig:workplan_jerarquia}
+\end{figure}
+\shorthandon{<>}
+
+\subsubsection*{Modelo de estados y sistema de semáforo}
+
+Tanto las actividades como las tareas implementan un ciclo de vida
+con los estados:
+\texttt{pendiente} → \texttt{en\_progreso} → \texttt{completo},
+con la transición automática a \texttt{vencido} cuando la fecha límite
+se supera sin que el ítem haya sido marcado como completo.
+
+La interfaz visualiza ese ciclo como un \textbf{semáforo de colores}:
+
+\begin{description}[noitemsep, leftmargin=2.0cm, labelwidth=1.8cm]
+  \item[\textcolor{green!60!black}{\textbf{Verde}}]
+    Actividad completada dentro del plazo.
+  \item[\textcolor{orange!80!black}{\textbf{Naranja}}]
+    Actividad en progreso con fecha límite próxima
+    (dentro del umbral configurable, por defecto 7 días).
+  \item[\textcolor{red!70!black}{\textbf{Rojo}}]
+    Actividad vencida: la fecha límite se superó sin completarse.
+  \item[\textcolor{gray}{\textbf{Gris}}]
+    Actividad pendiente sin fecha próxima.
+\end{description}
+
+Este semáforo se calcula en el backend en el endpoint
+\texttt{GET /accreditation/workplan} comparando la fecha actual con
+\texttt{due\_date} de cada ítem, y es consumido directamente por el
+componente de interfaz sin lógica adicional en el frontend.
+
+\subsubsection*{Responsables, colaboradores y acceso}
+
+Cada actividad y cada tarea puede tener asignado un \textbf{responsable
+principal} y una lista de \textbf{colaboradores}, ambos tomados del
+padrón de docentes existente en el sistema (\texttt{Teacher}).
+Esta vinculación no requiere ningún alta adicional: cuando se asigna
+un docente como responsable o colaborador de una actividad, ese mismo
+usuario obtiene acceso automático a la sección de acreditación
+en el frontend, donde solo ve las actividades y tareas que le fueron
+asignadas.
+El Directivo y el Secretario tienen visión completa del plan; el
+Miembro de la Comisión Curricular y el Docente asignado ven
+exclusivamente su cartera de ítems.
+
+\subsubsection*{API del módulo}
+
+Las operaciones disponibles sobre el plan de trabajo son:
+
+\begin{itemize}[noitemsep, topsep=2pt]
+  \item \texttt{GET /accreditation/workplan}: devuelve el plan completo
+    con estados calculados y semáforo para cada ítem;
+  \item \texttt{POST /accreditation/workplan/stages}: crea una etapa;
+  \item \texttt{POST /accreditation/workplan/substages}: crea una
+    sub-etapa dentro de una etapa;
+  \item \texttt{POST /accreditation/workplan/activities}: crea una
+    actividad con responsable y colaboradores;
+  \item \texttt{PATCH /accreditation/workplan/activities/\{id\}}: actualiza
+    estado, fechas o responsable de una actividad;
+  \item \texttt{POST /accreditation/workplan/activities/\{id\}/tasks}: agrega
+    una tarea a una actividad;
+  \item \texttt{PATCH /accreditation/workplan/tasks/\{id\}}: actualiza
+    estado o fecha límite de una tarea;
+  \item \texttt{DELETE /accreditation/workplan/activities/\{id\}}: elimina
+    una actividad sin afectar el historial de evidencias asociadas;
+  \item \texttt{DELETE /accreditation/workplan/tasks/\{id\}}: elimina
+    una tarea sin afectar el historial de evidencias asociadas.
+\end{itemize}
+
+Las actividades próximas a vencer o ya vencidas se integran con el módulo
+de notificaciones (\S\ref{sec:notificaciones}): el sistema puede generar
+automáticamente un correo de alerta con la lista de ítems en riesgo,
+redactado con asistencia LLM y enviado por la cuenta Gmail del director.
+
+Cabe destacar que la dimensión \emph{plan de estudios} de la acreditación
+no se sustenta únicamente en evidencias documentales: la plataforma
+permite construir la matriz de tributación de competencias
+(\S\ref{subsec:competencias}) a partir de los datos ya cargados en el
+catálogo de competencias y las propuestas de cátedra aprobadas.
+Esta matriz, consultable antes de una visita de acreditación, permite
+verificar la cobertura del perfil de egreso y detectar brechas entre
+lo declarado en el plan de estudios y lo efectivamente desarrollado
+en las asignaturas.
+
+%% =============================================================================
+\section{Módulo de notificaciones}
+\label{sec:notificaciones}
+%% =============================================================================
+
+El módulo de notificaciones centraliza el envío de correos institucionales
+que antes se redactaban manualmente sin registro ni uniformidad.
+
+\subsection{Integración Gmail OAuth}
+\label{subsec:gmail_oauth}
+
+La integración usa el flujo OAuth 2.0 estándar de Google.
+Los endpoints involucrados son:
+\begin{itemize}[noitemsep, topsep=2pt]
+  \item \texttt{GET /notifications/gmail/authorize}: redirige al usuario
+    a la pantalla de consentimiento de Google; al completar el flujo,
+    el callback guarda el token de acceso y refresco.
+  \item \texttt{GET /notifications/gmail/status}: informa si la cuenta
+    está conectada.
+  \item \texttt{POST /notifications/gmail/disconnect}: revoca el token.
+  \item \texttt{POST /notifications/gmail/send}: envía el correo desde
+    la cuenta institucional del usuario, no desde un servidor SMTP genérico.
+\end{itemize}
+
+\subsection{Asistencia LLM para redacción de correos}
+\label{subsec:email_llm}
+
+El endpoint \texttt{POST /notifications/email/ai-assist} recibe el
+contexto de la notificación (nombre del docente, asignatura, lista de
+campos pendientes o instrumentos no entregados) y genera el cuerpo del
+correo en tono institucional formal.
+El usuario revisa el texto generado antes de enviarlo, lo que mantiene
+el control humano sobre la comunicación.
+
+Los casos de uso cubiertos son: propuestas incompletas fuera de plazo,
+instrumentos evaluativos no subidos, actividades del plan de trabajo
+próximas a vencer, y resultados de controles normativos con
+observaciones que requieren corrección por parte del docente.
+
+%% =============================================================================
+\section{Backend — API REST}
+\label{sec:backend}
+%% =============================================================================
+
+El backend se implementa con \textbf{FastAPI} (Python~3.13.12), un framework
+asincrónico que genera automáticamente la documentación interactiva
+OpenAPI/Swagger en \texttt{/docs} y valida todos los cuerpos de petición
+mediante esquemas \textbf{Pydantic} antes de que lleguen a la lógica de
+negocio.
+La base de datos es \textbf{SQLite} gestionada con \textbf{SQLAlchemy} en
+modo síncrono; las migraciones de esquema se administran con
+\textbf{Alembic}, lo que permite evolucionar el modelo de datos sin
+pérdida de información entre versiones del sistema.
+
+Todos los endpoints residen en un único \texttt{main.py}, organizados por
+recurso mediante prefijos de ruta coherentes con los nombres de los
+módulos funcionales.
+Esta estructura monolítica simplifica el despliegue en la fase actual del
+proyecto, en la que la carga de usuarios y el equipo de desarrollo no
+justifican una arquitectura de microservicios; la separación conceptual
+entre módulos queda garantizada por la organización interna del código y
+por el uso de routers de FastAPI.
+
+\subsection{Autenticación y seguridad}
+
+La autenticación usa \textbf{JWT Bearer token} (algoritmo HS256) con
+tiempo de expiración configurable mediante variable de entorno.
+Las contraseñas se almacenan exclusivamente como hash \texttt{bcrypt},
+nunca en texto plano.
+El ciclo completo de gestión de credenciales expone:
+\begin{itemize}[noitemsep, topsep=2pt]
+  \item \texttt{POST /auth/login}: autenticación y emisión del token;
+  \item \texttt{GET  /auth/me}: perfil del usuario autenticado;
+  \item \texttt{POST /auth/forgot-password}: solicitud de recuperación
+    por correo electrónico;
+  \item \texttt{POST /auth/reset-passwords}: reset con token de un solo
+    uso enviado por correo;
+  \item \texttt{POST /auth/change-my-password}: cambio de contraseña
+    para el usuario autenticado, exigido en el primer inicio de sesión.
+\end{itemize}
+
+Cada endpoint protegido verifica el token JWT y, adicionalmente, el rol
+\texttt{TeacherCareer.role} del usuario para la carrera involucrada.
+Esta verificación se realiza en una dependencia reutilizable inyectada
+por FastAPI, de modo que la lógica de autorización no se duplica en cada
+ruta.
+
+\subsection{Integración con servicios externos}
+
+El backend gestiona tres integraciones con servicios de Google:
+\begin{description}[noitemsep, leftmargin=1.6cm, labelwidth=1.4cm]
+  \item[Google Docs] Sincronización bidireccional de propuestas de cátedra
+    mediante la API de Google Docs; el flujo OAuth se gestiona con
+    \texttt{/auth/google/\{authorize,callback\}}.
+  \item[Google Drive] Almacenamiento de instrumentos evaluativos en
+    carpetas por asignatura; autenticación compartida con Google Docs.
+  \item[Gmail] Envío de notificaciones institucionales desde la cuenta del
+    director mediante OAuth~2.0 (\S\ref{sec:notificaciones}).
+\end{description}
+
+La clave \texttt{OPENAI\_API\_KEY} habilita las funciones de generación,
+reformulación y evaluación mediante LLM (controles inteligentes, asistencia
+de redacción, clasificación de evidencias CONEAU).
+Todas las credenciales se leen desde variables de entorno; el archivo
+\texttt{.env} y la base de datos están cubiertos por \texttt{.gitignore}.
+
+\subsection{Tareas en segundo plano}
+
+Las operaciones de larga duración —importación de DOCX, ejecución de
+controles inteligentes, ingesta masiva de evidencias— se ejecutan como
+\texttt{BackgroundTasks} de FastAPI.
+Esto permite que el endpoint devuelva \texttt{HTTP~202 Accepted}
+inmediatamente mientras el procesamiento continúa en segundo plano,
+sin bloquear al cliente y sin necesidad de un broker de colas externo
+en la fase actual del proyecto.
+
+\subsection{Resumen de endpoints por módulo}
+
+La Tabla~\ref{tab:endpoints} resume los grupos de endpoints con la
+cantidad real de rutas en cada módulo.
+
+\begin{longtable}{p{4cm}rp{10cm}}
+\caption{Grupos de endpoints de la API REST.}
+\label{tab:endpoints}\\
+\toprule
+\textbf{Módulo} & \textbf{N.\textsuperscript{o}} & \textbf{Rutas representativas} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{l}{\small\textit{(continuación)}} \\
+\toprule
+\textbf{Módulo} & \textbf{N.\textsuperscript{o}} & \textbf{Rutas representativas} \\
+\midrule
+\endhead
+\midrule
+\multicolumn{3}{r}{\small\textit{continúa en la página siguiente}} \\
+\endfoot
+\bottomrule
+\endlastfoot
+Propuestas         & 17 & \texttt{GET/POST /proposals},
+                          \texttt{PATCH /proposals/\{id\}} \\
+Google Workspace   & 13 & \texttt{/auth/google/authorize},
+                          \texttt{/proposals/\{id\}/sync-gdoc} \\
+Plan de estudios   & 12 & \texttt{/study-plans}\\
+Acreditación       & 14 & \texttt{/accreditation/evidences},
+                          \texttt{/accreditation/ingest} \\
+Instrumentos       & 10 & \texttt{/instruments},
+                          \texttt{/instruments/upload} \\
+Controles intelig. &  8 & \texttt{/intelligent-controls},
+                          \texttt{/proposals/\{id\}/intelligent-controls/run} \\
+Notificaciones     &  6 & \texttt{/notifications/gmail/send},
+                          \texttt{/notifications/email/ai-assist} \\
+Competencias       &  5 & \texttt{/competencies},
+                          \texttt{/competencies/\{id\}/usage} \\
+Docentes           &  5 & \texttt{/teachers},
+                          \texttt{/teachers/\{id\}/usage} \\
+Carreras           &  6 & \texttt{/careers},
+                          \texttt{/careers/\{id\}/committee} \\
+Autenticación      &  5 & \texttt{/auth/login},
+                          \texttt{/auth/forgot-password} \\
+IA generativa      &  4 & \texttt{/suggest},
+                          \texttt{/ai-generate},
+                          \texttt{/ai-reformulate} \\
+Búsqueda semántica &  1 & \texttt{POST /search} \\
+\midrule
+\textbf{Total} & \textbf{113} & \\
+\end{longtable}
+
+%% =============================================================================
+\section{Frontend — Interfaz de usuario}
+\label{sec:frontend}
+%% =============================================================================
+
+El frontend es una SPA (Single Page Application) construida con React~18 y Vite~7.
+El enrutamiento del lado del cliente usa \texttt{react-router-dom};
+las llamadas a la API se realizan con \texttt{Axios}.
+La visibilidad de cada sección y las acciones disponibles dentro de ella
+se determinan en tiempo de ejecución según el rol del usuario autenticado.
+
+\subsection*{Secciones y acceso por rol}
+
+La Tabla~\ref{tab:frontend_roles} resume las secciones de la plataforma
+y los roles que pueden acceder a cada una.
+
+\begin{longtable}{p{5cm}cccc}
+\caption{Secciones del frontend y acceso por rol.}
+\label{tab:frontend_roles}\\
+\toprule
+\textbf{Sección} & \textbf{Directivo} & \textbf{Docente} & \textbf{Secretario} & \textbf{MiembroCC} \\
+\midrule
+\endfirsthead
+\multicolumn{5}{l}{\small\textit{(continuación)}} \\
+\toprule
+\textbf{Sección} & \textbf{Directivo} & \textbf{Docente} & \textbf{Secretario} & \textbf{MiembroCC} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+Dashboard (inicio)           & \checkmark &  & \checkmark & \checkmark \\
+Propuestas                   & \checkmark & \checkmark & \checkmark & \checkmark \\
+\quad Importar propuesta      & \checkmark &            & \checkmark & \\
+\quad Editar propuesta        & \checkmark & \checkmark & \checkmark & \\
+\quad Configurar Google Drive & \checkmark &            & \checkmark & \\
+Control de propuestas        & \checkmark & \checkmark & \checkmark & \checkmark \\
+\quad Control rápido          & \checkmark & \checkmark & \checkmark & \checkmark \\
+\quad Control inteligente     & \checkmark & \checkmark & \checkmark & \checkmark \\
+\quad Config. ctrl. inteligente & \checkmark &          & \checkmark & \\
+Plan de estudios             & \checkmark &            & \checkmark & \checkmark \\
+Instrumentos evaluativos     & \checkmark & \checkmark & \checkmark & \checkmark \\
+Docentes                     & \checkmark &            & \checkmark & \checkmark \\
+\quad Crear / modificar docente & \checkmark &          &            & \\
+\quad Eliminar docente        & \checkmark &            &            & \\
+\quad Enviar notificaciones   & \checkmark &            & \checkmark & \checkmark \\
+Acreditación                 & \checkmark &            & \checkmark & (*) \\
+Búsqueda semántica           & \checkmark &            & \checkmark & \checkmark \\
+\end{longtable}
+
+\noindent\small(*) Los docentes asignados como responsables o colaboradores
+en el plan de trabajo de acreditación acceden únicamente a sus actividades
+y tareas vinculadas (\S\ref{subsec:plan_trabajo}).
+\normalsize
+
+\subsection*{Descripción de las secciones principales}
+
+\begin{description}[noitemsep, leftmargin=0pt]
+  \item[\textbf{Dashboard}]
+    Pantalla de inicio común a todos los roles menos al de Docente.
+    Muestra el resumen de propuestas (aprobadas, pendientes, con
+    observaciones), Docente (con información completa o incompleta) y Asignaturas en el Plan de Estudios..
+
+  \item[\textbf{Propuestas}]
+    Listado de propuestas con filtros por carrera, estado y docente.
+    El Directivo y el Secretario pueden importar desde DOCX o Google Docs
+    y configurar la carpeta Drive asociada.
+    El Docente accede únicamente a sus propias propuestas y puede editarlas
+    campo a campo con asistencia LLM (\textit{Sugerir}, \textit{Generar},
+    \textit{Reformular}, o \textit{Escribir completamente}).
+
+  \item[\textbf{Control de propuestas}]
+    Ejecuta controles rápidos (validaciones normativas fijas) o controles
+    inteligentes (evaluación por LLM) sobre una propuesta.
+    El reporte muestra un semáforo por control con estado, justificación
+    textual y sugerencia de mejora.
+    La configuración de los controles inteligentes —prompts, modelos,
+    modo de ejecución— es exclusiva del Directivo y el Secretario.
+
+  \item[\textbf{Plan de estudios}]
+    Árbol jerárquico editable: año $\to$ cuatrimestre $\to$ asignatura,
+    con sus cargas horarias y correlatividades.
+    Incluye la visualización de la matriz de tributación de competencias
+    (\S\ref{subsec:competencias}).
+    Accesible para Directivo, Secretario y Miembro de la CC.
+
+  \item[\textbf{Instrumentos evaluativos}]
+    Visible para todos los roles con distintos alcances.
+    El Directivo vincula carpetas de Google Drive por asignatura.
+    El Docente sube y gestiona sus propios instrumentos.
+    El Directivo, el Secretario y los Miembros de la CC acceden al resumen agregado de entregas
+    y pueden enviar notificaciones a docentes con instrumentos pendientes.
+
+  \item[\textbf{Docentes}]
+    Gestión del padrón institucional.
+    El Directivo crea y modifica docentes; es el único que puede
+    eliminarlos.
+    El Secretario y el Miembro de la CC pueden consultar el padrón y
+    enviar notificaciones pero no modificar datos personales.
+
+  \item[\textbf{Acreditación}]
+    Registro de evidencias por dimensión CONEAU y plan de trabajo de la
+    autoevaluación con semáforo de estados.
+    El Directivo y el Secretario tienen visión y edición completa.
+    Los docentes designados como responsables o colaboradores de
+    actividades específicas acceden únicamente a su cartera de ítems.
+
+  \item[\textbf{Búsqueda semántica}]
+    Campo de consulta en lenguaje natural sobre el corpus institucional
+    indexado (propuestas, normativa, competencias, evidencias).
+    Devuelve los fragmentos más relevantes con \emph{score} de similitud
+    y permite inyectarlos como contexto al asistente LLM.
+    Disponible para Directivo, Secretario y Miembro de la CC.
+\end{description}
+
+%% =============================================================================
+\section{Seguridad, trazabilidad y auditoría}
+\label{sec:seguridad}
+%% =============================================================================
+
+\subsection{Autenticación y control de acceso}
+\label{subsec:seg_auth}
+
+Todos los endpoints protegidos requieren un JWT Bearer token (HS256)
+cuya expiración es configurable.
+Las contraseñas se almacenan exclusivamente como hash \texttt{bcrypt},
+nunca en texto plano.
+La recuperación de contraseña emite un token de un solo uso enviado
+por correo; el token expira tras su primer uso.
+El control de acceso granular se implementa mediante
+\texttt{TeacherCareer.role}: cada endpoint verifica que el usuario
+autenticado posea el rol requerido antes de ejecutar la operación.
+
+\subsection{Protección de credenciales y configuración}
+\label{subsec:seg_creds}
+
+Todas las credenciales sensibles:
+
+(\texttt{OPENAI\_API\_KEY},
+\texttt{GOOGLE\_CLIENT\_ID}, \texttt{GOOGLE\_CLIENT\_SECRET},
+\texttt{JWT\_SECRET}) se leen exclusivamente desde variables de entorno
+cargadas con \texttt{python-dotenv}.
+El archivo \texttt{.env} y la base de datos \texttt{database.db}
+están cubiertos por \texttt{.gitignore} para evitar su inclusión
+en el repositorio.
+
+\subsection{Trazabilidad y auditoría}
+\label{subsec:seg_auditoria}
+
+El sistema implementa dos niveles de auditoría:
+
+\begin{enumerate}
+  \item \textbf{Log de evidencias}: \texttt{AccreditationEvidenceAuditLog}
+registra cada operación sobre un documento de acreditación con
+usuario, acción y marca temporal.
+  \item \textbf{Log de acciones de agentes MCP}: el Servidor de Auditoría
+(§\ref{subsec:mcp_auditoria}) escribe un registro inmutable por cada
+herramienta invocada, incluyendo \texttt{hash} del payload para detectar
+alteraciones posteriores.
+\end{enumerate}
+
+Las propuestas aprobadas pueden bloquearse contra edición posterior
+mediante \texttt{PATCH /proposals/\{id\}/lock} o en bloque al cierre
+del ciclo con \texttt{POST /proposals/bulk-lock}.
+
+\subsection{Validación de entradas y mitigación de inyección}
+\label{subsec:seg_inputs}
+
+Todos los cuerpos de petición son validados automáticamente por esquemas
+Pydantic antes de llegar a la lógica de negocio.
+Las URLs de Google Docs son sanitizadas mediante expresión regular para
+extraer el \texttt{doc\_id} antes de llamar a la API de Google,
+evitando SSRF por URLs maliciosas.
+En el contexto del agente LLM, el contenido controlado por el usuario
+(texto de propuestas) nunca se concatena directamente en el system prompt;
+se inyecta en la sección de usuario del mensaje para preservar el
+aislamiento de instrucciones y mitigar ataques de \emph{prompt injection}.
+Las herramientas disponibles para el modelo están definidas estáticamente
+en cada servidor MCP; el agente no puede invocar herramientas fuera
+de ese conjunto.
+
+%% =============================================================================
+\section{Decisiones de diseño y trade-offs}
+\label{sec:decisiones_disenio}
+%% =============================================================================
+
+Todo sistema de software implica decisiones que no tienen una respuesta
+universalmente correcta: la elección entre dos alternativas técnicas
+igualmente válidas depende del contexto, los recursos disponibles y el
+horizonte de evolución del proyecto.
+Esta sección documenta las decisiones no triviales tomadas durante el
+desarrollo de \textsc{macau}, las alternativas consideradas y la
+justificación de cada elección.
+Aquellas decisiones que se identifican como candidatas a revisión
+en una fase de escala se señalan explícitamente.
+
+\subsection*{Base de datos: SQLite}
+
+\textbf{Alternativas consideradas:} PostgreSQL, MySQL.
+
+Se eligió \textbf{SQLite} por su modelo de despliegue sin servidor: la
+base de datos es un único archivo en disco que no requiere instancia
+separada, configuración de red ni gestión de usuarios de base de datos.
+En el contexto actual —una institución con un único plan de estudios
+activo por carrera, menos de diez carreras y un volumen de propuestas que no supera
+las pocas centenas de filas— el overhead operativo de PostgreSQL no
+se justifica.
+SQLAlchemy abstrae la capa de acceso a datos con una interfaz uniforme,
+lo que permite migrar a PostgreSQL sin cambios en la lógica de negocio
+si el volumen de usuarios o la necesidad de concurrencia de escritura lo
+requieren en el futuro.
+
+\subsection*{Índice vectorial: hnswlib}
+
+\textbf{Alternativas consideradas:} ChromaDB, Weaviate, Pinecone.
+
+El módulo RAG utiliza \textbf{hnswlib} como motor de búsqueda aproximada
+de vecinos más cercanos.
+A diferencia de ChromaDB o Weaviate, hnswlib no requiere un proceso
+servidor independiente: el índice se persiste en disco como un archivo
+binario y se carga en memoria al iniciar el backend.
+Esta decisión elimina una dependencia de infraestructura y simplifica
+el despliegue en entornos sin contenedores ni orquestación.
+La contrapartida es que el índice no soporta actualizaciones parciales
+eficientes a gran escala; sin embargo, en el corpus institucional actual
+(propuestas, normativa, competencias y evidencias) el tamaño no supera
+los miles de fragmentos, rango en el que hnswlib opera con latencia
+de consulta por debajo de los 10~ms.
+
+\subsection*{Modelo de lenguaje: API de OpenAI con modelo configurable}
+
+\textbf{Alternativas consideradas:} Llama~3, Mistral, modelos locales
+vía Ollama.
+
+Se optó por la \textbf{API de OpenAI} por tres razones convergentes:
+calidad de razonamiento en español suficiente para evaluación académica
+estructurada, estabilidad de la API con versionado explícito, y ausencia
+de requerimiento de GPU local.
+A ello se suma que el autor contaba con créditos preexistentes en la
+plataforma, lo que eliminó la barrera de adopción durante el desarrollo
+del prototipo.
+
+El sistema no fija un único modelo para todas sus funciones, lo que
+permite ajustar la relación costo/calidad según la tarea.
+
+Las funcionalidades de \textbf{asistencia de redacción} —sugerencias de
+mejora, generación de texto desde cero y reformulación de resultados de
+aprendizaje— utilizan un modelo de alta capacidad del catálogo de OpenAI,
+configurado al momento del despliegue, cuyo rendimiento en generación de
+texto libre en español resulta adecuado para el contexto académico.
+
+El módulo de \textbf{controles inteligentes} delega la elección del modelo
+al Directivo en cada ejecución, conforme a lo descrito en
+\S\ref{subsec:controles_inteligentes}.
+
+Los modelos de código abierto ejecutados localmente representan una
+alternativa válida para despliegues con restricciones de privacidad
+o sin conectividad.
+La arquitectura MCP permite sustituir el proveedor LLM sin modificar
+la lógica de los agentes, lo que reduce el costo de una migración futura.
+
+\subsection*{Modelo de embeddings: text-embedding-3-small}
+
+\textbf{Alternativas consideradas:} \texttt{text-embedding-ada-002},
+modelos multilinguales (e5-multilingual, bge-m3).
+
+El modelo \texttt{text-embedding-3-small} de OpenAI ofrece una relación
+calidad/costo superior a su predecesor \texttt{ada-002} con la mitad del
+costo por token y dimensionalidad configurable.
+Comparte el mismo proveedor que el modelo de chat, lo que simplifica la
+gestión de claves y facturación.
+Los modelos multilinguales de código abierto son una alternativa para
+escenarios sin conectividad, pero requieren infraestructura de cómputo
+adicional y su rendimiento en corpus institucionales en español
+específico es variable.
+
+\subsection*{Arquitectura del backend: monolito}
+
+\textbf{Alternativas consideradas:} microservicios, arquitectura hexagonal.
+
+El backend concentra todos los endpoints en un único módulo
+\texttt{main.py}.
+Esta decisión responde al estadio actual del proyecto: un equipo de
+desarrollo unipersonal en fase de prototipo necesita iterar rápido,
+y la separación en microservicios introduce overhead de coordinación que
+no está justificado mientras el sistema corre en un único servidor.
+La separación lógica por módulo se mantiene mediante prefijos de ruta
+y routers de FastAPI, lo que facilita una futura extracción a
+microservicios cuando el volumen de usuarios o la necesidad de
+despliegue independiente por módulo lo justifiquen.
+
+\subsection*{Protocolo de agentes: MCP}
+
+\textbf{Alternativas consideradas:} llamadas directas a funciones Python,
+LangChain, LlamaIndex.
+
+El \emph{Model Context Protocol} se eligió sobre llamadas directas porque
+introduce una capa de trazabilidad nativa: toda invocación de herramienta
+queda registrada con el hash del payload, el agente invocante y la marca
+temporal, sin instrumentación adicional del código.
+Frente a frameworks como LangChain, MCP define un contrato de transporte
+(JSON-RPC 2.0 por stdio o HTTP+SSE) que es independiente del modelo y
+del lenguaje de implementación, lo que otorga interoperabilidad futura
+con otros clientes MCP y reduce el acoplamiento con una biblioteca
+específica del ecosistema Python.
+
+\subsection*{Autenticación: JWT local}
+
+\textbf{Alternativas consideradas:} Auth0, Supabase Auth, Keycloak.
+
+Se implementó autenticación \textbf{JWT propia} (HS256) en lugar de
+delegar en un proveedor de identidad externo.
+La decisión responde a dos criterios: el contexto institucional no tiene
+SSO existente con el que integrarse, y los proveedores de identidad
+gestionados (Auth0, Supabase) introducen una dependencia de pago y
+conectividad externa que no es deseable en una herramienta de uso
+interno.
+El flujo implementado cubre los requisitos de seguridad del escenario:
+tokens con expiración, hash bcrypt de contraseñas, recuperación por
+correo con token de un solo uso y cambio de contraseña obligatorio en
+el primer inicio de sesión.
+Si la institución adoptara en el futuro un IdP corporativo (Azure AD,
+Google Workspace), la dependencia \texttt{get\_current\_user} de FastAPI
+puede reemplazarse sin modificar la lógica de negocio.
+
+\subsection*{Integración de correo: Gmail OAuth}
+
+\textbf{Alternativas consideradas:} SMTP genérico, SendGrid, Mailgun.
+
+El envío de notificaciones usa la \textbf{API de Gmail} mediante OAuth~2.0
+en lugar de un servidor SMTP externo.
+Esto garantiza que los correos se envíen desde la cuenta institucional
+real del Director, Secretario o Miembro de la CC, con el nombre del remitente y el historial en su
+buzón de enviados, lo que otorga confianza y trazabilidad que un
+relay SMTP genérico no puede proveer.
+La contrapartida es la fricción inicial del flujo de consentimiento
+OAuth; sin embargo, el token de refresco se almacena en el backend y
+se renueva automáticamente, de modo que el Director, Secretario o Miembro de la CC solo debe autorizar
+una vez.
+
+\subsection*{Resumen de decisiones y deuda técnica}
+
+La Tabla~\ref{tab:decisiones} consolida las decisiones descritas,
+indicando cuáles se recomiendan revisar ante un escenario de escala.
+
+\begin{longtable}{p{4.5cm}p{4.5cm}p{6cm}}
+\caption{Decisiones de diseño y candidatos a revisión futura.}
+\label{tab:decisiones}\\
+\toprule
+\textbf{Decisión} & \textbf{Opción elegida} & \textbf{Candidato a revisión} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{l}{\small\textit{(continuación)}} \\
+\toprule
+\textbf{Decisión} & \textbf{Opción elegida} & \textbf{Candidato a revisión} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+Base de datos        & SQLite             & Migrar a PostgreSQL al superar múltiples instituciones o concurrencia alta \\
+Índice vectorial     & hnswlib            & ChromaDB/Weaviate si el corpus supera decenas de miles de fragmentos \\
+Modelo LLM           & API OpenAI (modelo configurable por módulo) & Modelo local si se requiere privacidad estricta o sin conectividad \\
+Embeddings           & text-embedding-3-small & Modelo local multilingüe en despliegues sin API externa \\
+Arquitectura backend & Monolito           & Microservicios si se requiere escala independiente por módulo \\
+Protocolo agentes    & MCP                & Estable; escala con el protocolo sin cambios de arquitectura \\
+Autenticación        & JWT local          & IdP corporativo si la institución adopta SSO \\
+Integración correo   & Gmail OAuth        & SMTP corporativo si se exige independencia de Google \\
+\end{longtable}
