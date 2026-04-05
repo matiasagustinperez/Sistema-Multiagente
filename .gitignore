@@ -1,9 +1,13 @@
 # Python
 .venv/
+env/
+venv/
 __pycache__/
 *.pyc
+*.pyo
+.ipynb_checkpoints/
 
-# Env
+# Env / Secrets
 backend/.env
 backend/.env.example
 backend/secrets/
@@ -12,24 +16,34 @@ backend/secrets/
 frontend/node_modules/
 frontend/dist/
 
-# VSCode
+# IDEs
 .vscode/
-
-# Data
-data/
-vector_index/
+.idea/
 
 # OS
 .DS_Store
 Thumbs.db
-.venv/
-__pycache__/
-*.pyc
-.DS_Store
-env/
-venv/
-.ipynb_checkpoints/
+
+# Data / DB
 data/
-.idea/
-.vscode/
+vector_index/
+backend/data/
+*.db
+
+# Logs y métricas
 *.log
+backend/llm_metrics.jsonl
+
+# Archivos de análisis y scripts de tesis (no son parte del sistema)
+backend/analysis_output/
+backend/analyze_llm_metrics.py
+backend/create_acceptance_sheet.py
+backend/generate_analysis.py
+backend/*.xlsx
+backend/~$*
+
+# Carpetas excluidas del repo
+tesis/
+backups/
+docs/
+_deprecated/

@@ -270,7 +270,7 @@ const LoginScreen = ({ onLogin }) => {
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
           <img src={logoMacau} alt="MACAU" style={{ maxWidth: '140px', height: 'auto' }} />
           <div style={{ color: '#1a3d5c', fontSize: '13px', marginTop: '8px', fontWeight: 600 }}>
-            Multiagente para la Acreditación ante CONEAU
+            MultiAgente de Apoyo a la Calidad Académica Universitaria
           </div>
         </div>
 
@@ -4685,6 +4685,11 @@ const App = () => {
     if (!viewProposal?.id || !localDiffData?.changes) {
       return
     }
+    if (!localDiffSelection || !Object.values(localDiffSelection).some(Boolean)) {
+      setStatusMsg('Seleccioná al menos un campo para enviar a Google Docs')
+      setStatusType('warning')
+      return
+    }
     try {
       setGdocDiffLoading(true)
       const changesToApply = localDiffSelection
@@ -7205,7 +7210,8 @@ const App = () => {
       .map((control, idx) => `${idx + 1}. ${String(control.name || 'Control').trim()}: ${String(control.instruction || '').trim()}`)
       .join('\n')
 
-    return `${basePrompt}\n\nControles activos de Control de Propuestas (bloque: ${topicLabelMap[normalizedTopic] || normalizedTopic}):\n${controlsBlock}\n\nCumple estrictamente estas reglas sin agregar explicación meta en la salida.`
+    const rulesSection = `\n\n[REQUISITOS ACADÉMICOS OBLIGATORIOS - NO LISTARLOS EN LA RESPUESTA]\nEl texto generado DEBE satisfacer todas las siguientes reglas sin mencionarlas ni listarlas en la salida:\n${controlsBlock}\n[FIN REQUISITOS]`
+    return `${basePrompt}${rulesSection}`
   }
 
   const requestAiText = async ({ prompt, endpoint = 'ai-generate', topic = '' }) => {
@@ -7277,7 +7283,7 @@ const App = () => {
     ].join('\n')
 
     if (mode === 'reformulate') {
-      return `Reformula la metodologia manteniendo el sentido, pero asegurando que cumpla los requisitos.
+      return `Reformula la metodologia CONSERVANDO todos los datos especificos del texto original (tipos de clases, actividades, frecuencias, referencias a unidades). Solo mejora la redaccion sin alterar ningun dato.
 \nContexto:\n${baseContext}\n\nResultados de aprendizaje:\n${raText}\n\nTexto a reformular:\n${currentValue}\n\nRequisitos:\n${commonRequirements}`
     }
 
@@ -7308,7 +7314,9 @@ const App = () => {
     })()
 
     const commonRequirements = [
-      '- Incluir dos parciales y un recuperatorio.',
+      mode === 'reformulate'
+        ? '- Mantener el numero exacto de parciales, recuperatorios y cualquier otro dato numerico mencionado en el texto original.'
+        : '- Incluir dos parciales y un recuperatorio.',
       '- Indicar que los trabajos practicos son evaluables.',
       '- Incluir examen libre con instancia practica y teorica.',
       ...promotionRules,
@@ -7317,7 +7325,7 @@ const App = () => {
     ].join('\n')
 
     if (mode === 'reformulate') {
-      return `Reformula la evaluacion manteniendo el sentido, pero asegurando que cumpla los requisitos.
+      return `Reformula la evaluacion CONSERVANDO todos los datos especificos del texto original (numero de parciales, porcentajes, condiciones de regularidad, modalidades). Solo mejora la redaccion sin alterar ningun dato.
 \nContexto:\n${baseContext}\n\nTexto a reformular:\n${currentValue}\n\nRequisitos:\n${commonRequirements}`
     }
 
@@ -10869,7 +10877,7 @@ const App = () => {
         <div style={{ textAlign: 'center', marginBottom: '20px', paddingBottom: '15px', borderBottom: '1px solid #ddd' }}>
           <img src={logoMacau} alt="MACAU" style={{ maxWidth: '140px', height: 'auto' }} />
           <div style={{ color: '#1a3d5c', fontSize: '12px', marginTop: '10px', fontWeight: 600, lineHeight: 1.3 }}>
-            Multiagente para la Acreditacion ante CONEAU
+            MultiAgente de Apoyo a la Calidad Académica Universitaria
           </div>
           {/* Role badge */}
           <div style={{
@@ -11079,11 +11087,19 @@ const App = () => {
         {activeMenu === 'home' && (
           <div style={styles.section}>
             <h1>Bienvenido a MACAU</h1>
-            <p>MACAU gestiona el ciclo completo de propuestas académicas: creación, edición, importación, validación y seguimiento para acreditación ante CONEAU.</p>
-            <p>Consolida planes de estudio, competencias y docentes en una única plataforma, y aplica controles automáticos para detectar faltantes y mantener calidad documental.</p>
-            <p>Además, integra asistencia de IA para revisar propuestas, generar sugerencias accionables y dejar trazabilidad del estado de cada control por asignatura.</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginTop: '20px' }}>
-              <div style={{ border: '1px solid #d0d0d0', borderRadius: '10px', padding: '16px', background: '#f8f9fb', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
+            <p><strong>MACAU</strong> centraliza la gestión integral del proceso de acreditación universitaria: creación, edición, importación desde documentos Word, validación y seguimiento de propuestas académicas por carrera y plan de estudios.</p>
+            <p>Unifica planes de estudio, competencias, resultados de aprendizaje e instrumentos de evaluación en una sola plataforma, con controles automáticos que detectan faltantes documentales y mantienen la coherencia curricular.</p>
+            <p>Integra asistencia de <strong>inteligencia artificial</strong> en múltiples dimensiones: genera y reformula contenido académico, revisa propuestas detectando inconsistencias, produce observaciones accionables por asignatura, redacta y mejora notificaciones institucionales, y deja trazabilidad completa del estado de cada control.</p>
+            <p>Permite enviar notificaciones por correo directamente desde el sistema, organiza la documentación automáticamente en Google Drive, e incorpora un asistente de escritura con corrección ortográfica, gramatical y reformulación inteligente en la redacción de mensajes.</p>
+            <p style={{ color: '#555', fontSize: '13px' }}>Diseñado para directivos, secretarios académicos y comisiones curriculares, con acceso diferenciado por rol y carrera.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '20px' }}>
+              {/* Propuestas */}
+              <div
+                onClick={() => handleMenuChange('propuestas')}
+                style={{ border: '1px solid #d0d0d0', borderRadius: '10px', padding: '20px', background: '#f8f9fb', display: 'flex', flexDirection: 'column', minHeight: '212px', cursor: 'pointer', transition: 'box-shadow .15s' }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,.12)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+              >
                 <div style={{ fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
                   <span style={{ fontSize: '24px' }}>📘</span> Propuestas
                 </div>
@@ -11094,11 +11110,19 @@ const App = () => {
                     <div>⏳ En proceso: {inProcessProposals.length}</div>
                   </div>
                 </div>
-                <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#4b5563' }}>
-                  {proposalsCreatedPct}% creadas
+                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#aaa' }}>Ir a Propuestas →</span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#4b5563' }}>{proposalsCreatedPct}% creadas</span>
                 </div>
               </div>
-              <div style={{ border: '1px solid #cde7d6', borderRadius: '10px', padding: '16px', background: '#f1fbf4', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
+
+              {/* Docentes */}
+              <div
+                onClick={() => handleMenuChange('docentes')}
+                style={{ border: '1px solid #cde7d6', borderRadius: '10px', padding: '20px', background: '#f1fbf4', display: 'flex', flexDirection: 'column', minHeight: '212px', cursor: 'pointer', transition: 'box-shadow .15s' }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(43,106,59,.18)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+              >
                 <div style={{ fontSize: '16px', color: '#2b6a3b', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
                   <span style={{ fontSize: '24px' }}>👩‍🏫</span> Docentes
                 </div>
@@ -11109,11 +11133,19 @@ const App = () => {
                     <div>⚠️ Con datos incompletos: {teachersIncompleteCount}</div>
                   </div>
                 </div>
-                <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#2b6a3b' }}>
-                  {teachersCompletePct}% completos
+                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#6aab7a' }}>Ir a Docentes →</span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#2b6a3b' }}>{teachersCompletePct}% completos</span>
                 </div>
               </div>
-              <div style={{ border: '1px solid #d9e4ff', borderRadius: '10px', padding: '16px', background: '#f4f7ff', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
+
+              {/* Control de Propuestas */}
+              <div
+                onClick={() => handleMenuChange('control-propuestas')}
+                style={{ border: '1px solid #d9e4ff', borderRadius: '10px', padding: '20px', background: '#f4f7ff', display: 'flex', flexDirection: 'column', minHeight: '212px', cursor: 'pointer', transition: 'box-shadow .15s' }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(31,61,122,.15)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+              >
                 <div style={{ fontSize: '16px', color: '#1f3d7a', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
                   <span style={{ fontSize: '24px' }}>🧪</span> Control de Propuestas
                 </div>
@@ -11126,17 +11158,19 @@ const App = () => {
                     <div>💡 Con sugerencias: {controlsHomeSuggestedCount}</div>
                   </div>
                 </div>
-                <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#1f3d7a' }}>
-                  {controlsHomeCompletePct}% completas
+                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#7b9cd4' }}>Ir a Control →</span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#1f3d7a' }}>{controlsHomeCompletePct}% completas</span>
                 </div>
               </div>
-              <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', padding: '16px', background: '#fafafa' }}>
-                <div style={{ fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '24px' }}>📄</span> Acreditación
-                </div>
-                <div style={{ fontSize: '40px', fontWeight: 800 }}>0</div>
-              </div>
-              <div style={{ border: '1px solid #d4a5d4', borderRadius: '10px', padding: '16px', background: '#f9f1f9', display: 'flex', flexDirection: 'column', minHeight: '170px' }}>
+
+              {/* Asignaturas */}
+              <div
+                onClick={() => handleMenuChange('plan')}
+                style={{ border: '1px solid #d4a5d4', borderRadius: '10px', padding: '20px', background: '#f9f1f9', display: 'flex', flexDirection: 'column', minHeight: '212px', cursor: 'pointer', transition: 'box-shadow .15s' }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(107,44,107,.15)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+              >
                 <div style={{ fontSize: '16px', color: '#6b2c6b', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
                   <span style={{ fontSize: '24px' }}>📚</span> Asignaturas
                 </div>
@@ -11147,8 +11181,9 @@ const App = () => {
                     <div>❌ Sin propuesta: {subjectStatsHome.withoutProposals}</div>
                   </div>
                 </div>
-                <div style={{ marginTop: 'auto', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: '#6b2c6b' }}>
-                  {subjectsWithProposalPct}% con propuesta
+                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#b07ab0' }}>Ir a Plan de Estudios →</span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#6b2c6b' }}>{subjectsWithProposalPct}% con propuesta</span>
                 </div>
               </div>
             </div>
@@ -19733,6 +19768,15 @@ const App = () => {
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {!isReadOnlyRole && !viewProposal.editing_locked && (
+                    <button
+                      style={{ ...styles.button, marginRight: 0, background: '#1565c0', color: '#fff', whiteSpace: 'nowrap' }}
+                      onClick={() => loadProposalForEdit(viewProposal.id)}
+                      title="Ir a editar esta propuesta"
+                    >
+                      ✏️ Editar propuesta
+                    </button>
+                  )}
                   {!isReadOnlyRole && (
                     <button
                       style={{ ...styles.button, marginRight: 0, background: viewProposal.editing_locked ? '#2e7d32' : '#c62828', color: '#fff', whiteSpace: 'nowrap' }}

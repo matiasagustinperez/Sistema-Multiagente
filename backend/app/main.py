@@ -24,6 +24,9 @@ import ast
 import mimetypes
 import xml.etree.ElementTree as ET
 import textwrap
+import time as _time
+import pathlib as _pathlib
+import contextvars as _contextvars
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
@@ -32,6 +35,22 @@ import requests
 
 app = FastAPI(title="TesisMCD API")
 
+# ---------------------------------------------------------------------------
+# LLM metrics logging
+# ---------------------------------------------------------------------------
+_LLM_LOG_PATH = _pathlib.Path(__file__).parent.parent / "llm_metrics.jsonl"
+_llm_tag: _contextvars.ContextVar[str] = _contextvars.ContextVar("llm_tag", default="unknown")
+
+
+def _write_llm_log(entry: dict) -> None:
+    """Append one JSON line to llm_metrics.jsonl (best-effort, never raises)."""
+    try:
+        with open(_LLM_LOG_PATH, "a", encoding="utf-8") as _f:
+            _f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+# ---------------------------------------------------------------------------
 # Load environment variables from backend/.env
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 env_file = os.path.join(backend_dir, '.env')
@@ -2096,11 +2115,11 @@ def push_proposal_to_gdoc_direct(
     if not proposal.gdoc_url:
         raise HTTPException(status_code=400, detail="La propuesta no tiene enlace de Google Docs")
 
-    if not changes_to_apply or not isinstance(changes_to_apply, dict):
-        raise HTTPException(status_code=400, detail="changes_to_apply es requerido")
+    if not isinstance(changes_to_apply, dict):
+        raise HTTPException(status_code=400, detail="changes_to_apply debe ser un objeto")
 
-    # Verificar que tengo cambios que aplicar
-    if not any(changes_to_apply.values()):
+    # Verificar que hay al menos un cambio seleccionado
+    if not changes_to_apply or not any(changes_to_apply.values()):
         return {
             "status": "ok",
             "message": "No hay cambios seleccionados para aplicar",
@@ -2122,12 +2141,13 @@ def push_proposal_to_gdoc_direct(
             detail=f"Faltan dependencias: {str(e)}",
         )
 
-    # Extraer ID del documento de GDoc
-    doc_id_match = re.search(r"/d/([\w-]+)", proposal.gdoc_url)
-    if not doc_id_match:
+    # Extraer ID del documento de GDoc (soporta /d/ID/ y ?id=ID)
+    _gdoc_url = proposal.gdoc_url or ""
+    _m = re.search(r"/d/([\w-]+)", _gdoc_url) or re.search(r"[?&]id=([\w-]+)", _gdoc_url)
+    if not _m:
         raise HTTPException(status_code=400, detail="URL de Google Docs inválida")
-    
-    doc_id = doc_id_match.group(1)
+
+    doc_id = _m.group(1)
     drive_service = get_google_drive_service()
 
     # Registrar qué campos se actualizarán
@@ -2286,8 +2306,9 @@ def create_chat_completion_compatible(
         else:
             kwargs["max_tokens"] = int(max_tokens)
 
+    _t0 = _time.perf_counter()
     try:
-        return client.chat.completions.create(**kwargs)
+        _response = client.chat.completions.create(**kwargs)
     except Exception as exc:
         message = str(exc)
         lower_message = message.lower()
@@ -2312,8 +2333,21 @@ def create_chat_completion_compatible(
             kwargs.pop("temperature", None)
             retriable = True
         if retriable:
-            return client.chat.completions.create(**kwargs)
-        raise
+            _response = client.chat.completions.create(**kwargs)
+        else:
+            raise
+    _elapsed = _time.perf_counter() - _t0
+    _usage = getattr(_response, "usage", None)
+    _write_llm_log({
+        "ts": datetime.utcnow().isoformat(timespec="milliseconds"),
+        "tag": _llm_tag.get("unknown"),
+        "model": model,
+        "prompt_tokens": getattr(_usage, "prompt_tokens", None),
+        "completion_tokens": getattr(_usage, "completion_tokens", None),
+        "total_tokens": getattr(_usage, "total_tokens", None),
+        "elapsed_s": round(_elapsed, 3),
+    })
+    return _response
 
 
 INTELLIGENT_TOPIC_ALIASES = {
@@ -2783,14 +2817,17 @@ def evaluate_control_with_llm(
         db.close()
     effective_mode = selected_mode
     topic_normalized = normalize_intelligent_topic(control.topic)
-    instruction_text = str(control.instruction or "")
-    senior_category_rule = bool(re.search(r"adjunt|asociad|titular", normalize_header(instruction_text)))
-    if topic_normalized == "teaching_team" and senior_category_rule and selected_mode in {"guepardo", "delfin"}:
-        effective_mode = "ballena"
 
     config = mode_settings[effective_mode]
 
+    current_year = datetime.utcnow().year
+    _cutoff_5y = current_year - 5
     system_prompt = (
+        f"Fecha actual: {datetime.utcnow().strftime('%d/%m/%Y')} (año {current_year}). "
+        f"Cualquier año ≤ {current_year} es pasado o presente, NUNCA futuro. "
+        f"Para controles de antigüedad bibliográfica: el año de corte para '≤ 5 años' es {_cutoff_5y}. "
+        f"Cualquier referencia con año de publicación ≥ {_cutoff_5y} cumple la condición de antigüedad ≤ 5 años. "
+        f"Ejemplo: una referencia de {current_year - 2} tiene antigüedad de 2 años y SÍ cumple. "
         "Eres un evaluador académico estricto de programas analíticos universitarios. "
         "Debes responder SOLO JSON válido con claves: "
         "pass (boolean), what_failed (string), why_failed (string), suggestion (string), proposed_text (string), summary (string). "
@@ -5793,7 +5830,7 @@ async def forgot_password(payload: dict, db: Session = Depends(get_db)):
         '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
         + _img3 +
         '<div style="color:#555;font-size:13px;margin-top:4px;">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>'
-        '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+        '<div style="color:#aaa;font-size:11px;margin-top:4px;">MultiAgente de Apoyo a la Calidad Acad&eacute;mica Universitaria</div>'
         '</td></tr>'
         '</table></td></tr></table>'
         '</body></html>'
@@ -6027,7 +6064,7 @@ def reset_passwords(request: Request, payload: ResetPasswordsRequest, db: Sessio
             '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
             + _img_tag +
             '<div style="color:#555;font-size:13px;margin-top:4px;">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>'
-            '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+            '<div style="color:#aaa;font-size:11px;margin-top:4px;">MultiAgente de Apoyo a la Calidad Acad&eacute;mica Universitaria</div>'
             '<div style="color:#555;font-size:12px;margin-top:8px;">Enviado por: <strong>ADMINISTRADOR</strong></div>'
             '</td></tr>'
             '</table></td></tr></table>'
@@ -6422,7 +6459,7 @@ async def gmail_send(
             '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
             + _img_tag +
             '<div style="color:#555;font-size:13px;margin-top:4px;">Este correo ha sido enviado desde el <strong>Sistema MACAU</strong></div>'
-            '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditaci&oacute;n ante CONEAU</div>'
+            '<div style="color:#aaa;font-size:11px;margin-top:4px;">MultiAgente de Apoyo a la Calidad Acad&eacute;mica Universitaria</div>'
             + _personal_line +
             '</td></tr>'
             '</table></td></tr></table>'
@@ -6745,6 +6782,7 @@ def suggest_for_proposal(proposal_id: int = Form(...), prompt_context: str = For
     """Generate a suggestion (text) for a proposal using nearby evidence and OpenAI.
     Returns suggestion text and used evidences.
     """
+    _llm_tag.set("generacion_scratch")
     try:
         # get top evidence for the proposal
         matches = extract_agent.query_local(f"proposal:{proposal_id}", top_k=5)
@@ -6773,6 +6811,7 @@ def suggest_for_proposal(proposal_id: int = Form(...), prompt_context: str = For
 
 @app.post("/ai-generate")
 def ai_generate(payload: AiPrompt):
+    _llm_tag.set("generacion_scratch")
     try:
         if not payload.prompt.strip():
             raise HTTPException(status_code=400, detail="Prompt is required")
@@ -6806,6 +6845,7 @@ class EmailAiAssistRequest(BaseModel):
 @app.post("/notifications/email/ai-assist", tags=["Notifications"])
 def email_ai_assist(payload: EmailAiAssistRequest):
     """Corrige ortografía, gramática o reformula el texto de un correo institucional."""
+    _llm_tag.set("notificacion")
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="El texto no puede estar vacío.")
@@ -6869,11 +6909,14 @@ def email_ai_assist(payload: EmailAiAssistRequest):
 
 @app.post("/ai-reformulate")
 def ai_reformulate(payload: AiPrompt):
+    _llm_tag.set("reformulacion")
     try:
         if not payload.prompt.strip():
             raise HTTPException(status_code=400, detail="Prompt is required")
         system_prompt = (
-            "Eres un asistente que reformula textos academicos manteniendo el significado. "
+            "Eres un asistente que reformula textos academicos. "
+            "REGLA FUNDAMENTAL: Conservar TODOS los datos especificos del original: numeros (cantidad de parciales, porcentajes, notas), condiciones (con/sin promocion, modalidades), y cualquier restriccion explícita. "
+            "Solo mejora la redaccion, claridad y formalidad. NUNCA cambies datos numericos ni condiciones del texto original. "
             "Devuelve UNICAMENTE el texto final, sin encabezados, sin preambulos y sin etiquetas como 'Sección:' o 'Texto original:'. "
             f"{TERMINOLOGY_POLICY_PROMPT}"
         )
@@ -7052,6 +7095,8 @@ def run_intelligent_controls(
     ).all()
 
     selected_mode = normalize_intelligent_mode((payload.mode if payload else "delfin") or "delfin", default="delfin")
+    # Tag includes mode so metrics log distinguishes Guepardo / Delfín / Ballena
+    _llm_tag.set(f"control_{selected_mode}")
 
     if not controls:
         return build_intelligent_summary(db, proposal)
@@ -8572,7 +8617,7 @@ async def instruments_notify(request: Request, payload: dict = Body(...), db: Se
             '<tr><td style="background:#f5f7fa;border-top:2px solid #e8eaf6;padding:24px 36px;text-align:center;">'
             + _img_tag +
             f'<div style="color:#aaa;font-size:12px;margin-top:6px;">Esta notificación fue generada por <strong style="color:#555;">{sender_name}</strong></div>'
-            '<div style="color:#aaa;font-size:11px;margin-top:4px;">Multiagente para la Acreditación ante CONEAU</div>'
+            '<div style="color:#aaa;font-size:11px;margin-top:4px;">MultiAgente de Apoyo a la Calidad Acad&eacute;mica Universitaria</div>'
             f'<div style="color:#888;font-size:12px;margin-top:8px;border-top:1px solid #e8eaf6;padding-top:8px;">Enviado por: <strong>{sender.name}</strong></div>'
             '</td></tr>'
             '</table></td></tr></table>'
