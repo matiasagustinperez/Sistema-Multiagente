@@ -1,311 +1,217 @@
-# TesisMCD — Accreditation Support Platform
+﻿# MACAU — Sistema Multiagente de Apoyo a la Calidad Académica Universitaria
 
-**Local-first application for assisting university accreditation reviews (CONEAU)**
-
-## 🚀 Quick Navigation
-
-### 👤 I'm a Developer — Where Do I Start?
-
-- **🏃 5-minute setup?** → [QUICKSTART.md](./QUICKSTART.md)
-- **📚 Full documentation?** → [DEV_SETUP.md](./DEV_SETUP.md)
-- **🪟 Windows issues?** → [INSTALL_WINDOWS.md](./INSTALL_WINDOWS.md)
-- **📋 Setup went wrong?** → Run `health-check.ps1`
-
-### 🎯 I Want to Deploy to Production
-
-- **Production checklist** → [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md)
-- **8-step roadmap** → Items 1-8 in production checklist
-- **What's done so far?** → [SESSION_SUMMARY.md](./SESSION_SUMMARY.md)
-
-### 🔍 Want to Understand the Architecture?
-
-In [DEV_SETUP.md](./DEV_SETUP.md):
-- Architecture diagram
-- Component breakdown
-- API endpoint guide
-- Technology stack explanation
+> Plataforma de gestión académica que combina agentes LLM, integración con Google Drive y controles de calidad automáticos para asistir en la elaboración y revisión de programas analíticos universitarios.
 
 ---
 
-## 📋 Project Status
+## Descripción general
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| **Backend (FastAPI)** | ✅ Working | Port 8001, all endpoints functional |
-| **Frontend (React+Vite)** | ✅ Working | Port 5173, dynamic API URL |
-| **Vector Index** | ⚠️ numpy fallback | Install hnswlib for 10-100x speedup |
-| **OpenAI Integration** | ✅ Working | Embeddings + suggestions functional |
-| **Security** | ✅ Fixed | API keys now properly secured |
-| **Documentation** | ✅ Complete | 5 comprehensive guides created |
-| **Testing** | ⏳ Pending | Pytest setup guide included |
-| **CI/CD** | ⏳ Pending | GitHub Actions guide included |
+MACAU es un sistema de escritorio (ejecución local) desarrollado como trabajo final de Maestría en Ciencias de Datos. Asiste a directores de carrera, docentes y comisiones curriculares en la elaboración, revisión y control de programas analíticos, con soporte de inteligencia artificial generativa y mecanismos de control de calidad configurables.
+
+El sistema implementa una arquitectura multiagente donde distintos componentes especializados colaboran para: asistir la redacción con IA, verificar el cumplimiento de estándares académicos, sincronizar documentos con Google Drive/Docs, gestionar notificaciones institucionales y mantener trazabilidad del proceso.
 
 ---
 
-## 🎯 What This Project Does
+## Funcionalidades principales
 
-```
-User uploads .docx → Extract text → Generate embeddings → 
-  Store in local index → Search semantically → 
-    Generate AI suggestions → Accept/Edit proposals
-```
+### Gestión de propuestas analíticas
+- Carga y edición estructurada de programas analíticos por asignatura
+- Campos: fundamentación, contenidos mínimos, resultados de aprendizaje, unidades, trabajos prácticos, metodología, evaluación y bibliografía
+- Estados de propuesta: En proceso / Completada / Cerrada para edición
+- Importación desde documentos Word (.docx) o desde Google Docs (por URL)
+- Exportación en formato DOCX, PDF, JSON y XML
 
-### Key Features
-- 📤 Upload Word documents (.docx)
-- 🔍 Semantic search with vector indices
-- 🤖 AI-powered suggestions (OpenAI)
-- 💾 Local-first (no cloud storage)
-- 🚀 Fast vector search (with hnswlib)
-- 📊 Track proposal status
+### Asistencia con inteligencia artificial
+- Generación de contenido desde cero por sección (metodología, evaluación, RAs, unidades, fundamentación, bibliografía)
+- Reformulación de texto existente preservando los datos originales
+- Corrección ortográfica y gramatical
+- Los controles inteligentes activos se incorporan automáticamente al prompt de generación
+
+### Controles inteligentes (LLM)
+- Controles académicos configurables por tópico (evaluación, bibliografía, metodología, RAs, etc.)
+- Tres modos de ejecución con distintos modelos y parámetros:
+  - **Guepardo** — rápido y económico (gpt-4o-mini, baja temperatura)
+  - **Delfín** — equilibrado (gpt-4o-mini, temperatura media)
+  - **Ballena** — exhaustivo y preciso (gpt-4o, mayor contexto)
+- Resultados con veredicto, descripción del fallo, sugerencia y texto propuesto
+- Posibilidad de aplicar sugerencias directamente sobre la propuesta
+
+### Controles rápidos (basados en reglas)
+- Verificaciones deterministas sin llamadas a LLM
+- Configurables por institución y plan de estudios
+
+### Integración con Google Drive y Gmail
+- Creación de documentos en Drive vinculados a cada propuesta
+- Sincronización bidireccional: detección de cambios y aplicación selectiva
+- Envío de notificaciones institucionales por Gmail a docentes
+- Autenticación OAuth2 con renovación de token
+
+### Gestión de planes de estudio
+- Carga y administración de planes de carrera con años, cuatrimestres y asignaturas
+- Importación de planes desde archivos Excel (.xlsx)
+- Matriz de tributación de competencias
+- Gestión de correlatividades
+
+### Módulo de acreditación
+- Registro y seguimiento de evidencias para procesos CONEAU
+- Plan de trabajo con actividades y tareas
+- Auditoría y versiones de evidencias
+
+### Autenticación y roles
+- Login con JWT y bcrypt
+- Roles: Director de carrera, Docente, Comisión curricular (solo lectura), Administrador
+- Recuperación de contraseña por correo electrónico
 
 ---
 
-## 📊 File Structure
+## Arquitectura técnica
 
 ```
-C:\TesisMCD\
-├── backend/                    # FastAPI server
+MACAU/
+├── backend/                    # Servidor FastAPI (Python)
 │   ├── app/
-│   │   ├── main.py            # API endpoints
-│   │   ├── models.py          # Database schema
-│   │   ├── database.py        # SQLite setup
-│   │   └── schemas.py         # Pydantic models
+│   │   ├── main.py            # Todos los endpoints de la API REST
+│   │   ├── models.py          # Modelos SQLAlchemy (SQLite)
+│   │   ├── schemas.py         # Esquemas Pydantic
+│   │   ├── database.py        # Configuración de base de datos
+│   │   ├── auth.py            # Autenticación JWT / bcrypt
+│   │   ├── docx_import.py     # Importación desde Word
+│   │   └── docx_export.py     # Exportación a Word/PDF
 │   ├── agents/
-│   │   ├── extract.py         # Document → embeddings
-│   │   └── indexer.py         # Vector search (HNSW/numpy)
-│   ├── .venv/                 # Virtual environment
-│   ├── requirements.txt        # Python dependencies
-│   ├── .env                   # Configuration (⚠️ never commit)
-│   └── .env.example           # Template
+│   │   └── extract.py         # Extracción de embeddings vectoriales
+│   ├── scripts/
+│   │   └── generate_google_refresh_token.py  # Renovación OAuth2
+│   ├── requirements.txt
+│   └── .env                   # Variables de entorno (no incluido en repo)
 │
-├── frontend/                   # React + Vite
-│   ├── src/
-│   │   ├── App.jsx            # Main UI component
-│   │   └── main.jsx           # Entry point
-│   ├── public/
-│   ├── node_modules/          # npm dependencies
-│   ├── .env.local             # Frontend config
-│   └── package.json
-│
-├── data/                       # Local storage
-│   ├── uploads/               # Uploaded .docx files
-│   ├── logs/                  # Application logs
-│   └── vector_index/          # Persisted vectors
-│
-└── docs/
-    ├── QUICKSTART.md          # ✨ 5-min setup guide
-    ├── INSTALL_WINDOWS.md     # Windows setup details
-    ├── DEV_SETUP.md           # Full development guide
-    ├── PRODUCTION_CHECKLIST.md # Production roadmap (8 items)
-    ├── SESSION_SUMMARY.md     # What was done
-    ├── health-check.ps1       # Validation script
-    └── README.md              # This file
+└── frontend/                  # Interfaz React + Vite
+    ├── src/
+    │   ├── App.jsx            # Componente principal (SPA completa)
+    │   └── main.jsx           # Punto de entrada
+    └── package.json
 ```
+
+### Stack tecnológico
+
+| Capa | Tecnología |
+|------|-----------|
+| Backend | Python 3.11+, FastAPI, Uvicorn |
+| Base de datos | SQLite + SQLAlchemy 2.0 |
+| Inteligencia artificial | OpenAI API (gpt-4o, gpt-4o-mini) + embeddings |
+| Búsqueda vectorial | hnswlib / numpy fallback |
+| Integración Google | Drive API v3, Gmail API, OAuth2 |
+| Autenticación | JWT (PyJWT) + bcrypt |
+| Exportación | python-docx, docx2pdf, pypdfium2 |
+| Frontend | React 18, Vite |
+| Comunicación | REST API JSON, CORS configurado |
 
 ---
 
-## ⚡ Quick Start (Copy & Paste)
+## Requisitos previos
+
+- Python 3.11 o superior
+- Node.js 18 o superior
+- Clave de API de OpenAI (con acceso a gpt-4o-mini y gpt-4o)
+- Credenciales OAuth2 de Google (para Drive y Gmail) — opcionales
+
+---
+
+## Instalación y puesta en marcha
+
+### 1. Clonar el repositorio
 
 ```powershell
-# Terminal 1: Backend
-cd C:\TesisMCD\backend
+git clone https://github.com/matiasagustinperez/Sistema-Multiagente.git
+cd Sistema-Multiagente
+```
+
+### 2. Configurar el entorno del backend
+
+```powershell
+cd backend
+
+# Crear entorno virtual
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-copy .env.example .env
-# ⬇️ EDIT .env: paste your OPENAI_API_KEY
-notepad .env
-# ⬇️ SAVE and close
-uvicorn app.main:app --reload --port 8001
 
-# Terminal 2: Frontend
-cd C:\TesisMCD\frontend
-npm run dev
-
-# Browser: http://localhost:5173
+# Instalar dependencias
+pip install -r requirements.txt
 ```
 
-**That's it!** See [QUICKSTART.md](./QUICKSTART.md) for troubleshooting.
+### 3. Configurar variables de entorno
 
----
+Crear el archivo `backend/.env` con el siguiente contenido:
 
-## 🔑 Getting Your OpenAI API Key (2 min)
+```env
+OPENAI_API_KEY=sk-...tu-clave...
+SECRET_KEY=una-clave-secreta-larga-y-aleatoria
 
-1. Go to https://platform.openai.com/account/api-keys
-2. Click "Create new secret key"
-3. Copy immediately (shown only once)
-4. Paste into `backend/.env`: `OPENAI_API_KEY=sk-proj-xxxxx`
+# Google OAuth2 (opcional — requerido para Drive y Gmail)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_OAUTH_REFRESH_TOKEN=...
+```
 
-**Cost**: ~$0.10 per 500 proposal suggestions (very cheap!)
+### 4. Inicializar la base de datos
 
----
-
-## 📚 Documentation Guide
-
-### For New Developers
-1. Read [QUICKSTART.md](./QUICKSTART.md) (5 min)
-2. Run the health check: `health-check.ps1`
-3. Start both servers and test
-
-### For Understanding the Code
-1. Read [DEV_SETUP.md](./DEV_SETUP.md) architecture section
-2. Explore: `backend/app/main.py`, `frontend/src/App.jsx`
-3. Check API docs: `http://localhost:8001/docs`
-
-### For Production Deployment
-1. Follow [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md)
-2. Items 1-3: Critical (10-30 min) — mostly already done
-3. Items 4-8: Nice-to-have (2-3 hours)
-
-### For Windows-Specific Issues
-→ [INSTALL_WINDOWS.md](./INSTALL_WINDOWS.md)
-
----
-
-## ✅ Production Readiness Summary
-
-**Currently completed:**
-- ✅ (1/8) Port configuration fixed
-- ✅ (3/8) API key security implemented
-- ✅ (5/8) Environment variables configured
-- ⏳ (2/8) hnswlib installation guide (optional, improves 10-100x)
-- 📋 (4/8) Database migrations (ready with Alembic)
-- 📋 (6/8) Logging & monitoring (code examples provided)
-- 📋 (7/8) Rate limiting (code examples provided)
-- 📋 (8/8) Testing & CI/CD (pytest guide provided)
-
-**Progress**: 37.5% critical items done (3/8), remaining items documented
-
----
-
-## 🆘 Troubleshooting
-
-### Backend fails to start
 ```powershell
-# Problem: "OPENAI_API_KEY not set"
-# Solution: Edit backend/.env and add real key
-notepad C:\TesisMCD\backend\.env
+# Desde backend/ con el entorno activado
+python init_db.py
 ```
 
-### Frontend can't connect
+### 5. Instalar dependencias del frontend
+
 ```powershell
-# Problem: "fetch failed"
-# Solution: Verify backend is running
-curl http://localhost:8001/proposals
+cd ..\frontend
+npm install
 ```
 
-### Common errors
-→ See [QUICKSTART.md](./QUICKSTART.md#-troubleshooting)
+### 6. Iniciar los servidores
 
----
+**Backend** (puerto 8011):
 
-## 🔧 Environment Variables Quick Reference
-
-### Backend (.env)
-```
-OPENAI_API_KEY=sk-proj-your-key-here    # From OpenAI dashboard
-LOCAL_UPLOAD_PATH=./data/uploads        # Where to store uploaded files
-LOCAL_INDEX_PATH=./data/vector_index    # Where to store vector index
-DATABASE_URL=sqlite:///./data/proposals.db
-BACKEND_HOST=127.0.0.1
-BACKEND_PORT=8001
-FRONTEND_URL=http://localhost:5173
-DEBUG=true
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8011
 ```
 
-### Frontend (.env.local)
+**Frontend** (puerto 5173):
+
+```powershell
+cd frontend
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
-VITE_API_URL=http://localhost:8001     # Backend URL
-```
+
+La aplicación estará disponible en: **http://127.0.0.1:5173**
+
+La documentación interactiva de la API en: **http://127.0.0.1:8011/docs**
 
 ---
 
-## 💡 Key Technologies
+## Inicio rápido con VS Code
 
-| Component | Technology | Why |
-|-----------|-----------|-----|
-| Backend | FastAPI | Modern, fast, easy to use |
-| Frontend | React + Vite | Fast, responsive, great DX |
-| Vector DB | HNSW (or numpy) | Fast local search, no costs |
-| Embeddings | OpenAI | High quality, cheap |
-| Suggestions | GPT-4o-mini | Good quality, very fast |
-| Storage | SQLite / .docx | Simple, no server needed |
+El repositorio incluye tareas de VS Code preconfiguradas. Desde la paleta de comandos (`Ctrl+Shift+P → Tasks: Run Task`):
+
+- **Start Backend (PowerShell)** — inicia el backend en el puerto 8011
+- **Start Frontend** — inicia el frontend en el puerto 5173
 
 ---
 
-## 📈 Scaling Path
+## Variables de entorno de referencia
 
-### Current (MVP)
-- Single-user local deployment
-- SQLite database
-- numpy vector search
-
-### Next (Production)
-- PostgreSQL database
-- hnswlib vector search
-- Rate limiting & logging
-- GitHub Actions CI/CD
-
-### Future (Enterprise)
-- Dedicated vector DB (Pinecone)
-- Redis caching
-- Multi-user authentication
-- Azure/AWS deployment
+| Variable | Descripción | Requerida |
+|----------|-------------|-----------|
+| `OPENAI_API_KEY` | Clave de API de OpenAI | Sí |
+| `SECRET_KEY` | Clave para firma de tokens JWT | Sí |
+| `GOOGLE_CLIENT_ID` | ID de cliente OAuth2 de Google | Solo para Drive/Gmail |
+| `GOOGLE_CLIENT_SECRET` | Secreto OAuth2 de Google | Solo para Drive/Gmail |
+| `GOOGLE_OAUTH_REFRESH_TOKEN` | Token de refresco OAuth2 | Solo para Drive/Gmail |
 
 ---
 
-## 🤝 Contributing
+## Licencia y autoría
 
-See [DEV_SETUP.md](./DEV_SETUP.md#-contributing) for guidelines
+Desarrollado como trabajo final de la Maestría en Ciencias de Datos — 2025/2026.
 
----
-
-## 📞 Support
-
-| Question | Answer |
-|----------|--------|
-| How do I get started? | Read [QUICKSTART.md](./QUICKSTART.md) |
-| Where's the API documentation? | http://localhost:8001/docs (when running) |
-| How do I deploy to production? | Follow [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md) |
-| Windows keeps crashing? | See [INSTALL_WINDOWS.md](./INSTALL_WINDOWS.md) |
-| What's the current status? | See [SESSION_SUMMARY.md](./SESSION_SUMMARY.md) |
-| What was changed? | See [SESSION_SUMMARY.md](./SESSION_SUMMARY.md#-issues-fixed--improvements-made) |
-
----
-
-## 📅 Timeline
-
-| Date | Milestone | Status |
-|------|-----------|--------|
-| Feb 15, 2026 | Development setup + security fixes | ✅ Complete |
-| Soon | Install hnswlib + add logging | ⏳ Pending |
-| Soon | Pytest tests + GitHub Actions | ⏳ Pending |
-| Soon | Production deployment | ⏳ Pending |
-
----
-
-## 📄 License
-
-[See LICENSE file](./LICENSE)
-
----
-
-## 🎯 Next Steps
-
-### **Right Now** (5 min)
-1. Run `health-check.ps1`
-2. Follow [QUICKSTART.md](./QUICKSTART.md)
-3. Test upload & suggestion feature
-
-### **Today** (30 min)
-1. Understand architecture ([DEV_SETUP.md](./DEV_SETUP.md))
-2. Install hnswlib (optional but recommended)
-3. Run health check again
-
-### **This Week** (2-3 hours)
-1. Follow [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md)
-2. Add pytest tests
-3. Set up GitHub Actions CI/CD
-
----
-
-**Welcome to TesisMCD!** 🚀  
-Start here: [QUICKSTART.md](./QUICKSTART.md)
+Autor: Matías Agustín Pérez
