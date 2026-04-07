@@ -12,6 +12,7 @@ from .database import SessionLocal, init_db
 from .auth import hash_password, verify_password, create_access_token, decode_access_token
 from agents import extract as extract_agent
 from .docx_import import import_proposal_from_docx
+from . import search_index as _search_index
 from openai import OpenAI
 import shutil
 import tempfile
@@ -32,6 +33,17 @@ from zoneinfo import ZoneInfo
 from io import BytesIO
 from urllib.parse import quote
 import requests
+from .pdf_reports import (
+    report_docentes,
+    report_propuestas,
+    report_instrumentos,
+    report_sugerencias,
+    report_matriz_tributacion,
+    report_docentes_por_asignatura,
+    report_asignaturas_por_docente,
+    report_plan_estudios,
+    report_revision_propuesta,
+)
 
 app = FastAPI(title="TesisMCD API")
 
@@ -438,12 +450,54 @@ def extract_document_preview(filename: str, content: bytes, preview_mode: bool =
                 method = "binary-unsupported"
 
     preview_lines = split_preview_lines(text)
-    return {
+    result = {
         "extraction_method": method,
         "ocr_applied": ocr_applied,
         "extracted_char_count": len(text or ""),
         "preview_lines": preview_lines,
     }
+    if not preview_mode:
+        result["full_text"] = text
+    return result
+
+
+def _generate_evidence_metadata(text: str, filename: str, career: str) -> dict:
+    """Call LLM to produce a structured summary of an accreditation evidence document."""
+    try:
+        client = get_openai_client()
+    except Exception:
+        return {}
+    truncated = text[:12000]  # stay well within token budget
+    prompt = (
+        f"Analizá el siguiente documento de evidencia de acreditación universitaria.\n"
+        f"Archivo: {filename}\n"
+        f"Carrera: {career}\n\n"
+        f"Texto extraído:\n{truncated}\n\n"
+        "Respondé ÚNICAMENTE con un objeto JSON con las siguientes claves "
+        "(omitir claves vacías):\n"
+        "{\n"
+        '  "resumen": "<2-4 oraciones que describan de qué trata el documento>",\n'
+        '  "tipo_detectado": "<acta|resolución|plan de estudios|curriculum vitae|programa|informe|otro>",\n'
+        '  "fecha_detectada": "<fecha o período relevante si se menciona>",\n'
+        '  "docentes_mencionados": ["<apellido, nombre>", ...],\n'
+        '  "asignaturas_mencionadas": ["<nombre de asignatura>", ...],\n'
+        '  "temas_clave": ["<tema 1>", "<tema 2>", ...]\n'
+        "}"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=600,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        # strip markdown fences if present
+        raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        return json.loads(raw)
+    except Exception:
+        return {}
 
 
 def normalize_hash_value(value):
@@ -2958,6 +3012,21 @@ def build_intelligent_summary(db: Session, proposal: models.Proposal) -> dict:
     for control in active_controls:
         row = results_by_control_id.get(control.id)
         if not row:
+            result_items.append({
+                "id": None,
+                "proposal_id": proposal.id,
+                "control_id": control.id,
+                "control_topic": control.topic,
+                "control_name": control.name,
+                "control_instruction": control.instruction,
+                "passed": None,
+                "what_failed": None,
+                "why_failed": None,
+                "suggestion": None,
+                "proposed_text": None,
+                "summary": None,
+                "checked_at": None,
+            })
             continue
         if row.passed:
             passed_controls += 1
@@ -2971,6 +3040,7 @@ def build_intelligent_summary(db: Session, proposal: models.Proposal) -> dict:
             "control_id": row.control_id,
             "control_topic": controls_by_id[row.control_id].topic,
             "control_name": controls_by_id[row.control_id].name,
+            "control_instruction": controls_by_id[row.control_id].instruction,
             "passed": row.passed,
             "what_failed": row.what_failed,
             "why_failed": row.why_failed,
@@ -4108,6 +4178,23 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
 
         normalized_filename = normalize_evidence_filename(source_filename, source_reference)
 
+        # ── LLM metadata (best-effort: download file → extract text → summarise) ──
+        ingest_metadata_json: dict | None = item_payload.get("metadata") or None
+        _download_file_id = destination_file_id or source_file_id
+        if _download_file_id and not transfer_error:
+            try:
+                service = get_drive_service_for_ingest()
+                _file_bytes, _file_name_dl, _, _ = download_drive_file_bytes(service, _download_file_id)
+                _fname = source_filename or _file_name_dl or "archivo"
+                _full_ext = extract_document_preview(_fname, _file_bytes, preview_mode=False)
+                _full_text = _full_ext.get("full_text") or ""
+                if _full_text.strip():
+                    _llm_meta = _generate_evidence_metadata(_full_text, _fname, career)
+                    if _llm_meta:
+                        ingest_metadata_json = _llm_meta
+            except Exception:
+                pass  # never block ingestion
+
         existing_query = db.query(models.AccreditationEvidenceRegistry).filter(
             models.AccreditationEvidenceRegistry.career == career,
         )
@@ -4139,8 +4226,8 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
                 existing.title = item_payload.get("title")
             if item_payload.get("evidence_type"):
                 existing.evidence_type = item_payload.get("evidence_type")
-            if item_payload.get("metadata") is not None:
-                existing.metadata_json = item_payload.get("metadata")
+            if ingest_metadata_json is not None:
+                existing.metadata_json = ingest_metadata_json
             db.add(existing)
 
             db.add(models.AccreditationEvidenceVersion(
@@ -4197,7 +4284,7 @@ def ingest_accreditation_evidences(payload: schemas.AccreditationIngestRequest, 
             status="error" if transfer_error else "registered",
             ocr_applied=False,
             access_error=transfer_error,
-            metadata_json=item_payload.get("metadata"),
+            metadata_json=ingest_metadata_json,
             created_by=actor,
         )
         db.add(record)
@@ -4504,6 +4591,13 @@ async def ingest_accreditation_local_files(
 
         content = await upload.read()
         extraction_preview = extract_document_preview(original_name, content, preview_mode=True)
+        # Full extraction + LLM summary (best-effort, never blocks the upload)
+        try:
+            full_extraction = extract_document_preview(original_name, content, preview_mode=False)
+            full_text = full_extraction.get("full_text") or ""
+            doc_metadata_json: dict | None = _generate_evidence_metadata(full_text, original_name, normalized_career) if full_text.strip() else None
+        except Exception:
+            doc_metadata_json = None
         with open(target_path, "wb") as handler:
             handler.write(content)
 
@@ -4545,6 +4639,8 @@ async def ingest_accreditation_local_files(
             existing.checksum_sha256 = checksum
             existing.access_error = transfer_error
             existing.ocr_applied = bool(extraction_preview.get("ocr_applied"))
+            if doc_metadata_json:
+                existing.metadata_json = doc_metadata_json
             db.add(existing)
 
             db.add(models.AccreditationEvidenceVersion(
@@ -4602,7 +4698,7 @@ async def ingest_accreditation_local_files(
             status="error" if transfer_error else "registered",
             ocr_applied=bool(extraction_preview.get("ocr_applied")),
             access_error=transfer_error,
-            metadata_json=None,
+            metadata_json=doc_metadata_json,
             created_by=actor_value,
         )
         db.add(record)
@@ -6777,6 +6873,255 @@ def semantic_search(q: str = Form(...), top_k: int = Form(5)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Búsqueda semántica global ──────────────────────────────────────────────────
+
+@app.get("/search/index-info")
+def search_index_info(career: str, db: Session = Depends(get_db)):
+    """Devuelve metadata del índice vectorial para una carrera."""
+    return _search_index.index_info(career)
+
+
+@app.post("/search/build-index")
+def search_build_index(
+    career: str,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Lanza la construcción (o reconstrucción) del índice semántico para una carrera."""
+    def _run():
+        try:
+            _search_index.build_index(db, career, get_openai_client)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("Error building search index: %s", exc, exc_info=True)
+
+    background.add_task(_run)
+    return {"status": "building", "career": career}
+
+
+@app.get("/search/global")
+def search_global(
+    q: str,
+    career: str,
+    top_k: int = 15,
+    db: Session = Depends(get_db),
+):
+    """Búsqueda semántica sobre todas las entidades de la carrera."""
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="La consulta no puede estar vacía")
+    if not _search_index.index_info(career).get("exists"):
+        raise HTTPException(status_code=404, detail="Índice no construido. Usa /search/build-index primero.")
+    try:
+        results = _search_index.query_index(q, career, get_openai_client, top_k=top_k)
+        return {"results": results, "query": q, "career": career}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/search/detail")
+def search_detail(type: str, id: int, career: str, db: Session = Depends(get_db)):
+    """Devuelve el detalle completo y las relaciones de una entidad encontrada en la búsqueda."""
+    if type == "propuesta":
+        p = db.query(models.Proposal).filter(models.Proposal.id == id).first()
+        if not p:
+            raise HTTPException(status_code=404, detail="Propuesta no encontrada")
+
+        # Teaching team
+        team = p.teaching_team or []
+        if isinstance(team, str):
+            try:
+                team = json.loads(team)
+            except Exception:
+                team = []
+
+        # Intelligent control results (active controls only)
+        ctrl_rows = (
+            db.query(
+                models.ProposalIntelligentControlResult,
+                models.IntelligentControl.name.label("ctrl_name"),
+                models.IntelligentControl.topic.label("ctrl_topic"),
+            )
+            .join(models.IntelligentControl,
+                  models.IntelligentControl.id == models.ProposalIntelligentControlResult.control_id)
+            .filter(
+                models.ProposalIntelligentControlResult.proposal_id == id,
+                models.IntelligentControl.is_active == True,
+            )
+            .order_by(models.IntelligentControl.topic, models.IntelligentControl.name)
+            .all()
+        )
+        _TOPIC_ES = {
+            "teaching_team": "Equipo docente", "fundamentals": "Fundamentación",
+            "minimum_content": "Contenidos mínimos", "learning_outcomes": "Resultados de aprendizaje",
+            "units": "Unidades", "practicals": "Trabajos prácticos",
+            "methodology": "Metodología", "evaluation": "Evaluación", "bibliography": "Bibliografía",
+        }
+        controls = [
+            {
+                "name": cn or "",
+                "topic": _TOPIC_ES.get((tp or "").strip(), tp or ""),
+                "passed": r.passed,
+                "what_failed": r.what_failed or "",
+                "suggestion": r.suggestion or "",
+            }
+            for r, cn, tp in ctrl_rows
+        ]
+
+        # Units & practicals (titles only for summary)
+        units = [
+            {"title": u.get("title", ""), "objectives": u.get("objectives", "")[:200]}
+            for u in (p.units or []) if isinstance(u, dict) and u.get("title")
+        ]
+        practicals = [
+            {"title": tp.get("title", "")}
+            for tp in (p.practicals or []) if isinstance(tp, dict) and tp.get("title")
+        ]
+
+        # Plan location
+        plan_location = None
+        if p.study_subject_id:
+            subj = db.query(models.StudySubject).filter(models.StudySubject.id == p.study_subject_id).first()
+            if subj and subj.term:
+                plan_location = f"{subj.term.year.label or ''} · {subj.term.name}"
+
+        return {
+            "type": "propuesta",
+            "id": p.id,
+            "subject": p.subject or "",
+            "career": p.career or "",
+            "year_of_career": p.year_of_career,
+            "quarter": p.quarter,
+            "status": p.status or "",
+            "study_plan": p.study_plan or "",
+            "character": p.character or "",
+            "regime": p.regime or "",
+            "theoretical_hours": p.theoretical_hours,
+            "practical_hours": p.practical_hours,
+            "total_hours": p.total_hours,
+            "plan_location": plan_location,
+            "teaching_team": team,
+            "has_fundamentals": bool(p.fundamentals_part1 or p.fundamentals_part2),
+            "has_minimum_content": bool(p.minimum_content),
+            "has_methodology": bool(p.methodology),
+            "has_evaluation": bool(p.evaluation),
+            "has_bibliography": bool(p.bibliography),
+            "has_learning_outcomes": bool(p.learning_outcomes),
+            "units": units,
+            "practicals": practicals,
+            "controls": controls,
+        }
+
+    elif type == "docente":
+        t = db.query(models.Teacher).filter(models.Teacher.id == id).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Docente no encontrado")
+
+        # Roles in this career
+        roles: list[str] = []
+        career_obj = db.query(models.Career).filter(models.Career.name == career).first()
+        if career_obj:
+            if career_obj.director_id == t.id:
+                roles.append("Director de carrera")
+            if career_obj.secretario_id == t.id:
+                roles.append("Secretario de carrera")
+            is_cc = db.query(models.CareerCommitteeMember).filter(
+                models.CareerCommitteeMember.career_id == career_obj.id,
+                models.CareerCommitteeMember.teacher_id == t.id,
+            ).first()
+            if is_cc:
+                roles.append("Comisión Curricular")
+
+        # Proposals/subjects in this career
+        prop_teacher_rows = (
+            db.query(models.ProposalTeacher, models.Proposal)
+            .join(models.Proposal, models.Proposal.id == models.ProposalTeacher.proposal_id)
+            .filter(
+                models.ProposalTeacher.teacher_id == t.id,
+                models.Proposal.career == career,
+            )
+            .order_by(models.Proposal.year_of_career, models.Proposal.subject)
+            .all()
+        )
+        subjects = [
+            {
+                "proposal_id": prop.id,
+                "subject": prop.subject or "",
+                "year_of_career": prop.year_of_career,
+                "quarter": prop.quarter,
+                "status": prop.status or "",
+            }
+            for _, prop in prop_teacher_rows
+        ]
+
+        # Mention in evidences (search metadata_json for teacher name)
+        name_lower = (t.name or "").lower()
+        evidence_mentions: list[dict] = []
+        if name_lower:
+            evs = db.query(models.AccreditationEvidenceRegistry).filter(
+                models.AccreditationEvidenceRegistry.career == career
+            ).all()
+            for ev in evs:
+                meta_str = json.dumps(ev.metadata_json or {}).lower()
+                title_str = (ev.title or ev.source_filename or "").lower()
+                if name_lower in meta_str or name_lower in title_str:
+                    evidence_mentions.append({
+                        "id": ev.id,
+                        "title": ev.title or ev.source_filename or "Sin título",
+                        "evidence_type": ev.evidence_type or "",
+                    })
+
+        return {
+            "type": "docente",
+            "id": t.id,
+            "name": t.name or "",
+            "email": t.email or "",
+            "category": t.category or "",
+            "dedication": t.dedication or "",
+            "roles": roles,
+            "subjects": subjects,
+            "evidence_mentions": evidence_mentions,
+        }
+
+    elif type == "evidencia":
+        ev = db.query(models.AccreditationEvidenceRegistry).filter(
+            models.AccreditationEvidenceRegistry.id == id
+        ).first()
+        if not ev:
+            raise HTTPException(status_code=404, detail="Evidencia no encontrada")
+
+        meta = ev.metadata_json or {}
+        # Extract people mentioned
+        people = meta.get("people_mentioned", meta.get("people", meta.get("docentes", [])))
+        if isinstance(people, str):
+            people = [people]
+
+        subjects_mentioned = meta.get("subjects_mentioned", meta.get("asignaturas", meta.get("materias", [])))
+        if isinstance(subjects_mentioned, str):
+            subjects_mentioned = [subjects_mentioned]
+
+        summary = meta.get("summary", meta.get("resumen", meta.get("descripcion", "")))
+
+        return {
+            "type": "evidencia",
+            "id": ev.id,
+            "title": ev.title or ev.source_filename or "Sin título",
+            "evidence_type": ev.evidence_type or "",
+            "status": ev.status or "",
+            "source_filename": ev.source_filename or "",
+            "created_at": ev.created_at.strftime("%d/%m/%Y") if ev.created_at else "",
+            "created_by": ev.created_by or "",
+            "summary": str(summary)[:800] if summary else "",
+            "people_mentioned": people if isinstance(people, list) else [],
+            "subjects_mentioned": subjects_mentioned if isinstance(subjects_mentioned, list) else [],
+            "metadata": {k: v for k, v in meta.items()
+                         if k not in ("people_mentioned", "people", "docentes",
+                                      "subjects_mentioned", "asignaturas", "materias",
+                                      "summary", "resumen", "descripcion")},
+        }
+
+    raise HTTPException(status_code=400, detail="Tipo no reconocido")
+
+
 @app.post("/suggest")
 def suggest_for_proposal(proposal_id: int = Form(...), prompt_context: str = Form(None)):
     """Generate a suggestion (text) for a proposal using nearby evidence and OpenAI.
@@ -7304,7 +7649,7 @@ def delete_proposal(proposal_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/proposals", response_model=list[schemas.ProposalOut])
-def list_proposals(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def list_proposals(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db)):
     proposals = db.query(models.Proposal).offset(skip).limit(limit).all()
     return [build_proposal_response(db, proposal) for proposal in proposals]
 
@@ -8656,3 +9001,574 @@ async def instruments_notify(request: Request, payload: dict = Body(...), db: Se
             pass
 
     return {"ok": True, "sent": sent_count, "total": len(subjects_payload), "results": results}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PDF REPORTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _pdf_response(pdf_bytes: bytes, filename: str) -> Response:
+    from urllib.parse import quote as _quote
+    encoded = _quote(filename)
+    ascii_name = filename.encode("ascii", "ignore").decode("ascii") or "reporte.pdf"
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=utf-8''{encoded}",
+        "Content-Type": "application/pdf",
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+_ROLE_LABELS = {
+    "director": "Director",
+    "secretario": "Secretario",
+    "docente": "Docente",
+    "comision_curricular": "Comisión Curricular",
+    "admin": "Administrador",
+    "coordinador": "Coordinador",
+}
+
+
+def _make_generated_by(user_name: str, user_role: str) -> str:
+    parts = []
+    if user_name.strip():
+        parts.append(user_name.strip())
+    r = user_role.strip()
+    if r:
+        parts.append(_ROLE_LABELS.get(r.lower(), r.replace("_", " ").title()))
+    return " — ".join(parts)
+
+
+@app.get("/reports/docentes")
+def report_docentes_endpoint(
+    career: str = None,
+    ids: str = None,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.Teacher)
+    if ids:
+        id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+        q = q.filter(models.Teacher.id.in_(id_list))
+
+    teachers_raw = q.order_by(models.Teacher.name).all()
+
+    # If career filter, apply via TeacherCareer join
+    if career:
+        career_ids = {
+            tc.teacher_id
+            for tc in db.query(models.TeacherCareer).filter(models.TeacherCareer.career == career).all()
+        }
+        teachers_raw = [t for t in teachers_raw if t.id in career_ids]
+
+    data = []
+    for t in teachers_raw:
+        careers_list = [tc.career for tc in t.careers]
+        data.append({
+            "name": t.name,
+            "email": t.email or "",
+            "category": t.category or "",
+            "dedication": t.dedication or "",
+            "careers": careers_list,
+        })
+
+    pdf_bytes = report_docentes(data, generated_by=_make_generated_by(user_name, user_role), show_system_name=show_sys)
+    today = datetime.now().strftime("%Y%m%d")
+    return _pdf_response(pdf_bytes, f"MACAU_docentes_{today}.pdf")
+
+
+@app.get("/reports/propuestas")
+def report_propuestas_endpoint(
+    career: str = None,
+    status: str = None,
+    ids: str = None,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.Proposal)
+    if career:
+        q = q.filter(models.Proposal.career == career)
+    if status:
+        q = q.filter(models.Proposal.status == status)
+    if ids:
+        id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+        q = q.filter(models.Proposal.id.in_(id_list))
+
+    proposals_raw = q.order_by(models.Proposal.career, models.Proposal.year_of_career, models.Proposal.quarter, models.Proposal.subject).all()
+
+    data = []
+    for p in proposals_raw:
+        team = p.teaching_team
+        if isinstance(team, str):
+            try:
+                team = json.loads(team)
+            except Exception:
+                team = []
+        data.append({
+            "subject": p.subject,
+            "career": p.career,
+            "study_plan": p.study_plan or "",
+            "academic_year": p.academic_year or "",
+            "year_of_career": p.year_of_career or "",
+            "quarter": p.quarter or "",
+            "minimum_content": p.minimum_content or "",
+            "teaching_team": team or [],
+            "status": p.status or "",
+        })
+
+    pdf_bytes = report_propuestas(data, generated_by=_make_generated_by(user_name, user_role), show_system_name=show_sys)
+    today = datetime.now().strftime("%Y%m%d")
+    return _pdf_response(pdf_bytes, f"MACAU_propuestas_{today}.pdf")
+
+
+@app.get("/reports/instrumentos")
+def report_instrumentos_endpoint(
+    career: str = None,
+    plan: str = None,
+    subject: str = None,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.EvaluativeInstrument)
+    if career:
+        q = q.filter(models.EvaluativeInstrument.career == career)
+    if plan:
+        q = q.filter(models.EvaluativeInstrument.study_plan == plan)
+    if subject:
+        q = q.filter(models.EvaluativeInstrument.subject == subject)
+
+    items = q.order_by(
+        models.EvaluativeInstrument.career,
+        models.EvaluativeInstrument.subject,
+        models.EvaluativeInstrument.instrument_type,
+    ).all()
+
+    data = [{
+        "career": i.career,
+        "study_plan": i.study_plan or "",
+        "subject": i.subject,
+        "instrument_type": i.instrument_type,
+        "title": i.title or i.original_filename,
+        "original_filename": i.original_filename,
+        "uploaded_by": i.uploaded_by or "",
+        "created_at": i.created_at.isoformat() if i.created_at else "",
+    } for i in items]
+
+    pdf_bytes = report_instrumentos(data, generated_by=_make_generated_by(user_name, user_role), show_system_name=show_sys)
+    today = datetime.now().strftime("%Y%m%d")
+    return _pdf_response(pdf_bytes, f"MACAU_instrumentos_{today}.pdf")
+
+
+@app.get("/reports/sugerencias")
+def report_sugerencias_endpoint(
+    proposal_ids: str = None,
+    career: str = None,
+    only_failed: bool = False,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    q = (
+        db.query(
+            models.ProposalIntelligentControlResult,
+            models.Proposal.subject.label("proposal_subject"),
+            models.Proposal.career.label("proposal_career"),
+            models.IntelligentControl.name.label("control_name"),
+            models.IntelligentControl.topic.label("control_topic"),
+        )
+        .join(models.Proposal, models.Proposal.id == models.ProposalIntelligentControlResult.proposal_id)
+        .join(models.IntelligentControl, models.IntelligentControl.id == models.ProposalIntelligentControlResult.control_id)
+        .filter(models.IntelligentControl.is_active == True)
+    )
+    if proposal_ids:
+        id_list = [int(x) for x in proposal_ids.split(",") if x.strip().isdigit()]
+        q = q.filter(models.ProposalIntelligentControlResult.proposal_id.in_(id_list))
+    if career:
+        q = q.filter(models.Proposal.career == career)
+    if only_failed:
+        q = q.filter(models.ProposalIntelligentControlResult.passed == False)
+
+    rows = q.order_by(
+        models.Proposal.career,
+        models.Proposal.subject,
+        models.IntelligentControl.topic,
+    ).all()
+
+    _TOPIC_ES_SG = {
+        "teaching_team": "Equipo docente",
+        "fundamentals": "Fundamentación",
+        "minimum_content": "Contenidos mínimos",
+        "learning_outcomes": "Resultados de aprendizaje",
+        "units": "Unidades",
+        "practicals": "Trabajos prácticos",
+        "methodology": "Metodología",
+        "evaluation": "Evaluación",
+        "bibliography": "Bibliografía",
+    }
+    data = []
+    for r, proposal_subject, proposal_career, control_name, control_topic in rows:
+        data.append({
+            "proposal_subject": proposal_subject or "",
+            "proposal_career": proposal_career or "",
+            "control_name": control_name or "",
+            "control_topic": _TOPIC_ES_SG.get((control_topic or "").strip(), control_topic or ""),
+            "passed": r.passed,
+            "what_failed": r.what_failed or "",
+            "why_failed": r.why_failed or "",
+            "suggestion": r.suggestion or "",
+            "proposed_text": r.proposed_text or "",
+            "summary": r.summary or "",
+            "checked_at": r.checked_at.isoformat() if r.checked_at else "",
+        })
+
+    pdf_bytes = report_sugerencias(data, generated_by=_make_generated_by(user_name, user_role), show_system_name=show_sys)
+    today = datetime.now().strftime("%Y%m%d")
+    return _pdf_response(pdf_bytes, f"MACAU_sugerencias_{today}.pdf")
+
+
+@app.get("/reports/matriz-tributacion")
+def report_matriz_tributacion_endpoint(
+    career: str,
+    plan: str = None,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    # Get competencies for this career/plan
+    q_comp = db.query(models.CompetencyCatalog).filter(models.CompetencyCatalog.career == career)
+    if plan:
+        q_comp = q_comp.filter(models.CompetencyCatalog.plan_name == plan)
+    competencies_raw = q_comp.order_by(models.CompetencyCatalog.competency_type, models.CompetencyCatalog.code).all()
+
+    # Get proposals with their competencies
+    q_prop = db.query(models.Proposal).filter(models.Proposal.career == career)
+    if plan:
+        q_prop = q_prop.filter(models.Proposal.study_plan == plan)
+
+    proposals = q_prop.order_by(models.Proposal.subject).all()
+
+    # Build subjects list with their competency {code: level} mapping
+    subjects = []
+    for p in proposals:
+        comp_map = {pc.code: pc.level for pc in p.competencies}
+        subjects.append({"name": p.subject, "competencies": comp_map})
+
+    matrix_data = {
+        "career": career,
+        "plan": plan or "",
+        "competencies": [
+            {
+                "code": c.code,
+                "description": c.description,
+                "type": c.competency_type,
+            }
+            for c in competencies_raw
+        ],
+        "subjects": subjects,
+    }
+
+    pdf_bytes = report_matriz_tributacion(matrix_data, generated_by=_make_generated_by(user_name, user_role), show_system_name=show_sys)
+    today = datetime.now().strftime("%Y%m%d")
+    career_slug = career.replace(" ", "_")[:30]
+    return _pdf_response(pdf_bytes, f"MACAU_matriz_{career_slug}_{today}.pdf")
+
+
+@app.get("/reports/docentes-por-asignatura")
+def report_docentes_por_asignatura_endpoint(
+    career: str = None,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    q = (
+        db.query(models.Proposal, models.Teacher)
+        .join(models.ProposalTeacher, models.ProposalTeacher.proposal_id == models.Proposal.id)
+        .join(models.Teacher, models.Teacher.id == models.ProposalTeacher.teacher_id)
+    )
+    if career:
+        q = q.filter(models.Proposal.career == career)
+
+    rows = q.order_by(models.Proposal.career, models.Proposal.year_of_career, models.Proposal.quarter, models.Proposal.subject, models.Teacher.name).all()
+
+    grouped: dict = {}
+    for proposal, teacher in rows:
+        key = (proposal.subject, proposal.career)
+        if key not in grouped:
+            grouped[key] = {"subject": proposal.subject, "career": proposal.career, "teachers": []}
+        if teacher.name not in grouped[key]["teachers"]:
+            grouped[key]["teachers"].append(teacher.name)
+
+    data = list(grouped.values())
+    pdf_bytes = report_docentes_por_asignatura(data, generated_by=_make_generated_by(user_name, user_role), show_system_name=show_sys)
+    today = datetime.now().strftime("%Y%m%d")
+    return _pdf_response(pdf_bytes, f"MACAU_docentes_por_asignatura_{today}.pdf")
+
+
+@app.get("/reports/asignaturas-por-docente")
+def report_asignaturas_por_docente_endpoint(
+    career: str = None,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    q = (
+        db.query(models.Teacher, models.Proposal)
+        .join(models.ProposalTeacher, models.ProposalTeacher.teacher_id == models.Teacher.id)
+        .join(models.Proposal, models.Proposal.id == models.ProposalTeacher.proposal_id)
+    )
+    if career:
+        q = q.filter(models.Proposal.career == career)
+
+    rows = q.order_by(models.Teacher.name, models.Proposal.career, models.Proposal.year_of_career, models.Proposal.quarter, models.Proposal.subject).all()
+
+    grouped: dict = {}
+    for teacher, proposal in rows:
+        tid = teacher.id
+        if tid not in grouped:
+            grouped[tid] = {"teacher": teacher.name, "email": teacher.email or "", "subjects": []}
+        subj_entry = {"career": proposal.career, "subject": proposal.subject}
+        if subj_entry not in grouped[tid]["subjects"]:
+            grouped[tid]["subjects"].append(subj_entry)
+
+    data = list(grouped.values())
+    pdf_bytes = report_asignaturas_por_docente(data, generated_by=_make_generated_by(user_name, user_role), show_system_name=show_sys)
+    today = datetime.now().strftime("%Y%m%d")
+    return _pdf_response(pdf_bytes, f"MACAU_asignaturas_por_docente_{today}.pdf")
+
+
+@app.get("/reports/plan-estudios/{plan_id}")
+def report_plan_estudios_endpoint(
+    plan_id: int,
+    correlativas: bool = False,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    plan = db.query(models.StudyPlan).filter(models.StudyPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    # Build lookup from ORM StudySubject (synced via sync_subject_from_proposal)
+    # Index by normalized name (no accents, lowercase) for fuzzy matching
+    orm_subject_by_name: dict = {}
+    for year_orm in plan.years:
+        for term_orm in year_orm.terms:
+            for subj_orm in term_orm.subjects:
+                key = normalize_header(subj_orm.name or "")
+                if key and key not in orm_subject_by_name:
+                    orm_subject_by_name[key] = subj_orm
+
+    # Also build lookup from proposals as secondary fallback
+    proposals_in_career = db.query(models.Proposal).filter(
+        models.Proposal.career == plan.career
+    ).all()
+    proposal_by_subject: dict = {}
+    for p in proposals_in_career:
+        key = normalize_header(p.subject or "")
+        if key and key not in proposal_by_subject:
+            proposal_by_subject[key] = p
+
+    def _enrich(subj_dict: dict) -> dict:
+        """Fill hours/character/regime: payload data → ORM subject → proposal."""
+        name_key = normalize_header(subj_dict.get("name") or "")
+        orm = orm_subject_by_name.get(name_key)
+        prop = proposal_by_subject.get(name_key)
+
+        def _val(field, orm_obj, prop_obj):
+            v = subj_dict.get(field)
+            if v is not None and v != "" and v != 0:
+                return v
+            if orm_obj and getattr(orm_obj, field, None) is not None:
+                return getattr(orm_obj, field)
+            if prop_obj and getattr(prop_obj, field, None) is not None:
+                return getattr(prop_obj, field)
+            return None
+
+        def _str(field, orm_obj, prop_obj):
+            v = subj_dict.get(field) or ""
+            if v:
+                return v
+            if orm_obj and getattr(orm_obj, field, None):
+                return getattr(orm_obj, field)
+            if prop_obj and getattr(prop_obj, field, None):
+                return getattr(prop_obj, field)
+            return ""
+
+        return {
+            "name": subj_dict.get("name") or "",
+            "character": _str("character", orm, prop),
+            "regime": _str("regime", orm, prop),
+            "theoretical_hours": _val("theoretical_hours", orm, prop),
+            "practical_hours": _val("practical_hours", orm, prop),
+            "total_hours": _val("total_hours", orm, prop),
+            "weekly_hours": _val("weekly_hours", orm, prop),
+        }
+
+    # Use payload JSON (stored via /study-plans-storage)
+    payload = plan.payload or {}
+    years_raw = payload.get("years", [])
+
+    years_data = []
+    for year in sorted(years_raw, key=lambda y: y.get("year_number", 999)):
+        terms_data = []
+        for term in year.get("terms", []):
+            subjects_data = []
+            for subj in term.get("subjects", []):
+                corr_enroll = subj.get("correlatives_to_enroll") or []
+                corr_exam = subj.get("correlatives_to_exam") or []
+                prereqs_text = []
+                if correlativas:
+                    if corr_enroll:
+                        prereqs_text.append(f"Cursar: {', '.join(corr_enroll)}")
+                    if corr_exam:
+                        prereqs_text.append(f"Rendir: {', '.join(corr_exam)}")
+                enriched = _enrich(subj)
+                enriched["prerequisites"] = prereqs_text
+                subjects_data.append(enriched)
+            terms_data.append({"name": term.get("name", ""), "subjects": subjects_data})
+        years_data.append({
+            "year_number": year.get("year_number", 0),
+            "label": year.get("label") or f"Año {year.get('year_number', '')}",
+            "terms": terms_data,
+        })
+
+    # Fallback: if payload yields nothing, try ORM (legacy plans)
+    if not years_data:
+        for year in sorted(plan.years, key=lambda y: y.sort_order or y.year_number):
+            terms_data = []
+            for term in sorted(year.terms, key=lambda t: t.sort_order or 0):
+                subjects_data = []
+                for subj in term.subjects:
+                    subj_dict = {
+                        "name": subj.name,
+                        "character": subj.character or "",
+                        "regime": subj.regime or "",
+                        "theoretical_hours": subj.theoretical_hours,
+                        "practical_hours": subj.practical_hours,
+                        "total_hours": subj.total_hours,
+                        "weekly_hours": subj.weekly_hours,
+                    }
+                    enriched = _enrich(subj_dict)
+                    enriched["prerequisites"] = []
+                    subjects_data.append(enriched)
+                terms_data.append({"name": term.name, "subjects": subjects_data})
+            years_data.append({
+                "year_number": year.year_number,
+                "label": year.label or f"Año {year.year_number}",
+                "terms": terms_data,
+            })
+
+    plan_data = {
+        "career": plan.career,
+        "plan": plan.name,
+        "years": years_data,
+    }
+
+    pdf_bytes = report_plan_estudios(plan_data, include_prerequisites=correlativas,
+                                      generated_by=_make_generated_by(user_name, user_role),
+                                      show_system_name=show_sys)
+    today = datetime.now().strftime("%Y%m%d")
+    plan_slug = plan.name.replace(" ", "_")[:30]
+    return _pdf_response(pdf_bytes, f"MACAU_plan_{plan_slug}_{today}.pdf")
+
+
+@app.get("/reports/revision-propuesta/{proposal_id}")
+def report_revision_propuesta_endpoint(
+    proposal_id: int,
+    user_name: str = "",
+    user_role: str = "",
+    show_sys: bool = True,
+    db: Session = Depends(get_db),
+):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Propuesta no encontrada")
+
+    # ── Controles rápidos (computed server-side) ─────────────────────────────
+    quick_checks = [
+        {"key": "hours",           "label": "Horas",          "passed": bool(proposal.theoretical_hours or proposal.practical_hours)},
+        {"key": "teachers",        "label": "Docentes",       "passed": bool(proposal.teaching_team)},
+        {"key": "minimum_content", "label": "Cont. mín.",    "passed": bool(proposal.minimum_content and str(proposal.minimum_content).strip())},
+        {"key": "fundamentals",    "label": "Fundamentación", "passed": bool((proposal.fundamentals_part1 and str(proposal.fundamentals_part1).strip()) or (proposal.fundamentals_part2 and str(proposal.fundamentals_part2).strip()))},
+        {"key": "objectives",      "label": "Res. aprendizaje", "passed": bool(proposal.learning_outcomes)},
+        {"key": "units",           "label": "Unidades",       "passed": bool(proposal.units)},
+        {"key": "practicals",      "label": "TPs",             "passed": bool(proposal.practicals)},
+        {"key": "methodology",     "label": "Metodología",    "passed": bool(proposal.methodology and str(proposal.methodology).strip())},
+        {"key": "evaluation",      "label": "Evaluación",     "passed": bool(proposal.evaluation and str(proposal.evaluation).strip())},
+        {"key": "bibliography",    "label": "Bibliografía",   "passed": bool(proposal.bibliography and str(proposal.bibliography).strip())},
+    ]
+
+    # ── Controles inteligentes ────────────────────────────────────────────────
+    i_rows = (
+        db.query(
+            models.ProposalIntelligentControlResult,
+            models.IntelligentControl.name.label("control_name"),
+            models.IntelligentControl.topic.label("topic"),
+        )
+        .join(models.IntelligentControl,
+              models.IntelligentControl.id == models.ProposalIntelligentControlResult.control_id)
+        .filter(
+            models.ProposalIntelligentControlResult.proposal_id == proposal_id,
+            models.IntelligentControl.is_active == True,
+        )
+        .order_by(models.IntelligentControl.topic, models.IntelligentControl.name)
+        .all()
+    )
+    _TOPIC_ES = {
+        "teaching_team": "Equipo docente",
+        "fundamentals": "Fundamentación",
+        "minimum_content": "Contenidos mínimos",
+        "learning_outcomes": "Resultados de aprendizaje",
+        "units": "Unidades",
+        "practicals": "Trabajos prácticos",
+        "methodology": "Metodología",
+        "evaluation": "Evaluación",
+        "bibliography": "Bibliografía",
+    }
+    intelligent_data = [
+        {
+            "control_name": cn or "",
+            "topic": _TOPIC_ES.get((tp or "").strip(), tp or ""),
+            "passed": r.passed,
+            "what_failed": r.what_failed or "",
+            "suggestion": r.suggestion or "",
+            "checked_at": r.checked_at.isoformat() if r.checked_at else "",
+        }
+        for r, cn, tp in i_rows
+    ]
+
+    # ── Proposal dict ─────────────────────────────────────────────────────────
+    team = proposal.teaching_team
+    if isinstance(team, str):
+        try:
+            team = json.loads(team)
+        except Exception:
+            team = []
+    proposal_dict = {
+        "subject": proposal.subject,
+        "career": proposal.career,
+        "year_of_career": proposal.year_of_career or "",
+        "quarter": proposal.quarter or "",
+        "status": proposal.status or "",
+        "teaching_team": team or [],
+    }
+
+    pdf_bytes = report_revision_propuesta(
+        proposal_dict,
+        quick_results=quick_checks,
+        intelligent_results=intelligent_data,
+        generated_by=_make_generated_by(user_name, user_role),
+        show_system_name=show_sys,
+    )
+    today = datetime.now().strftime("%Y%m%d")
+    slug = (proposal.subject or "propuesta").replace(" ", "_")[:30]
+    return _pdf_response(pdf_bytes, f"MACAU_revision_{slug}_{today}.pdf")

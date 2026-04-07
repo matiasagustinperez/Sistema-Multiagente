@@ -1109,6 +1109,22 @@ const App = () => {
   const [showMatrizModal, setShowMatrizModal] = useState(false)
   const [matrizData, setMatrizData] = useState(null)
   const [matrixColumnFilters, setMatrixColumnFilters] = useState({})
+  // PDF Reports state
+  const [pdfShowSysName, setPdfShowSysName] = useState(true)
+  const [reportSelectionMode, setReportSelectionMode] = useState(false)
+  const [selectedReportKeys, setSelectedReportKeys] = useState(new Set())
+  const [proposalReportPickerOpen, setProposalReportPickerOpen] = useState(false)
+  const [selectedProposalReportIds, setSelectedProposalReportIds] = useState(new Set())
+  const [proposalReportDownloading, setProposalReportDownloading] = useState(false)
+  const [proposalReportSearch, setProposalReportSearch] = useState('')
+  // Búsqueda semántica global
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState(null)   // null = no buscado aún
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchIndexInfo, setSearchIndexInfo] = useState(null)  // {exists, built_at, item_count}
+  const [searchIndexBuilding, setSearchIndexBuilding] = useState(false)
+  const [searchDetailItem, setSearchDetailItem] = useState(null)   // fetched detail object
+  const [searchDetailLoading, setSearchDetailLoading] = useState(false)
 
   const capsuleBaseStyle = {
     display: 'inline-flex',
@@ -1387,6 +1403,14 @@ const App = () => {
     }
     if (activeMenu !== 'admin-usuarios') setResetPasswordModal(null)
   }, [activeMenu])
+
+  // Cargar info del índice semántico cuando cambia la carrera
+  useEffect(() => {
+    setSearchResults(null)
+    setSearchQuery('')
+    setSearchDetailItem(null)
+    if (activeCareer) fetchSearchIndexInfo(activeCareer)
+  }, [activeCareer])
 
   // Cargar planes de estudios guardados (backend)
   useEffect(() => {
@@ -2061,7 +2085,7 @@ const App = () => {
 
   const fetchProposals = async () => {
     try {
-      const res = await fetch('http://localhost:8001/proposals')
+      const res = await fetch(`${API_BASE_URL}/proposals?limit=1000`)
       const data = await res.json()
       setProposals(data)
       return data
@@ -2069,6 +2093,91 @@ const App = () => {
       console.error('Error fetching proposals:', err)
     }
     return []
+  }
+
+  const fetchSearchIndexInfo = async (career = activeCareer) => {
+    if (!career) return
+    try {
+      const res = await fetch(`${API_BASE_URL}/search/index-info?career=${encodeURIComponent(career)}`)
+      if (res.ok) setSearchIndexInfo(await res.json())
+    } catch (err) {
+      console.error('Error fetching search index info:', err)
+    }
+  }
+
+  const buildSearchIndex = async (career = activeCareer) => {
+    if (!career || searchIndexBuilding) return
+    setSearchIndexBuilding(true)
+    try {
+      await fetch(`${API_BASE_URL}/search/build-index?career=${encodeURIComponent(career)}`, { method: 'POST' })
+      // Poll until built (up to 120s)
+      let attempts = 0
+      const poll = setInterval(async () => {
+        attempts++
+        try {
+          const res = await fetch(`${API_BASE_URL}/search/index-info?career=${encodeURIComponent(career)}`)
+          if (res.ok) {
+            const info = await res.json()
+            if (info.exists) {
+              setSearchIndexInfo(info)
+              setSearchIndexBuilding(false)
+              clearInterval(poll)
+            }
+          }
+        } catch { /* ignore */ }
+        if (attempts >= 60) { setSearchIndexBuilding(false); clearInterval(poll) }
+      }, 2000)
+    } catch (err) {
+      console.error('Error building search index:', err)
+      setSearchIndexBuilding(false)
+    }
+  }
+
+  const runGlobalSearch = async () => {
+    if (!searchQuery.trim() || !activeCareer) return
+    setSearchLoading(true)
+    setSearchResults(null)
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/search/global?q=${encodeURIComponent(searchQuery)}&career=${encodeURIComponent(activeCareer)}&top_k=20`
+      )
+      if (res.status === 404) {
+        setSearchResults({ error: 'no_index' })
+        return
+      }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        setSearchResults({ error: d.detail || 'Error en la búsqueda' })
+        return
+      }
+      const data = await res.json()
+      setSearchResults(data)
+    } catch (err) {
+      setSearchResults({ error: err.message || 'Error de conexión' })
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  const fetchSearchDetail = async (type, id) => {
+    if (!type || !id || !activeCareer) return
+    setSearchDetailLoading(true)
+    setSearchDetailItem(null)
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/search/detail?type=${encodeURIComponent(type)}&id=${id}&career=${encodeURIComponent(activeCareer)}`
+      )
+      if (res.ok) {
+        setSearchDetailItem(await res.json())
+      } else {
+        const d = await res.json().catch(() => ({}))
+        setSearchDetailItem({ _error: d.detail || 'Error al cargar detalle' })
+      }
+    } catch (err) {
+      setSearchDetailItem({ _error: err.message || 'Error de conexión' })
+    } finally {
+      setSearchDetailLoading(false)
+    }
   }
 
   const fetchAccreditationEvidences = async (career = activeCareer) => {
@@ -11001,6 +11110,9 @@ const App = () => {
         {!isAdminView && (!isDocenteView || docenteIsAccreditationParticipant) && (
           <MenuButton label="Acreditación" onClick={() => handleMenuChange('resoluciones')} active={activeMenu === 'resoluciones'} />
         )}
+        {!isAdminView && !isDocenteView && (
+          <MenuButton label="Reportes PDF" onClick={() => handleMenuChange('reportes')} active={activeMenu === 'reportes'} />
+        )}
 
         <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #ddd' }}>
           {/* Career selector – locked to user's assigned careers when applicable */}
@@ -11187,6 +11299,393 @@ const App = () => {
                 </div>
               </div>
             </div>
+
+            {/* ── Búsqueda Semántica Global ─────────────────────────── */}
+            {activeCareer && (() => {
+              const typeConfig = {
+                propuesta:  { icon: '📘', label: 'Propuesta',  color: '#1a237e', bg: '#f0f4ff', border: '#c5cae9' },
+                docente:    { icon: '👩‍🏫', label: 'Docente',    color: '#1b5e20', bg: '#f1f8e9', border: '#a5d6a7' },
+                evidencia:  { icon: '📄', label: 'Evidencia',  color: '#4a148c', bg: '#f3e5f5', border: '#ce93d8' },
+              }
+              const grouped = {}
+              if (searchResults?.results) {
+                for (const r of searchResults.results) {
+                  if (!grouped[r.type]) grouped[r.type] = []
+                  grouped[r.type].push(r)
+                }
+              }
+              return (
+                <div style={{ marginTop: '28px', border: '1px solid #e0e4ef', borderRadius: '12px', padding: '22px 24px', background: '#fafbff' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a237e', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      🔍 Búsqueda Semántica
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#888', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      {searchIndexInfo?.exists
+                        ? <span>Índice: <b>{searchIndexInfo.item_count}</b> fragmentos · construido {searchIndexInfo.built_at}</span>
+                        : <span style={{ color: '#c62828' }}>Índice no construido</span>
+                      }
+                      <button
+                        onClick={() => buildSearchIndex(activeCareer)}
+                        disabled={searchIndexBuilding}
+                        style={{ background: searchIndexBuilding ? '#e0e0e0' : '#e8eaf6', color: '#1a237e', border: '1px solid #c5cae9', borderRadius: '6px', padding: '3px 10px', fontSize: '11px', fontWeight: 600, cursor: searchIndexBuilding ? 'not-allowed' : 'pointer' }}
+                      >
+                        {searchIndexBuilding ? '⏳ Construyendo…' : searchIndexInfo?.exists ? '🔄 Actualizar índice' : '⚡ Construir índice'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && runGlobalSearch()}
+                      placeholder="Buscar docente, asignatura, contenido, resolución…"
+                      style={{ flex: 1, border: '1px solid #c5cae9', borderRadius: '8px', padding: '9px 14px', fontSize: '14px', outline: 'none', background: '#fff' }}
+                    />
+                    <button
+                      onClick={runGlobalSearch}
+                      disabled={searchLoading || !searchQuery.trim() || !searchIndexInfo?.exists}
+                      style={{ background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '14px', fontWeight: 700, cursor: (searchLoading || !searchQuery.trim() || !searchIndexInfo?.exists) ? 'not-allowed' : 'pointer', opacity: (searchLoading || !searchQuery.trim() || !searchIndexInfo?.exists) ? 0.6 : 1 }}
+                    >
+                      {searchLoading ? '…' : 'Buscar'}
+                    </button>
+                  </div>
+
+                  {searchResults?.error === 'no_index' && (
+                    <div style={{ color: '#c62828', fontSize: '13px' }}>El índice no está construido. Presioná "Construir índice" primero.</div>
+                  )}
+                  {searchResults?.error && searchResults.error !== 'no_index' && (
+                    <div style={{ color: '#c62828', fontSize: '13px' }}>Error: {searchResults.error}</div>
+                  )}
+                  {searchResults?.results && searchResults.results.length === 0 && (
+                    <div style={{ color: '#888', fontSize: '13px' }}>Sin resultados para "{searchResults.query}".</div>
+                  )}
+                  {searchResults?.results && searchResults.results.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: '12px', color: '#546e7a', marginBottom: '12px' }}>
+                        {searchResults.results.length} resultado{searchResults.results.length !== 1 ? 's' : ''} para <b>"{searchResults.query}"</b>
+                      </div>
+                      {Object.entries(grouped).map(([type, items]) => {
+                        const cfg = typeConfig[type] || { icon: '📌', label: type, color: '#333', bg: '#f5f5f5', border: '#ddd' }
+                        return (
+                          <div key={type} style={{ marginBottom: '16px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: cfg.color, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                              {cfg.icon} {cfg.label}s ({items.length})
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {items.map((r, i) => (
+                                <div
+                                  key={i}
+                                  onClick={() => fetchSearchDetail(r.type, r.id)}
+                                  style={{ border: `1px solid ${cfg.border}`, borderRadius: '8px', padding: '10px 14px', background: cfg.bg, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}
+                                  onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,.1)' }}
+                                  onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none' }}
+                                >
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, color: cfg.color, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
+                                    {r.subtitle && <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>{r.subtitle}</div>}
+                                    {r.match_field && r.match_field !== 'contenido general' && (
+                                      <div style={{ fontSize: '11px', color: '#888', marginTop: '2px', fontStyle: 'italic' }}>Encontrado en: {r.match_field}</div>
+                                    )}
+                                    {r.type === 'docente' && r.subjects?.length > 0 && (
+                                      <div style={{ fontSize: '11px', color: '#666', marginTop: '3px' }}>Asignaturas: {r.subjects.slice(0, 4).join(', ')}{r.subjects.length > 4 ? '…' : ''}</div>
+                                    )}
+                                    {r.type === 'docente' && r.roles?.length > 0 && (
+                                      <div style={{ fontSize: '11px', color: '#3e7c43', marginTop: '2px' }}>{r.roles.join(' · ')}</div>
+                                    )}
+                                  </div>
+                                  <div style={{ fontSize: '11px', fontWeight: 700, color: cfg.color, whiteSpace: 'nowrap', opacity: .7 }}>
+                                    {Math.round(r.score * 100)}%
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* ── Panel de detalle semántico (slide-in) ──────────────── */}
+            {(searchDetailItem || searchDetailLoading) && (() => {
+              const d = searchDetailItem
+              const close = () => { setSearchDetailItem(null); setSearchDetailLoading(false) }
+
+              const Section = ({ title, children }) => (
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#546e7a', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: '6px' }}>{title}</div>
+                  {children}
+                </div>
+              )
+
+              const Tag = ({ children, color = '#546e7a', bg = '#f5f5f5' }) => (
+                <span style={{ display: 'inline-block', background: bg, color, fontSize: '11px', borderRadius: '4px', padding: '2px 8px', marginRight: '4px', marginBottom: '4px', fontWeight: 600 }}>{children}</span>
+              )
+
+              const InfoRow = ({ label, value }) => value ? (
+                <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px' }}>
+                  <span style={{ color: '#888', marginRight: '4px' }}>{label}:</span><b>{value}</b>
+                </div>
+              ) : null
+
+              const navigateTo = () => {
+                if (!d) return
+                if (d.type === 'propuesta') {
+                  setCompleteProposalFilters(prev => ({ ...prev, subject: d.subject || '' }))
+                  handleMenuChange('propuestas')
+                } else if (d.type === 'docente') {
+                  setTeacherTableFilters(prev => ({ ...prev, name: d.name || '' }))
+                  handleMenuChange('docentes')
+                } else if (d.type === 'evidencia') {
+                  handleMenuChange('acreditacion')
+                }
+                close()
+              }
+
+              const navLabel = d?.type === 'propuesta' ? 'propuestas' : d?.type === 'docente' ? 'docentes' : d?.type === 'evidencia' ? 'acreditación' : ''
+
+              return (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    onClick={close}
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.25)', zIndex: 1199 }}
+                  />
+                  {/* Panel */}
+                  <div style={{
+                    position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(480px, 95vw)',
+                    background: '#fff', boxShadow: '-4px 0 24px rgba(0,0,0,.18)', zIndex: 1200,
+                    display: 'flex', flexDirection: 'column', overflowY: 'hidden',
+                  }}>
+                    {/* Header */}
+                    <div style={{ padding: '16px 20px', borderBottom: '1px solid #e0e0e0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: '#f9fafe' }}>
+                      <div>
+                        <div style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                          {d?.type === 'propuesta' ? '📘 Propuesta académica' : d?.type === 'docente' ? '👩‍🏫 Docente' : d?.type === 'evidencia' ? '📄 Evidencia de acreditación' : 'Cargando…'}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '15px', color: '#1a237e', marginTop: '2px', maxWidth: '340px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {d ? (d.subject || d.name || d.title || '—') : ''}
+                        </div>
+                      </div>
+                      <button onClick={close} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888', lineHeight: 1 }}>✕</button>
+                    </div>
+
+                    {/* Body */}
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+                      {searchDetailLoading && (
+                        <div style={{ textAlign: 'center', color: '#888', marginTop: '40px' }}>Cargando detalle…</div>
+                      )}
+                      {d?._error && (
+                        <div style={{ color: '#c62828', fontSize: '13px' }}>{d._error}</div>
+                      )}
+
+                      {/* ─── PROPUESTA ─── */}
+                      {d?.type === 'propuesta' && !d._error && (
+                        <>
+                          <Section title="Información general">
+                            <InfoRow label="Asignatura" value={d.subject} />
+                            <InfoRow label="Carrera" value={d.career} />
+                            <InfoRow label="Año de carrera" value={d.year_of_career} />
+                            <InfoRow label="Cuatrimestre" value={d.quarter} />
+                            <InfoRow label="Plan" value={d.study_plan} />
+                            <InfoRow label="Carácter" value={d.character} />
+                            <InfoRow label="Régimen" value={d.regime} />
+                            {d.plan_location && <InfoRow label="Ubicación en plan" value={d.plan_location} />}
+                            <div style={{ fontSize: '12px', color: '#444', marginBottom: '4px', marginTop: '6px' }}>
+                              <span style={{ color: '#888', marginRight: '4px' }}>Horas:</span>
+                              <b>T {d.theoretical_hours ?? '—'} · P {d.practical_hours ?? '—'} · Total {d.total_hours ?? '—'}</b>
+                            </div>
+                            <div style={{ marginTop: '6px' }}>
+                              <Tag color={d.status === 'aprobado' ? '#1b5e20' : d.status === 'pendiente' ? '#e65100' : '#555'}
+                                   bg={d.status === 'aprobado' ? '#e8f5e9' : d.status === 'pendiente' ? '#fff3e0' : '#f5f5f5'}>
+                                {d.status || 'sin estado'}
+                              </Tag>
+                            </div>
+                          </Section>
+
+                          {d.teaching_team?.length > 0 && (
+                            <Section title="Equipo docente">
+                              {d.teaching_team.map((m, i) => (
+                                <div key={i} style={{ fontSize: '12px', color: '#333', padding: '4px 0', borderBottom: i < d.teaching_team.length - 1 ? '1px solid #f0f0f0' : 'none' }}>
+                                  <b>{m.name || m}</b>
+                                  {m.role && <span style={{ color: '#888', marginLeft: '6px' }}>{m.role}</span>}
+                                  {m.category && <span style={{ color: '#aaa', marginLeft: '6px', fontSize: '11px' }}>{m.category}</span>}
+                                </div>
+                              ))}
+                            </Section>
+                          )}
+
+                          <Section title="Contenidos (presencia)">
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {[
+                                [d.has_fundamentals, 'Fundamentación'],
+                                [d.has_minimum_content, 'Contenidos mínimos'],
+                                [d.has_methodology, 'Metodología'],
+                                [d.has_evaluation, 'Evaluación'],
+                                [d.has_bibliography, 'Bibliografía'],
+                                [d.has_learning_outcomes, 'Resultados de aprendizaje'],
+                              ].map(([has, label]) => (
+                                <Tag key={label} color={has ? '#1b5e20' : '#999'} bg={has ? '#e8f5e9' : '#f5f5f5'}>
+                                  {has ? '✓' : '✗'} {label}
+                                </Tag>
+                              ))}
+                            </div>
+                          </Section>
+
+                          {d.units?.length > 0 && (
+                            <Section title={`Unidades (${d.units.length})`}>
+                              {d.units.map((u, i) => (
+                                <div key={i} style={{ marginBottom: '6px' }}>
+                                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#333' }}>{i + 1}. {u.title}</div>
+                                  {u.objectives && <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>{u.objectives}{u.objectives.length >= 200 ? '…' : ''}</div>}
+                                </div>
+                              ))}
+                            </Section>
+                          )}
+
+                          {d.practicals?.length > 0 && (
+                            <Section title={`Trabajos prácticos (${d.practicals.length})`}>
+                              {d.practicals.map((tp, i) => (
+                                <div key={i} style={{ fontSize: '12px', color: '#333', padding: '3px 0' }}>{i + 1}. {tp.title}</div>
+                              ))}
+                            </Section>
+                          )}
+
+                          {d.controls?.length > 0 && (
+                            <Section title="Controles inteligentes">
+                              {d.controls.map((c, i) => (
+                                <div key={i} style={{ padding: '6px 0', borderBottom: i < d.controls.length - 1 ? '1px solid #f0f0f0' : 'none' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#333', flex: 1 }}>
+                                      <span style={{ fontSize: '11px', color: '#888', marginRight: '4px' }}>{c.topic} ·</span>{c.name}
+                                    </div>
+                                    <Tag color={c.passed ? '#1b5e20' : '#b71c1c'} bg={c.passed ? '#e8f5e9' : '#ffebee'}>
+                                      {c.passed ? '✓ OK' : '✗ Falla'}
+                                    </Tag>
+                                  </div>
+                                  {!c.passed && c.what_failed && (
+                                    <div style={{ fontSize: '11px', color: '#b71c1c', marginTop: '3px' }}>{c.what_failed}</div>
+                                  )}
+                                  {c.suggestion && (
+                                    <div style={{ fontSize: '11px', color: '#1565c0', marginTop: '2px' }}>💡 {c.suggestion}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </Section>
+                          )}
+                        </>
+                      )}
+
+                      {/* ─── DOCENTE ─── */}
+                      {d?.type === 'docente' && !d._error && (
+                        <>
+                          <Section title="Información personal">
+                            <InfoRow label="Nombre" value={d.name} />
+                            <InfoRow label="Email" value={d.email} />
+                            <InfoRow label="Categoría" value={d.category} />
+                            <InfoRow label="Dedicación" value={d.dedication} />
+                          </Section>
+
+                          {d.roles?.length > 0 && (
+                            <Section title="Roles en la carrera">
+                              {d.roles.map((r, i) => <Tag key={i} color="#1b5e20" bg="#e8f5e9">{r}</Tag>)}
+                            </Section>
+                          )}
+
+                          {d.subjects?.length > 0 && (
+                            <Section title={`Asignaturas (${d.subjects.length})`}>
+                              {d.subjects.map((s, i) => (
+                                <div key={i} style={{ padding: '5px 0', borderBottom: i < d.subjects.length - 1 ? '1px solid #f0f0f0' : 'none' }}>
+                                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#333' }}>{s.subject}</div>
+                                  <div style={{ fontSize: '11px', color: '#888', marginTop: '1px' }}>
+                                    Año {s.year_of_career} · {s.quarter}
+                                    <Tag color={s.status === 'aprobado' ? '#1b5e20' : '#e65100'} bg={s.status === 'aprobado' ? '#e8f5e9' : '#fff3e0'}
+                                         style={{ marginLeft: '6px' }}>{s.status}</Tag>
+                                  </div>
+                                </div>
+                              ))}
+                            </Section>
+                          )}
+
+                          {d.evidence_mentions?.length > 0 && (
+                            <Section title={`Aparece en evidencias (${d.evidence_mentions.length})`}>
+                              {d.evidence_mentions.map((ev, i) => (
+                                <div key={i} style={{ fontSize: '12px', color: '#4a148c', padding: '3px 0' }}>
+                                  📄 {ev.title} {ev.evidence_type ? <span style={{ color: '#888' }}>({ev.evidence_type})</span> : null}
+                                </div>
+                              ))}
+                            </Section>
+                          )}
+                        </>
+                      )}
+
+                      {/* ─── EVIDENCIA ─── */}
+                      {d?.type === 'evidencia' && !d._error && (
+                        <>
+                          <Section title="Información">
+                            <InfoRow label="Título" value={d.title} />
+                            <InfoRow label="Tipo" value={d.evidence_type} />
+                            <InfoRow label="Estado" value={d.status} />
+                            <InfoRow label="Archivo" value={d.source_filename} />
+                            <InfoRow label="Creado" value={d.created_at} />
+                            <InfoRow label="Creado por" value={d.created_by} />
+                          </Section>
+
+                          {d.summary && (
+                            <Section title="Resumen">
+                              <div style={{ fontSize: '12px', color: '#444', lineHeight: 1.55 }}>{d.summary}</div>
+                            </Section>
+                          )}
+
+                          {d.people_mentioned?.length > 0 && (
+                            <Section title="Personas mencionadas">
+                              <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+                                {d.people_mentioned.map((p, i) => <Tag key={i} color="#1a237e" bg="#e8eaf6">{p}</Tag>)}
+                              </div>
+                            </Section>
+                          )}
+
+                          {d.subjects_mentioned?.length > 0 && (
+                            <Section title="Asignaturas mencionadas">
+                              <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+                                {d.subjects_mentioned.map((s, i) => <Tag key={i} color="#1b5e20" bg="#e8f5e9">{s}</Tag>)}
+                              </div>
+                            </Section>
+                          )}
+
+                          {Object.keys(d.metadata || {}).length > 0 && (
+                            <Section title="Metadatos adicionales">
+                              {Object.entries(d.metadata).map(([k, v]) => (
+                                <div key={k} style={{ fontSize: '11px', color: '#555', marginBottom: '3px' }}>
+                                  <span style={{ color: '#888', marginRight: '4px' }}>{k}:</span>
+                                  <span>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+                                </div>
+                              ))}
+                            </Section>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    {d && !d._error && navLabel && (
+                      <div style={{ padding: '14px 20px', borderTop: '1px solid #e0e0e0', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px', background: '#f9fafe' }}>
+                        <button onClick={close} style={{ background: 'none', border: '1px solid #ccc', borderRadius: '7px', padding: '7px 18px', fontSize: '13px', cursor: 'pointer', color: '#555' }}>Cerrar</button>
+                        <button onClick={navigateTo} style={{ background: '#1a237e', color: '#fff', border: 'none', borderRadius: '7px', padding: '7px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                          Ir a {navLabel} →
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )
+            })()}
+
           </div>
         )}
 
@@ -11542,6 +12041,15 @@ const App = () => {
                             >
                               ⬇️
                             </button>
+                            <a
+                              href={`${API_BASE_URL}/reports/revision-propuesta/${prop.id}?user_name=${encodeURIComponent(currentUser?.name || '')}&user_role=${encodeURIComponent(viewRole || '')}`}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              style={{ ...styles.button, padding: '6px 10px', marginRight: '6px', background: 'rgba(120, 144, 156, 0.35)', color: '#1f2d3d', textDecoration: 'none', display: 'inline-block', lineHeight: '1' }}
+                              title="Descargar revisión PDF (controles rápidos + IA)"
+                            >
+                              📄
+                            </a>
                             {!isReadOnlyRole && (
                               <>
                                 <button
@@ -19960,7 +20468,7 @@ const App = () => {
                       )
                     })()}
                     {viewProposalIntelligentSummary.results
-                      .filter((result) => !result.passed)
+                      .filter((result) => result.passed === false)
                       .map((result) => {
                         const hasSuggestionContent = [
                           result.what_failed,
@@ -20101,6 +20609,64 @@ const App = () => {
                           </div>
                         )
                       })}
+
+                    {/* Controles aprobados */}
+                    {(() => {
+                      const passedResults = viewProposalIntelligentSummary.results.filter((r) => r.passed === true)
+                      if (!passedResults.length) return null
+                      return (
+                        <>
+                          <div style={{ fontWeight: 700, fontSize: '12px', color: '#2e7d32', marginTop: '8px', marginBottom: '4px' }}>
+                            ✓ Controles aprobados ({passedResults.length})
+                          </div>
+                          {passedResults.map((result) => {
+                            const isOpen = !!viewProposalExpandedSuggestions[`passed_${result.id}`]
+                            return (
+                              <div key={`passed-${result.id}`} style={{ border: '1px solid #a5d6a7', background: '#f1f8e9', borderRadius: '6px', padding: '8px 10px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                                  <div style={{ fontWeight: 700, color: '#2e7d32', fontSize: '13px' }}>
+                                    {getIntelligentTopicLabel(result.control_topic)} · {result.control_name}
+                                  </div>
+                                  {result.control_instruction && (
+                                    <button
+                                      style={{ ...styles.button, background: '#388e3c', padding: '4px 10px' }}
+                                      onClick={() => setViewProposalExpandedSuggestions((prev) => ({ ...prev, [`passed_${result.id}`]: !prev[`passed_${result.id}`] }))}
+                                    >
+                                      {isOpen ? 'Ocultar' : 'Ver regla'}
+                                    </button>
+                                  )}
+                                </div>
+                                {isOpen && result.control_instruction && (
+                                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#33691e', background: '#dcedc8', borderRadius: '4px', padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
+                                    {result.control_instruction}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </>
+                      )
+                    })()}
+
+                    {/* Controles pendientes de revisar */}
+                    {(() => {
+                      const pendingResults = viewProposalIntelligentSummary.results.filter((r) => r.passed === null || r.passed === undefined)
+                      if (!pendingResults.length) return null
+                      return (
+                        <>
+                          <div style={{ fontWeight: 700, fontSize: '12px', color: '#78909c', marginTop: '8px', marginBottom: '4px' }}>
+                            ⏳ Pendientes de revisar ({pendingResults.length})
+                          </div>
+                          {pendingResults.map((result) => (
+                            <div key={`pending-${result.control_id}`} style={{ border: '1px solid #cfd8dc', background: '#f5f5f5', borderRadius: '6px', padding: '8px 10px', opacity: 0.75 }}>
+                              <div style={{ fontWeight: 600, color: '#607d8b', fontSize: '13px' }}>
+                                {getIntelligentTopicLabel(result.control_topic)} · {result.control_name}
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      )
+                    })()}
 
                   </div>
                 )}
@@ -21036,6 +21602,319 @@ const App = () => {
             </div>
           </div>
         )}
+
+        {/* REPORTES PDF */}
+        {activeMenu === 'reportes' && (() => {
+          const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+          // Parámetros de usuario para el pie de página en el PDF
+          const uName = encodeURIComponent(currentUser?.name || '')
+          const uRole = encodeURIComponent(viewRole || '')
+          const userQS = `user_name=${uName}&user_role=${uRole}`
+          // Parámetros combinados (carrera + usuario + show_sys)
+          const qsBase = new URLSearchParams()
+          if (activeCareer) qsBase.set('career', activeCareer)
+          qsBase.set('user_name', currentUser?.name || '')
+          qsBase.set('user_role', viewRole || '')
+          if (!pdfShowSysName) qsBase.set('show_sys', 'false')
+          const careerParam = `?${qsBase.toString()}`
+          const careerAmpParam = `&${qsBase.toString()}`
+          const reportCards = [
+            { key: 'docentes', icon: '👩\u200d🏫', title: 'Docentes', desc: 'Nombre, correo, categoría, dedicación y carreras asociadas.', url: `${API_BASE_URL}/reports/docentes${careerParam}`, filename: `MACAU_docentes_${today}.pdf` },
+            { key: 'propuestas', icon: '📋', title: 'Propuestas Analíticas', desc: 'Asignatura, carrera, año, cuatrimestre, equipo docente y contenidos mínimos.', url: `${API_BASE_URL}/reports/propuestas${careerParam}`, filename: `MACAU_propuestas_${today}.pdf` },
+            { key: 'instrumentos', icon: '📝', title: 'Instrumentos Evaluativos', desc: 'Inventario por carrera, plan, asignatura y tipo.', url: `${API_BASE_URL}/reports/instrumentos${careerParam}`, filename: `MACAU_instrumentos_${today}.pdf` },
+            { key: 'sugerencias', icon: '🤖', title: 'Sugerencias IA (todas)', desc: 'Resultados de todos los controles inteligentes con observaciones y sugerencias.', url: `${API_BASE_URL}/reports/sugerencias?only_failed=false${careerAmpParam}`, filename: `MACAU_sugerencias_${today}.pdf` },
+            { key: 'observaciones', icon: '⚠️', title: 'Solo Observaciones IA', desc: 'Únicamente los controles que no pasaron, con sus sugerencias de corrección.', url: `${API_BASE_URL}/reports/sugerencias?only_failed=true${careerAmpParam}`, filename: `MACAU_observaciones_${today}.pdf` },
+            { key: 'matriz', icon: '🔗', title: 'Matriz de Tributación', desc: 'Relación entre competencias del plan y asignaturas. Requiere carrera activa.', url: activeCareer ? `${API_BASE_URL}/reports/matriz-tributacion?career=${encodeURIComponent(activeCareer)}&${userQS}${pdfShowSysName ? '' : '&show_sys=false'}` : null, filename: `MACAU_matriz_${today}.pdf`, disabled: !activeCareer, disabledMsg: 'Seleccioná una carrera activa' },
+            { key: 'docentes-asig', icon: '👥', title: 'Docentes por Asignatura', desc: 'Asignaturas con sus docentes asignados en propuestas.', url: `${API_BASE_URL}/reports/docentes-por-asignatura${careerParam}`, filename: `MACAU_docentes_asig_${today}.pdf` },
+            { key: 'asig-docente', icon: '📚', title: 'Asignaturas por Docente', desc: 'Docentes con todas las asignaturas en que participan.', url: `${API_BASE_URL}/reports/asignaturas-por-docente${careerParam}`, filename: `MACAU_asig_docente_${today}.pdf` },
+          ]
+          const cardStyle = (disabled, selected) => ({ background: selected ? '#eef0ff' : disabled ? '#f5f5f5' : '#fff', border: `1px solid ${selected ? '#7986cb' : disabled ? '#ddd' : '#c5cae9'}`, borderRadius: '14px', padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: disabled ? 'none' : '0 2px 10px rgba(26,35,126,0.10)', opacity: disabled ? 0.6 : 1, minHeight: '180px', position: 'relative', cursor: reportSelectionMode && !disabled ? 'pointer' : 'default' })
+          const btnStyle = (disabled) => ({ marginTop: 'auto', display: 'inline-block', background: disabled ? '#bbb' : '#1a237e', color: '#fff', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, textDecoration: 'none', textAlign: 'center', pointerEvents: disabled ? 'none' : 'auto', cursor: disabled ? 'not-allowed' : 'pointer' })
+          const plansHere = savedPlans[activeCareer] || []
+
+          const downloadAsZip = async () => {
+            const selectedCards = reportCards.filter(c => !c.disabled && selectedReportKeys.has(c.key))
+            if (!selectedCards.length) return
+            let JSZip = window.JSZip
+            if (!JSZip) {
+              await new Promise((resolve, reject) => {
+                const s = document.createElement('script')
+                s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+                s.onload = resolve
+                s.onerror = reject
+                document.head.appendChild(s)
+              })
+              JSZip = window.JSZip
+            }
+            const zip = new JSZip()
+            for (const card of selectedCards) {
+              try {
+                const resp = await fetch(card.url)
+                if (!resp.ok) continue
+                const blob = await resp.blob()
+                zip.file(card.filename, blob)
+              } catch (e) {
+                console.error('Error fetching report', card.key, e)
+              }
+            }
+            const content = await zip.generateAsync({ type: 'blob' })
+            const a = document.createElement('a')
+            a.href = URL.createObjectURL(content)
+            a.download = `MACAU_reportes_${today}.zip`
+            a.click()
+            URL.revokeObjectURL(a.href)
+          }
+
+          const toggleCardKey = (key) => {
+            setSelectedReportKeys(prev => {
+              const next = new Set(prev)
+              if (next.has(key)) next.delete(key)
+              else next.add(key)
+              return next
+            })
+          }
+
+          return (
+            <div style={{ padding: '28px 32px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                <h2 style={{ color: '#1a237e', margin: 0 }}>📄 Reportes PDF</h2>
+                <button
+                  style={{ ...styles.button, background: reportSelectionMode ? '#78909c' : '#5c6bc0', padding: '6px 14px', fontSize: '12px' }}
+                  onClick={() => { setReportSelectionMode(m => !m); setSelectedReportKeys(new Set()) }}
+                >
+                  {reportSelectionMode ? '✕ Cancelar selección' : '☑ Seleccionar'}
+                </button>
+                {reportSelectionMode && selectedReportKeys.size > 0 && (
+                  <button
+                    style={{ ...styles.button, background: '#1a237e', padding: '6px 14px', fontSize: '12px' }}
+                    onClick={downloadAsZip}
+                  >
+                    ⬇ Descargar ZIP ({selectedReportKeys.size})
+                  </button>
+                )}
+              </div>
+              <p style={{ color: '#546e7a', marginBottom: '16px', fontSize: '13px' }}>Generá y descargá reportes institucionales en PDF.</p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#37474f', marginBottom: '20px', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={pdfShowSysName} onChange={e => setPdfShowSysName(e.target.checked)} style={{ width: '15px', height: '15px', accentColor: '#1a237e', cursor: 'pointer' }} />
+                Mostrar nombre del sistema en el encabezado del PDF
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+                {reportCards.map((card) => {
+                  const isSelected = selectedReportKeys.has(card.key)
+                  return (
+                    <div
+                      key={card.key}
+                      style={cardStyle(card.disabled, isSelected)}
+                      onClick={reportSelectionMode && !card.disabled ? () => toggleCardKey(card.key) : undefined}
+                    >
+                      {reportSelectionMode && !card.disabled && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          readOnly
+                          style={{ position: 'absolute', top: '14px', right: '14px', width: '18px', height: '18px', accentColor: '#1a237e', pointerEvents: 'none' }}
+                        />
+                      )}
+                      <div style={{ fontSize: '30px' }}>{card.icon}</div>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '15px', color: '#1a237e', marginBottom: '6px' }}>{card.title}</div>
+                        <div style={{ fontSize: '13px', color: '#546e7a', lineHeight: 1.6 }}>{card.desc}</div>
+                        {card.disabled && card.disabledMsg && <div style={{ marginTop: '8px', fontSize: '12px', color: '#e65100', fontStyle: 'italic' }}>{card.disabledMsg}</div>}
+                      </div>
+                      {!reportSelectionMode && (
+                        <a href={card.disabled ? undefined : card.url} download={card.filename} target='_blank' rel='noopener noreferrer' style={btnStyle(card.disabled)} onClick={card.disabled ? e => e.preventDefault() : undefined}>⬇ Descargar PDF</a>
+                      )}
+                    </div>
+                  )
+                })}
+                {/* Plan de Estudios — usa savedPlans existente, sin useState extra */}
+                <div style={cardStyle(false, false)}>
+                  <div style={{ fontSize: '26px' }}>🎓</div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a237e', marginBottom: '4px' }}>Plan de Estudios</div>
+                    <div style={{ fontSize: '12px', color: '#546e7a', lineHeight: 1.5 }}>Árbol completo: años, cuatrimestres, asignaturas y horas. Incluye correlativas.</div>
+                  </div>
+                  {plansHere.length === 0 ? (
+                    <div style={{ fontSize: '11px', color: '#e65100', fontStyle: 'italic' }}>{activeCareer ? 'No hay planes cargados para esta carrera.' : 'Seleccioná una carrera activa.'}</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {plansHere.map(pl => (
+                        <a key={pl.id} href={`${API_BASE_URL}/reports/plan-estudios/${pl.id}?correlativas=true&${userQS}${pdfShowSysName ? '' : '&show_sys=false'}`} target='_blank' rel='noopener noreferrer' style={{ ...btnStyle(false), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>⬇ {pl.name}</a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Reportes por Propuesta (selección + ZIP) */}
+                <div style={cardStyle(false, false)}>
+                  <div style={{ fontSize: '26px' }}>📑</div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a237e', marginBottom: '4px' }}>Reportes por Propuesta</div>
+                    <div style={{ fontSize: '12px', color: '#546e7a', lineHeight: 1.5 }}>Seleccioná una o más asignaturas y descargá su reporte completo (controles rápidos + IA) en un ZIP.</div>
+                  </div>
+                  <button
+                    style={{ ...btnStyle(false), marginTop: 'auto' }}
+                    onClick={() => { setProposalReportPickerOpen(true); setSelectedProposalReportIds(new Set()); setProposalReportSearch('') }}
+                  >
+                    ☑ Seleccionar propuestas
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Modal selector de propuestas para ZIP */}
+        {proposalReportPickerOpen && (() => {
+          const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+          const uName = encodeURIComponent(currentUser?.name || '')
+          const uRole = encodeURIComponent(viewRole || '')
+          const userQS2 = `user_name=${uName}&user_role=${uRole}${pdfShowSysName ? '' : '&show_sys=false'}`
+          const activeCareerLower = (activeCareer || '').toLowerCase().trim()
+          const allProps = proposals.filter(p => !activeCareer || (p.career || '').toLowerCase().trim() === activeCareerLower)
+          const searchLower = proposalReportSearch.toLowerCase()
+          const visibleProps = allProps.filter(p => {
+            if (!searchLower) return true
+            return (p.subject || '').toLowerCase().includes(searchLower) ||
+              String(p.year_of_career || '').includes(searchLower) ||
+              String(p.quarter || '').toLowerCase().includes(searchLower)
+          })
+          const allVisibleSelected = visibleProps.length > 0 && visibleProps.every(p => selectedProposalReportIds.has(p.id))
+
+          const downloadProposalZip = async () => {
+            const ids = [...selectedProposalReportIds]
+            if (!ids.length) return
+            setProposalReportDownloading(true)
+            try {
+              let JSZip = window.JSZip
+              if (!JSZip) {
+                await new Promise((resolve, reject) => {
+                  const s = document.createElement('script')
+                  s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+                  s.onload = resolve
+                  s.onerror = reject
+                  document.head.appendChild(s)
+                })
+                JSZip = window.JSZip
+              }
+              const zip = new JSZip()
+              for (const id of ids) {
+                const prop = proposals.find(p => p.id === id)
+                const subjectSlug = (prop?.subject || `propuesta_${id}`).replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').slice(0, 40)
+                const filename = `MACAU_revision_${subjectSlug}_${today}.pdf`
+                try {
+                  const resp = await fetch(`${API_BASE_URL}/reports/revision-propuesta/${id}?${userQS2}`)
+                  if (!resp.ok) continue
+                  const blob = await resp.blob()
+                  zip.file(filename, blob)
+                } catch (e) {
+                  console.error('Error fetching revision-propuesta', id, e)
+                }
+              }
+              const content = await zip.generateAsync({ type: 'blob' })
+              const a = document.createElement('a')
+              a.href = URL.createObjectURL(content)
+              a.download = `MACAU_reportes_propuestas_${today}.zip`
+              a.click()
+              URL.revokeObjectURL(a.href)
+            } finally {
+              setProposalReportDownloading(false)
+            }
+          }
+
+          return (
+            <div
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
+              onClick={e => { if (e.target === e.currentTarget) setProposalReportPickerOpen(false) }}
+            >
+              <div style={{ background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '640px', padding: '24px 28px', boxShadow: '0 12px 48px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, color: '#1a237e', fontSize: '16px' }}>📑 Seleccionar propuestas</h3>
+                  <button onClick={() => setProposalReportPickerOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#666' }}>✕</button>
+                </div>
+                <input
+                  style={{ border: '1px solid #c5cae9', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', marginBottom: '12px', outline: 'none' }}
+                  placeholder="Buscar asignatura..."
+                  value={proposalReportSearch}
+                  onChange={e => setProposalReportSearch(e.target.value)}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '12px', color: '#546e7a', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={() => {
+                        if (allVisibleSelected) {
+                          setSelectedProposalReportIds(prev => {
+                            const next = new Set(prev)
+                            visibleProps.forEach(p => next.delete(p.id))
+                            return next
+                          })
+                        } else {
+                          setSelectedProposalReportIds(prev => {
+                            const next = new Set(prev)
+                            visibleProps.forEach(p => next.add(p.id))
+                            return next
+                          })
+                        }
+                      }}
+                      style={{ accentColor: '#1a237e' }}
+                    />
+                    Seleccionar todas ({visibleProps.length})
+                  </label>
+                  <span style={{ fontSize: '12px', color: '#1a237e', fontWeight: 700 }}>
+                    {selectedProposalReportIds.size} seleccionada{selectedProposalReportIds.size !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #e8eaf6', borderRadius: '8px', marginBottom: '16px' }}>
+                  {visibleProps.length === 0 ? (
+                    <div style={{ padding: '24px', textAlign: 'center', color: '#90a4ae', fontSize: '13px' }}>
+                      {allProps.length === 0 ? 'No hay propuestas cargadas.' : 'Sin resultados para la búsqueda.'}
+                    </div>
+                  ) : visibleProps.map((prop, idx) => {
+                    const isSelected = selectedProposalReportIds.has(prop.id)
+                    return (
+                      <label
+                        key={prop.id}
+                        style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', cursor: 'pointer', borderBottom: idx < visibleProps.length - 1 ? '1px solid #f0f0f0' : 'none', background: isSelected ? '#f0f3ff' : '#fff', userSelect: 'none' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => setSelectedProposalReportIds(prev => {
+                            const next = new Set(prev)
+                            if (next.has(prop.id)) next.delete(prop.id)
+                            else next.add(prop.id)
+                            return next
+                          })}
+                          style={{ accentColor: '#1a237e', width: '16px', height: '16px', flexShrink: 0 }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: '13px', color: '#1a237e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prop.subject || `Propuesta #${prop.id}`}</div>
+                          <div style={{ fontSize: '11px', color: '#78909c', marginTop: '2px' }}>
+                            {[prop.career, prop.year_of_career ? `Año ${prop.year_of_career}` : null, prop.quarter ? `Cuat. ${prop.quarter}` : null].filter(Boolean).join(' · ')}
+                          </div>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button style={{ background: '#e0e0e0', color: '#333', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }} onClick={() => setProposalReportPickerOpen(false)}>
+                    Cancelar
+                  </button>
+                  <button
+                    style={{ background: selectedProposalReportIds.size === 0 ? '#bbb' : '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: selectedProposalReportIds.size === 0 ? 'not-allowed' : 'pointer' }}
+                    disabled={selectedProposalReportIds.size === 0 || proposalReportDownloading}
+                    onClick={downloadProposalZip}
+                  >
+                    {proposalReportDownloading ? '⏳ Descargando...' : `⬇ Descargar ZIP (${selectedProposalReportIds.size})`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
       </div>
     </div>
 
@@ -21595,6 +22474,223 @@ const App = () => {
             </button>
           </div>
         </div>
+      </div>
+    )}
+
+    {/* ── REPORTES PDF (panel movido adentro de styles.main arriba) ── */}
+    {false && (
+      <div style={styles.section}>
+        <h2 style={{ color: '#1a237e', marginBottom: '6px' }}>📄 Reportes PDF</h2>
+        <p style={{ color: '#546e7a', marginBottom: '20px', fontSize: '13px' }}>
+          Generá y descargá reportes institucionales en PDF. Aplicá filtros opcionales antes de descargar.
+        </p>
+
+        {(() => {
+          const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+          const careerParam = activeCareer ? `?career=${encodeURIComponent(activeCareer)}` : ''
+          const careerAmpParam = activeCareer ? `&career=${encodeURIComponent(activeCareer)}` : ''
+
+          const reportCards = [
+            {
+              icon: '👩‍🏫',
+              title: 'Docentes',
+              desc: 'Listado completo de docentes: nombre, correo, categoría, dedicación y carreras asociadas.',
+              url: `${API_BASE_URL}/reports/docentes${careerParam}`,
+              filename: `MACAU_docentes_${today}.pdf`,
+            },
+            {
+              icon: '📋',
+              title: 'Propuestas Analíticas',
+              desc: 'Listado de propuestas con asignatura, carrera, año, cuatrimestre, equipo docente y contenidos mínimos.',
+              url: `${API_BASE_URL}/reports/propuestas${careerParam}`,
+              filename: `MACAU_propuestas_${today}.pdf`,
+            },
+            {
+              icon: '📝',
+              title: 'Instrumentos Evaluativos',
+              desc: 'Inventario de instrumentos de evaluación por carrera, plan, asignatura y tipo.',
+              url: `${API_BASE_URL}/reports/instrumentos${careerParam}`,
+              filename: `MACAU_instrumentos_${today}.pdf`,
+            },
+            {
+              icon: '🤖',
+              title: 'Sugerencias de Controles IA',
+              desc: 'Resultados de controles inteligentes: observaciones y sugerencias de mejora por propuesta.',
+              url: `${API_BASE_URL}/reports/sugerencias?only_failed=false${careerAmpParam}`,
+              filename: `MACAU_sugerencias_${today}.pdf`,
+            },
+            {
+              icon: '🤖',
+              title: 'Solo Observaciones IA',
+              desc: 'Únicamente los controles que no pasaron, con sus sugerencias de corrección.',
+              url: `${API_BASE_URL}/reports/sugerencias?only_failed=true${careerAmpParam}`,
+              filename: `MACAU_observaciones_${today}.pdf`,
+            },
+            {
+              icon: '🔗',
+              title: 'Matriz de Tributación',
+              desc: 'Relación entre competencias del plan y asignaturas que las trabajan. Requiere carrera activa.',
+              url: activeCareer ? `${API_BASE_URL}/reports/matriz-tributacion?career=${encodeURIComponent(activeCareer)}` : null,
+              filename: `MACAU_matriz_${today}.pdf`,
+              disabled: !activeCareer,
+              disabledMsg: 'Seleccioná una carrera activa',
+            },
+            {
+              icon: '👥',
+              title: 'Docentes por Asignatura',
+              desc: 'Listado de asignaturas con sus docentes asignados en propuestas.',
+              url: `${API_BASE_URL}/reports/docentes-por-asignatura${careerParam}`,
+              filename: `MACAU_docentes_asignatura_${today}.pdf`,
+            },
+            {
+              icon: '📚',
+              title: 'Asignaturas por Docente',
+              desc: 'Listado de docentes con todas las asignaturas en las que participan como equipo.',
+              url: `${API_BASE_URL}/reports/asignaturas-por-docente${careerParam}`,
+              filename: `MACAU_asignaturas_docente_${today}.pdf`,
+            },
+          ]
+
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+              {reportCards.map((card, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    background: card.disabled ? '#f5f5f5' : '#fff',
+                    border: `1px solid ${card.disabled ? '#ddd' : '#c5cae9'}`,
+                    borderRadius: '12px',
+                    padding: '18px 20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    boxShadow: card.disabled ? 'none' : '0 2px 8px rgba(26,35,126,0.08)',
+                    opacity: card.disabled ? 0.6 : 1,
+                  }}
+                >
+                  <div style={{ fontSize: '26px' }}>{card.icon}</div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a237e', marginBottom: '4px' }}>{card.title}</div>
+                    <div style={{ fontSize: '12px', color: '#546e7a', lineHeight: 1.5 }}>{card.desc}</div>
+                    {card.disabled && card.disabledMsg && (
+                      <div style={{ marginTop: '6px', fontSize: '11px', color: '#e65100', fontStyle: 'italic' }}>{card.disabledMsg}</div>
+                    )}
+                  </div>
+                  <a
+                    href={card.disabled ? undefined : card.url}
+                    download={card.filename}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      marginTop: 'auto',
+                      display: 'inline-block',
+                      background: card.disabled ? '#bbb' : '#1a237e',
+                      color: '#fff',
+                      borderRadius: '8px',
+                      padding: '8px 16px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      textDecoration: 'none',
+                      textAlign: 'center',
+                      pointerEvents: card.disabled ? 'none' : 'auto',
+                      cursor: card.disabled ? 'not-allowed' : 'pointer',
+                    }}
+                    onClick={card.disabled ? e => e.preventDefault() : undefined}
+                  >
+                    ⬇ Descargar PDF
+                  </a>
+                </div>
+              ))}
+
+              {/* Plan de Estudios — requires plan selection */}
+              {(() => {
+                const [selectedPlanId, setSelectedPlanId] = React.useState('')
+                const [withPrereqs, setWithPrereqs] = React.useState(false)
+                const [planList, setPlanList] = React.useState([])
+                const [planListLoaded, setPlanListLoaded] = React.useState(false)
+
+                React.useEffect(() => {
+                  if (!planListLoaded) {
+                    const url = activeCareer
+                      ? `${API_BASE_URL}/study-plans?career=${encodeURIComponent(activeCareer)}`
+                      : `${API_BASE_URL}/study-plans`
+                    fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+                      .then(r => r.ok ? r.json() : [])
+                      .then(data => { setPlanList(Array.isArray(data) ? data : []); setPlanListLoaded(true) })
+                      .catch(() => setPlanListLoaded(true))
+                  }
+                }, [planListLoaded, activeCareer])
+
+                const planUrl = selectedPlanId
+                  ? `${API_BASE_URL}/reports/plan-estudios/${selectedPlanId}?correlativas=${withPrereqs}`
+                  : null
+
+                return (
+                  <div style={{
+                    background: '#fff',
+                    border: '1px solid #c5cae9',
+                    borderRadius: '12px',
+                    padding: '18px 20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    boxShadow: '0 2px 8px rgba(26,35,126,0.08)',
+                  }}>
+                    <div style={{ fontSize: '26px' }}>🎓</div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a237e', marginBottom: '4px' }}>Plan de Estudios</div>
+                      <div style={{ fontSize: '12px', color: '#546e7a', lineHeight: 1.5 }}>
+                        Árbol completo del plan: años, cuatrimestres, asignaturas y horas. Opcionalmente incluye correlativas.
+                      </div>
+                    </div>
+                    <select
+                      value={selectedPlanId}
+                      onChange={e => setSelectedPlanId(e.target.value)}
+                      style={{ fontSize: '12px', padding: '6px 10px', borderRadius: '6px', border: '1px solid #c5cae9', color: '#1a237e' }}
+                    >
+                      <option value="">— Seleccioná un plan —</option>
+                      {planList.map(pl => (
+                        <option key={pl.id} value={pl.id}>{pl.career} — {pl.name}</option>
+                      ))}
+                    </select>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#546e7a', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={withPrereqs}
+                        onChange={e => setWithPrereqs(e.target.checked)}
+                        style={{ accentColor: '#1a237e' }}
+                      />
+                      Incluir correlativas
+                    </label>
+                    <a
+                      href={planUrl || undefined}
+                      download={`MACAU_plan_${today}.pdf`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        marginTop: 'auto',
+                        display: 'inline-block',
+                        background: planUrl ? '#1a237e' : '#bbb',
+                        color: '#fff',
+                        borderRadius: '8px',
+                        padding: '8px 16px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        textDecoration: 'none',
+                        textAlign: 'center',
+                        pointerEvents: planUrl ? 'auto' : 'none',
+                        cursor: planUrl ? 'pointer' : 'not-allowed',
+                      }}
+                      onClick={!planUrl ? e => e.preventDefault() : undefined}
+                    >
+                      ⬇ Descargar PDF
+                    </a>
+                  </div>
+                )
+              })()}
+            </div>
+          )
+        })()}
       </div>
     )}
 
